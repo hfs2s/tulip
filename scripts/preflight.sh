@@ -113,15 +113,29 @@ try:
     compose = open("docker-compose.yml").read()
 except Exception:
     compose = ""
-published = re.findall(r'"([0-9.]*):?(\d+):8791"', compose)
-if not published:
-    warn("could not find the panel's publish line in docker-compose.yml")
-elif all(addr in ("127.0.0.1", "localhost") for addr, _ in published):
+# The publish address may come from the environment, so read the resolved value.
+bind = None
+try:
+    for line in open(".env"):
+        if line.startswith("TULIP_PANEL_BIND="):
+            bind = line.split("=", 1)[1].strip()
+except Exception:
+    pass
+if bind is None:
+    published = re.findall(r'"([0-9.]*):?(\d+):8791"', compose)
+    bind = published[0][0] if published and published[0][0] else "127.0.0.1"
+
+if bind in ("127.0.0.1", "localhost"):
     ok("panel is published on the host's loopback only")
+elif bind in ("0.0.0.0", "::", ""):
+    warn("the panel is published on ALL interfaces. It can read every message and "
+         "hold delivery, and it authenticates with one bearer token. Bind it to "
+         "loopback or to a single private interface.")
 else:
-    warn("the panel is published beyond the host's loopback. It is a bearer-token "
-         "surface that can read every message and hold delivery. Tunnel over SSH "
-         "instead, or put something that authenticates in front of it.")
+    ok(f"panel is published on {bind} — reachable off-host")
+    warn(f"{bind} is not loopback, so something else must authenticate in front of "
+         "the panel. Confirm that is actually in place; the bearer token alone is "
+         "not a login.")
 
 if c.get("audience", {}).get("everyone"):
     ok("audience: everyone (this is the public configuration)")

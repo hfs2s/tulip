@@ -94,9 +94,14 @@ services:
     tmpfs:
       - /tmp:mode=1777,size=64m,noexec,nosuid,nodev
     ports:
-      # Loopback only. Publishing this is an explicit decision; see
-      # docs/OPERATIONS.md before changing the left-hand side.
-      - "127.0.0.1:8791:8791"
+      # The publish address is the control on who can reach the panel — not the
+      # app's bind address, which is 0.0.0.0 inside the container by necessity.
+      #
+      # Loopback by default. Set TULIP_PANEL_BIND to a specific interface when
+      # something else must reach it — a Cloudflare tunnel on another host, say
+      # — and put an authenticating proxy in front when you do. Never 0.0.0.0:
+      # that publishes an operator console to every network the host is on.
+      - "${TULIP_PANEL_BIND:-127.0.0.1}:8791:8791"
     mem_limit: 768m
     pids_limit: 256
     healthcheck:
