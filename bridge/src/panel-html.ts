@@ -1,17 +1,35 @@
 /**
  * The panel's page and script, as strings.
  *
- * Two rules hold throughout, and together they are why the panel can safely
- * display text written by strangers:
+ * ── The design, and why ──────────────────────────────────────────────────────
+ *
+ * One operator, usually on a phone, usually looking because something feels
+ * wrong. So the hero is not a number: it is a plain-language verdict —
+ * "Answering people." or "Not answering — the agent is out of credit." — set
+ * large enough to read across a room. Everything else is quiet around it.
+ *
+ * The one structural idea: **material encodes affordance.** Surfaces you press
+ * are neumorphic — extruded from the ground with a light and a dark shadow, and
+ * genuinely depressed (shadows inverted to inset) while held. Surfaces you read
+ * are glass — translucent, blurred, floating above the colour behind. Nothing is
+ * both. A glance tells you what you can act on before you have read a word.
+ *
+ * Neumorphism's known weakness is contrast, so it is confined to *surfaces*:
+ * every piece of text sits at a normal contrast ratio against its background,
+ * and the soft shadow language does the work of separating planes.
+ *
+ * ── Two rules that make it safe to display strangers' messages ───────────────
  *
  *   - **Nothing is ever assigned to `innerHTML`.** Every value from the API
  *     reaches the DOM through `textContent`, so a message containing
- *     `<img onerror=…>` is displayed as those characters and is never parsed as
- *     markup. This is the actual defence; the CSP is the backstop for a mistake.
+ *     `<img onerror=…>` is displayed as those characters and never parsed as
+ *     markup. This is the actual defence; the CSP is the backstop for a slip.
  *   - **The script is a separate resource, not inline.** That lets the CSP say
- *     `script-src 'self'` rather than `'unsafe-inline'`, which is the
- *     difference between a policy that stops injected script and one that
- *     merely looks like it does.
+ *     `script-src 'self'` rather than `'unsafe-inline'`, which is the difference
+ *     between a policy that stops injected script and one that looks like it.
+ *
+ * No external fonts, images or stylesheets: the CSP forbids them, and every
+ * visual here is a gradient or a shadow, which is what the style wants anyway.
  */
 
 export const PANEL_HTML = `<!doctype html>
@@ -22,85 +40,305 @@ export const PANEL_HTML = `<!doctype html>
 <title>Tulip</title>
 <style>
   :root {
-    --bg: #14121a; --panel: #1d1a25; --line: #2f2a3d; --ink: #ece9f3;
-    --dim: #9c93b3; --accent: #d98cb3; --ok: #7fd6a2; --warn: #f0c674; --bad: #ef7a85;
+    /* The ground. In neumorphism the surface and the background are the same
+       colour — shapes are extruded from the page, not laid on top of it. */
+    --ground: #e8e4ef;
+    --ground-lit: #f6f3fa;
+    --ground-dim: #c5bfd6;
+
+    /* Blooms behind the glass. Without something vivid back there, a frosted
+       panel is just a grey box. */
+    --bloom-a: #f0a8c0;
+    --bloom-b: #9fb8e8;
+
+    --ink: #2c2740;
+    --ink-soft: #6b6486;
+    --ink-faint: #918ba8;
+
+    /* Stem green for answering, deep rose for stopped. Both drawn from the
+       flower rather than from a framework's success/danger pair. */
+    --stem: #3d8168;
+    --alarm: #b04a61;
+
+    --glass: rgba(255, 255, 255, 0.42);
+    --glass-edge: rgba(255, 255, 255, 0.65);
+    --glass-shadow: rgba(58, 44, 82, 0.10);
+
+    --lift: -5px -5px 11px var(--ground-lit), 5px 5px 11px var(--ground-dim);
+    --lift-sm: -3px -3px 7px var(--ground-lit), 3px 3px 7px var(--ground-dim);
+    --press: inset -3px -3px 7px var(--ground-lit), inset 3px 3px 7px var(--ground-dim);
+
+    --r-lg: 26px;
+    --r-md: 18px;
+    --r-sm: 12px;
   }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #221f2f;
+      --ground-lit: #2e2a3f;
+      --ground-dim: #16141f;
+      --bloom-a: #8e3f60;
+      --bloom-b: #35507f;
+      --ink: #efecf7;
+      --ink-soft: #b3acc8;
+      --ink-faint: #837c9c;
+      --stem: #6fc79f;
+      --alarm: #ef8ba0;
+      --glass: rgba(60, 54, 82, 0.44);
+      --glass-edge: rgba(255, 255, 255, 0.12);
+      --glass-shadow: rgba(0, 0, 0, 0.30);
+    }
+  }
+
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-    font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
-    padding: 16px 20px; border-bottom: 1px solid var(--line); }
-  h1 { margin: 0; font-size: 17px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
-  .public { font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
-    border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; padding: 2px 9px; }
-  main { display: grid; gap: 16px; padding: 16px 20px; max-width: 1180px;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
-  section h2 { margin: 0 0 10px; font-size: 11px; letter-spacing: .13em;
-    text-transform: uppercase; color: var(--dim); font-weight: 600; }
-  .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
-  .row span:last-child { color: var(--dim); }
-  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
-  .wide { grid-column: 1 / -1; }
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
-    color: var(--dim); font-weight: 600; padding: 5px 8px 5px 0; }
-  td { padding: 5px 8px 5px 0; border-top: 1px solid var(--line); vertical-align: top; }
-  .key { color: var(--accent); }
-  .feed { max-height: 420px; overflow-y: auto; }
-  .entry { border-top: 1px solid var(--line); padding: 7px 0; display: grid;
-    grid-template-columns: 60px 74px 1fr; gap: 10px; }
-  .entry:first-child { border-top: 0; }
-  .at { color: var(--dim); font-size: 12px; }
-  .tag { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-  .text { overflow-wrap: anywhere; white-space: pre-wrap; }
-  .reason { color: var(--dim); font-style: italic; }
-  button { font: inherit; background: transparent; color: var(--ink);
-    border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
-  button:hover { border-color: var(--accent); color: var(--accent); }
-  .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
-  footer { color: var(--dim); padding: 4px 20px 24px; font-size: 12px; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--ground);
+    color: var(--ink);
+    font: 400 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The colour the glass is made of. Fixed, so panels drift over it on scroll. */
+  .bloom {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+  }
+  .bloom::before, .bloom::after {
+    content: "";
+    position: absolute;
+    width: 62vmax;
+    height: 62vmax;
+    border-radius: 50%;
+    filter: blur(70px);
+    opacity: 0.5;
+  }
+  .bloom::before { background: var(--bloom-a); top: -22vmax; right: -14vmax; }
+  .bloom::after  { background: var(--bloom-b); bottom: -26vmax; left: -18vmax; }
+
+  .shell { max-width: 1080px; margin: 0 auto; padding: 22px 20px 56px; }
+
+  /* ── Header ─────────────────────────────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 26px;
+  }
+  .mark {
+    font-size: 21px;
+    font-weight: 640;
+    letter-spacing: -0.015em;
+    margin: 0;
+  }
+  .mark span { color: var(--alarm); }
+  .reach {
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-right: auto;
+  }
+
+  /* ── The verdict: the one thing worth reading from across a room ────────── */
+  .verdict {
+    background: var(--glass);
+    border: 1px solid var(--glass-edge);
+    border-radius: var(--r-lg);
+    backdrop-filter: blur(22px) saturate(150%);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    box-shadow: 0 10px 34px var(--glass-shadow);
+    padding: 30px 30px 26px;
+    margin-bottom: 20px;
+  }
+  .headline {
+    font-size: clamp(27px, 5.2vw, 40px);
+    line-height: 1.16;
+    font-weight: 620;
+    letter-spacing: -0.025em;
+    margin: 0 0 6px;
+    color: var(--stem);
+    transition: color .2s ease;
+  }
+  .headline.stopped { color: var(--alarm); }
+  .subhead {
+    font-size: 15px;
+    color: var(--ink-soft);
+    margin: 0 0 22px;
+    max-width: 54ch;
+  }
+
+  /* ── Counts: pressed wells, because they are readouts, not buttons ──────── */
+  .counts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 12px;
+  }
+  .count {
+    background: var(--ground);
+    border-radius: var(--r-md);
+    box-shadow: var(--press);
+    padding: 15px 12px 13px;
+    text-align: center;
+  }
+  .count b {
+    display: block;
+    font-size: 25px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .count small {
+    display: block;
+    margin-top: 3px;
+    font-size: 12.5px;
+    color: var(--ink-faint);
+  }
+  .count.flag b { color: var(--alarm); }
+
+  /* ── Controls: extruded, and they really depress ────────────────────────── */
+  .controls { display: flex; gap: 11px; flex-wrap: wrap; }
+  button {
+    font: inherit;
+    font-size: 14.5px;
+    font-weight: 550;
+    color: var(--ink);
+    background: var(--ground);
+    border: 0;
+    border-radius: var(--r-sm);
+    box-shadow: var(--lift-sm);
+    padding: 10px 18px;
+    cursor: pointer;
+    transition: box-shadow .14s ease, color .14s ease;
+  }
+  button:hover { color: var(--alarm); }
+  button:active, button[aria-pressed="true"] { box-shadow: var(--press); }
+  button:focus-visible { outline: 2px solid var(--alarm); outline-offset: 3px; }
+  button.small { font-size: 13px; padding: 7px 13px; }
+
+  /* ── Reading surfaces ───────────────────────────────────────────────────── */
+  .panels {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px;
+  }
+  @media (max-width: 860px) { .panels { grid-template-columns: minmax(0, 1fr); } }
+
+  section {
+    background: var(--glass);
+    border: 1px solid var(--glass-edge);
+    border-radius: var(--r-lg);
+    backdrop-filter: blur(22px) saturate(150%);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    box-shadow: 0 10px 34px var(--glass-shadow);
+    padding: 22px 24px 20px;
+    min-width: 0;
+  }
+  h2 {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 4px;
+  }
+  .hint { font-size: 13px; color: var(--ink-faint); margin: 0 0 16px; }
+
+  /* Conversations */
+  .chat {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 0;
+    border-top: 1px solid var(--glass-edge);
+  }
+  .chat:first-of-type { border-top: 0; }
+  .chat-main { min-width: 0; flex: 1; }
+  .chat-name {
+    font-weight: 540;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chat-meta { font-size: 12.5px; color: var(--ink-faint); }
+  /* Monospace only here: comparing two 16-character keys is the actual task,
+     and alignment is what makes that possible. */
+  .key {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .blocked .chat-name { color: var(--alarm); }
+
+  /* Stream */
+  .stream { max-height: 460px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+  .line {
+    display: grid;
+    grid-template-columns: 52px 1fr;
+    gap: 12px;
+    padding: 9px 0;
+    border-top: 1px solid var(--glass-edge);
+  }
+  .line:first-child { border-top: 0; }
+  .when { font-size: 12.5px; color: var(--ink-faint); padding-top: 1px; }
+  .what { min-width: 0; overflow-wrap: anywhere; }
+  .who { font-weight: 540; }
+  .said { white-space: pre-wrap; }
+  .line.refused .said { color: var(--ink-faint); }
+  .why { font-size: 12.5px; color: var(--alarm); }
+  .line.sent .who { color: var(--stem); }
+
+  .empty { color: var(--ink-faint); padding: 18px 0; }
+  footer { margin-top: 22px; font-size: 12.5px; color: var(--ink-faint); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
 </style>
 </head>
 <body>
-  <header>
-    <h1>Tulip</h1>
-    <span id="audience" class="public" hidden>public</span>
-    <span id="held" class="public" hidden>delivery held</span>
-  </header>
-  <main>
-    <section>
-      <h2>State</h2>
-      <div class="row"><span>WhatsApp</span><span id="wa">—</span></div>
-      <div class="row"><span>Agent</span><span id="agent">—</span></div>
-      <div class="row"><span>Live sessions</span><span id="sessions">—</span></div>
-      <div class="row"><span>Answering</span><span id="inflight">—</span></div>
+  <div class="bloom"></div>
+  <div class="shell">
+    <header>
+      <h1 class="mark">Tulip<span>.</span></h1>
+      <p class="reach" id="reach">Checking…</p>
       <div class="controls">
-        <button id="hold">Hold</button>
-        <button id="release">Release</button>
+        <button id="hold" type="button">Hold delivery</button>
+        <button id="release" type="button">Resume</button>
       </div>
-    </section>
-    <section>
-      <h2>Last 24 hours</h2>
-      <div class="row"><span>Received</span><span id="t-in">—</span></div>
-      <div class="row"><span>Answered</span><span id="t-accepted">—</span></div>
-      <div class="row"><span>Refused</span><span id="t-refused">—</span></div>
-      <div class="row"><span>Sent</span><span id="t-out">—</span></div>
-      <div class="row"><span>Queued</span><span id="t-queued">—</span></div>
-    </section>
-    <section class="wide">
-      <h2>Chats</h2>
-      <table>
-        <thead><tr><th>Key</th><th>Name</th><th>Msgs</th><th>Turns today</th><th>Last seen</th><th></th></tr></thead>
-        <tbody id="chats"></tbody>
-      </table>
-    </section>
-    <section class="wide">
-      <h2>Messages</h2>
-      <div class="feed" id="feed"></div>
-    </section>
-  </main>
-  <footer id="foot">connecting…</footer>
+    </header>
+
+    <div class="verdict">
+      <p class="headline" id="headline">Connecting…</p>
+      <p class="subhead" id="subhead">Reading the bridge's state.</p>
+      <div class="counts">
+        <div class="count"><b id="c-in">–</b><small>received</small></div>
+        <div class="count"><b id="c-answered">–</b><small>answered</small></div>
+        <div class="count flag"><b id="c-refused">–</b><small>refused</small></div>
+        <div class="count"><b id="c-sent">–</b><small>sent</small></div>
+        <div class="count"><b id="c-waiting">–</b><small>waiting</small></div>
+      </div>
+    </div>
+
+    <div class="panels">
+      <section>
+        <h2>Conversations</h2>
+        <p class="hint">Each one is a separate session. They cannot see each other.</p>
+        <div id="chats"><p class="empty">Nobody has messaged yet.</p></div>
+      </section>
+
+      <section>
+        <h2>What's happening</h2>
+        <p class="hint">Every message that arrives, including the ones turned away.</p>
+        <div class="stream" id="stream"><p class="empty">Nothing yet.</p></div>
+      </section>
+    </div>
+
+    <footer id="foot">Connecting…</footer>
+  </div>
   <script src="/panel.js"></script>
 </body>
 </html>
@@ -108,94 +346,128 @@ export const PANEL_HTML = `<!doctype html>
 
 export const PANEL_JS = `'use strict';
 // Every value from the API reaches the DOM through textContent. Message text is
-// written by strangers; assigning it to innerHTML anywhere here would make the
-// panel the softest target in the deployment.
+// written by strangers; assigning it to innerHTML anywhere here would make this
+// page the softest target in the deployment.
 
-function text(id, value, className) {
-  var el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = value;
-  if (className !== undefined) el.className = className;
-}
+function el(id) { return document.getElementById(id); }
+function set(id, value) { var n = el(id); if (n) n.textContent = value; }
 
 function ago(ms) {
   var s = Math.round(ms / 1000);
-  if (s < 60) return s + 's';
-  if (s < 3600) return Math.round(s / 60) + 'm';
-  if (s < 86400) return Math.round(s / 3600) + 'h';
-  return Math.round(s / 86400) + 'd';
+  if (s < 60) return s + ' seconds ago';
+  var m = Math.round(s / 60);
+  if (m < 60) return m + (m === 1 ? ' minute ago' : ' minutes ago');
+  var h = Math.round(m / 60);
+  if (h < 24) return h + (h === 1 ? ' hour ago' : ' hours ago');
+  var d = Math.round(h / 24);
+  return d + (d === 1 ? ' day ago' : ' days ago');
 }
 
-function cell(row, value, className) {
-  var td = document.createElement('td');
-  td.textContent = value;
-  if (className) td.className = className;
-  row.appendChild(td);
-  return td;
+function node(tag, className, text) {
+  var n = document.createElement(tag);
+  if (className) n.className = className;
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  return n;
 }
 
 async function act(action, key) {
   var url = '/api/action/' + encodeURIComponent(action) + (key ? '?key=' + encodeURIComponent(key) : '');
   try {
-    await fetch(url, { method: 'POST' });
+    var res = await fetch(url, { method: 'POST' });
+    var body = await res.json();
+    if (!body.ok) set('foot', body.message);
   } catch (err) {
-    text('foot', 'action failed: ' + err.message);
+    set('foot', 'That did not go through. ' + err.message);
     return;
   }
   refresh();
 }
 
+/**
+ * The verdict. One sentence, in the order an operator needs it: stopped for a
+ * reason they must fix, stopped because they asked, or working.
+ */
+function verdict(s) {
+  var head = el('headline');
+  var stopped = true;
+
+  if (!s.whatsapp.connected) {
+    head.textContent = 'Not answering — WhatsApp is disconnected.';
+    set('subhead', 'The bridge is reconnecting on its own. If this persists, the number may have been unlinked.');
+  } else if (s.agent.fatal) {
+    head.textContent = 'Not answering — ' + s.agent.fatal + '.';
+    set('subhead', 'Only you can clear this. Messages keep arriving and are recorded meanwhile.');
+  } else if (!s.agent.reporting) {
+    head.textContent = 'Not answering — the agent is silent.';
+    set('subhead', 'Its container may be down or restarting. Nothing is lost; messages queue until it returns.');
+  } else if (s.hold.active) {
+    head.textContent = 'Holding.';
+    set('subhead', s.queue.queued
+      ? s.queue.queued + ' message' + (s.queue.queued === 1 ? '' : 's') + ' waiting. Resume to hand them over.'
+      : 'Nothing waiting. New messages will queue rather than reach the agent.');
+  } else {
+    stopped = false;
+    head.textContent = 'Answering people.';
+    var open = s.agent.sessions;
+    set('subhead', open === 0
+      ? 'Idle and listening. Nobody is mid-conversation.'
+      : open + ' conversation' + (open === 1 ? '' : 's') + ' open right now.');
+  }
+
+  head.classList.toggle('stopped', stopped);
+  el('hold').setAttribute('aria-pressed', s.hold.active ? 'true' : 'false');
+}
+
 function renderChats(chats, now) {
-  var body = document.getElementById('chats');
-  body.textContent = '';
+  var box = el('chats');
+  box.textContent = '';
+  if (!chats.length) {
+    box.appendChild(node('p', 'empty', 'Nobody has messaged yet.'));
+    return;
+  }
   chats.forEach(function (c) {
-    var row = document.createElement('tr');
-    cell(row, c.chatKey, 'key');
-    cell(row, (c.name || '(unnamed)') + (c.isGroup ? ' (group)' : '') + (c.blocked ? ' — blocked' : ''));
-    cell(row, String(c.messages));
-    cell(row, String(c.turnsToday));
-    cell(row, ago(now - c.lastSeenAt));
-    var actions = document.createElement('td');
-    var button = document.createElement('button');
-    button.textContent = c.blocked ? 'Unblock' : 'Block';
+    var row = node('div', 'chat' + (c.blocked ? ' blocked' : ''));
+    var main = node('div', 'chat-main');
+    main.appendChild(node('div', 'chat-name',
+      (c.name || 'Someone') + (c.isGroup ? ' (group)' : '') + (c.blocked ? ' — blocked' : '')));
+
+    var meta = node('div', 'chat-meta');
+    meta.appendChild(node('span', 'key', c.chatKey));
+    meta.appendChild(node('span', null, '  ' + c.messages + ' messages, '
+      + c.turnsToday + ' answered today, last ' + ago(now - c.lastSeenAt)));
+    main.appendChild(meta);
+    row.appendChild(main);
+
+    var button = node('button', 'small', c.blocked ? 'Unblock' : 'Block');
+    button.type = 'button';
     button.addEventListener('click', function () { act(c.blocked ? 'unblock' : 'block', c.chatKey); });
-    actions.appendChild(button);
-    row.appendChild(actions);
-    body.appendChild(row);
+    row.appendChild(button);
+    box.appendChild(row);
   });
 }
 
-function entryNode(e) {
-  var node = document.createElement('div');
-  node.className = 'entry';
+function lineFor(e) {
+  var kind = e.kind === 'in' ? (e.accepted ? 'in' : 'refused') : e.kind;
+  var row = node('div', 'line ' + (kind === 'out' ? 'sent' : kind));
+  row.appendChild(node('div', 'when', new Date(e.ts).toTimeString().slice(0, 5)));
 
-  var at = document.createElement('div');
-  at.className = 'at';
-  at.textContent = new Date(e.ts).toISOString().slice(11, 19);
-  node.appendChild(at);
-
-  var tag = document.createElement('div');
-  tag.className = 'tag ' + (e.kind === 'out' ? 'ok' : e.kind === 'in' ? (e.accepted ? '' : 'warn') : 'warn');
-  tag.textContent = e.kind === 'in' ? (e.accepted ? 'in' : 'refused') : e.kind;
-  node.appendChild(tag);
-
-  var body = document.createElement('div');
-  body.className = 'text';
+  var what = node('div', 'what');
   if (e.kind === 'event') {
-    body.textContent = (e.event || '') + (e.detail ? ' — ' + e.detail : '');
+    what.appendChild(node('span', 'who', e.event || 'event'));
+    if (e.detail) what.appendChild(node('div', 'said', e.detail));
   } else if (e.kind === 'delivered') {
-    body.textContent = e.chatKey + ' · ' + e.count + ' message(s) handed over';
+    what.appendChild(node('div', 'said',
+      'Handed over ' + e.count + ' message' + (e.count === 1 ? '' : 's') + '.'));
+  } else if (e.kind === 'out') {
+    what.appendChild(node('span', 'who', 'Tulip replied'));
+    if (e.text) what.appendChild(node('div', 'said', e.text));
   } else {
-    body.textContent = (e.chatName || e.chatKey || '') + ': ' + (e.text || '');
-    if (e.reason) {
-      var why = document.createElement('div');
-      why.className = 'reason';
-      why.textContent = e.reason;
-      body.appendChild(why);
-    }
+    what.appendChild(node('span', 'who', e.chatName || e.from || 'Someone'));
+    if (e.text) what.appendChild(node('div', 'said', e.text));
+    if (e.reason) what.appendChild(node('div', 'why', 'Turned away: ' + e.reason));
   }
-  node.appendChild(body);
-  return node;
+  row.appendChild(what);
+  return row;
 }
 
 async function refresh() {
@@ -203,52 +475,46 @@ async function refresh() {
   try {
     res = await fetch('/api/state');
   } catch (err) {
-    text('foot', 'disconnected');
+    set('foot', 'Lost contact with the bridge. Retrying.');
     return;
   }
-  if (!res.ok) { text('foot', 'panel returned ' + res.status); return; }
+  if (!res.ok) { set('foot', 'The bridge answered ' + res.status + '.'); return; }
   var s = await res.json();
 
-  text('wa', s.whatsapp.connected ? 'connected' + (s.whatsapp.name ? ' — ' + s.whatsapp.name : '') : 'disconnected',
-       s.whatsapp.connected ? 'ok' : 'bad');
-  text('agent', s.agent.fatal ? s.agent.fatal : s.agent.reporting ? (s.agent.busyTurn ? 'working' : 'idle') : 'not reporting',
-       s.agent.fatal ? 'bad' : s.agent.reporting ? 'ok' : 'warn');
-  text('sessions', String(s.agent.sessions));
-  text('inflight', s.queue.inFlight || 'nothing');
-
-  text('t-in', String(s.today.in));
-  text('t-accepted', String(s.today.accepted));
-  text('t-refused', String(s.today.refused));
-  text('t-out', String(s.today.out));
-  text('t-queued', String(s.queue.queued));
-
-  document.getElementById('audience').hidden = !s.audience.everyone;
-  document.getElementById('held').hidden = !s.hold.active;
-
+  verdict(s);
+  set('reach', s.audience.everyone ? 'Open to anyone' : 'Open to a set list');
+  set('c-in', s.today.in);
+  set('c-answered', s.today.accepted);
+  set('c-refused', s.today.refused);
+  set('c-sent', s.today.out);
+  set('c-waiting', s.queue.queued);
   renderChats(s.chats, s.now);
-  text('foot', 'updated ' + new Date(s.now).toISOString().slice(11, 19) + ' UTC');
+  set('foot', 'Last checked ' + new Date(s.now).toTimeString().slice(0, 8) + '. Counts cover the last 24 hours.');
 }
 
-async function loadFeed() {
+async function loadStream() {
   var res = await fetch('/api/feed?n=120');
   if (!res.ok) return;
   var rows = await res.json();
-  var feed = document.getElementById('feed');
-  feed.textContent = '';
-  rows.reverse().forEach(function (e) { feed.appendChild(entryNode(e)); });
+  var box = el('stream');
+  box.textContent = '';
+  if (!rows.length) { box.appendChild(node('p', 'empty', 'Nothing yet.')); return; }
+  rows.reverse().forEach(function (e) { box.appendChild(lineFor(e)); });
 }
 
-document.getElementById('hold').addEventListener('click', function () { act('hold'); });
-document.getElementById('release').addEventListener('click', function () { act('release'); });
+el('hold').addEventListener('click', function () { act('hold'); });
+el('release').addEventListener('click', function () { act('release'); });
 
 var stream = new EventSource('/api/stream');
 stream.onmessage = function (event) {
-  var feed = document.getElementById('feed');
-  feed.insertBefore(entryNode(JSON.parse(event.data)), feed.firstChild);
-  while (feed.childNodes.length > 200) feed.removeChild(feed.lastChild);
+  var box = el('stream');
+  var first = box.firstChild;
+  if (first && first.className === 'empty') box.textContent = '';
+  box.insertBefore(lineFor(JSON.parse(event.data)), box.firstChild);
+  while (box.childNodes.length > 200) box.removeChild(box.lastChild);
 };
 
 refresh();
-loadFeed();
+loadStream();
 setInterval(refresh, 5000);
 `;
