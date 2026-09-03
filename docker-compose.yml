@@ -160,7 +160,9 @@ services:
     environment:
       # Deny-by-default: an unset or empty list refuses every CONNECT. Add hosts
       # only with a reason, and note that each one is a channel out of the jail.
-      TULIP_EGRESS_ALLOW: ${TULIP_EGRESS_ALLOW:-api.anthropic.com}
+      # These two are the minimum for Claude Code to start — inference, and the
+      # entitlement check it makes at launch. See .env.example.
+      TULIP_EGRESS_ALLOW: ${TULIP_EGRESS_ALLOW:-api.anthropic.com,platform.claude.com}
       TULIP_EGRESS_MAX_TUNNELS: ${TULIP_EGRESS_MAX_TUNNELS:-32}
     tmpfs:
       - /tmp:mode=1777,size=16m,noexec,nosuid,nodev

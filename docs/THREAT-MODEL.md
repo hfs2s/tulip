@@ -115,8 +115,16 @@ Three independent layers, in order of how hard they are to bypass:
    external lookup fails immediately. DNS tunnelling — the standard escape from a
    proxy-only jail — has no server to reach.
 3. **Deny-by-default proxy.** The single reachable peer is `tulip-egress`, which
-   permits `CONNECT` only to hosts on an explicit allowlist (by default
-   `api.anthropic.com`) and logs every allow and deny.
+   permits `CONNECT` only to hosts on an explicit allowlist and logs every allow
+   and deny. The default list is two entries — `api.anthropic.com` for
+   inference and `platform.claude.com` for the entitlement check Claude Code
+   makes at startup — with telemetry, error reporting and the auto-updater
+   disabled by environment variable so that nothing else is attempted.
+
+   Each entry is a channel out of the jail and should be justified. The log is
+   what makes that tractable: bringing the deployment up with an allowlist of
+   only `api.anthropic.com` produced a refusal naming `platform.claude.com`
+   exactly, rather than a silent failure somewhere else.
 
 **Residual, stated plainly:** the allowlisted destination is itself a channel. An
 attacker who controls the content of a prompt can encode data into text that
