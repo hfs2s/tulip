@@ -53,6 +53,10 @@ const DIALOGS: ReadonlyArray<readonly [RegExp, string]> = [
   // highlighted default is right for all of them — the questions are cosmetic.
   [/Choose the text style|Syntax theme:|Let's get started/i, 'Enter'],
   [/Press Enter to continue|to continue…/i, 'Enter'],
+  // "Detected a custom API key in your environment — use it?" defaults to
+  // "No (recommended)", so Enter is the wrong key: Up selects Yes first.
+  // claude-config.ts pre-approves the key, making this the backstop.
+  [/Detected a custom API key in your environment/i, 'Up'],
 ];
 
 /**
