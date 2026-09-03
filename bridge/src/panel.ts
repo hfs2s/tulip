@@ -126,7 +126,10 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
  */
 function asset(name: string): Buffer | null {
   try {
-    return readFileSync(join(HERE, name));
+    // `web/`, not `HERE` directly: the browser script is also called panel.js,
+    // and writing it beside the compiled panel.js replaced the server with the
+    // client. It did exactly that once.
+    return readFileSync(join(HERE, 'web', name));
   } catch {
     return null;
   }

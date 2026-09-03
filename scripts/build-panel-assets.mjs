@@ -21,7 +21,16 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const out = join(root, 'bridge', 'dist');
+/**
+ * Browser assets go in their own directory, NOT beside the compiled server.
+ *
+ * They used to land directly in `bridge/dist`, where `panel.js` — the browser
+ * script — silently overwrote `panel.js`, the compiled `panel.ts`. The bridge
+ * then crash-looped on `does not provide an export named 'startPanel'`. Two
+ * files, one name, one directory. A subdirectory makes the collision
+ * impossible rather than merely unlikely.
+ */
+const out = join(root, 'bridge', 'dist', 'web');
 const fonts = join(out, 'fonts');
 
 mkdirSync(fonts, { recursive: true });
