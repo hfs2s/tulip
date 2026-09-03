@@ -16,6 +16,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { sessionUuidFor } from '@tulip/shared';
+import { seedClaudeConfig } from './claude-config.js';
 import { log } from './log.js';
 import { capture, killWindow, sendKey, spawnWindow, windowExists } from './tmux.js';
 import { ensureWorkspace, WORKSPACE_ROOT, type ChatWorkspace } from './workspace.js';
@@ -46,6 +47,12 @@ const WORKING = /esc to interrupt/i;
 const DIALOGS: ReadonlyArray<readonly [RegExp, string]> = [
   [/Is this a project you created or one you trust|Yes, I trust this folder/i, 'Enter'],
   [/How is Claude doing this session/i, '0'],
+  // First-run onboarding. `claude-config.ts` answers these in the config file
+  // before the spawn, which is deterministic; these patterns are the backstop
+  // for a release that adds a screen the config does not cover. Accepting the
+  // highlighted default is right for all of them — the questions are cosmetic.
+  [/Choose the text style|Syntax theme:|Let's get started/i, 'Enter'],
+  [/Press Enter to continue|to continue…/i, 'Enter'],
 ];
 
 /**
@@ -99,6 +106,9 @@ export class SessionPool {
     await this.makeRoom();
 
     const workspace = ensureWorkspace(chatKey);
+    // Before the spawn, every time: Claude Code rewrites its config on exit, so
+    // a flag set once at boot can be gone by the next session.
+    seedClaudeConfig(workspace.dir);
     const uuid = sessionUuidFor(chatKey, generation);
     const window = `c-${chatKey}`;
     const resuming = transcriptExists(uuid);
