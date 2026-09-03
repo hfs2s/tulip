@@ -1,0 +1,157 @@
+import { describe, expect, it } from 'vitest';
+import { parseConfig } from '../src/config.js';
+import { gate, isOperator, type GateInput } from '../src/gate.js';
+
+const message = (over: Partial<GateInput> = {}): GateInput => ({
+  senderIds: ['15551234567', '15551234567@s.whatsapp.net'],
+  text: 'hello',
+  isGroup: false,
+  mentionsMe: false,
+  isReaction: false,
+  isPollVote: false,
+  ...over,
+});
+
+describe('gate — a public deployment', () => {
+  const config = parseConfig({ audience: { everyone: true } });
+
+  it('answers a stranger', () => {
+    expect(gate(message(), config)).toEqual({ accept: true });
+  });
+
+  it('still refuses a reaction', () => {
+    expect(gate(message({ isReaction: true }), config).accept).toBe(false);
+  });
+
+  it('still refuses a poll vote', () => {
+    expect(gate(message({ isPollVote: true }), config).accept).toBe(false);
+  });
+
+  it('refuses a message with no text', () => {
+    expect(gate(message({ text: '   ' }), config)).toEqual({
+      accept: false,
+      reason: 'no text content',
+    });
+  });
+
+  it('refuses groups, which are off by default even when everyone is on', () => {
+    expect(gate(message({ isGroup: true }), config)).toEqual({
+      accept: false,
+      reason: 'groups are disabled',
+    });
+  });
+});
+
+describe('gate — a closed deployment', () => {
+  const config = parseConfig({ audience: { everyone: false, numbers: ['15551234567'] } });
+
+  it('answers a listed number', () => {
+    expect(gate(message(), config).accept).toBe(true);
+  });
+
+  it('refuses an unlisted number', () => {
+    expect(gate(message({ senderIds: ['15559999999'] }), config)).toEqual({
+      accept: false,
+      reason: 'sender is not on the allow list',
+    });
+  });
+
+  // WhatsApp increasingly delivers senders as a bare @lid with no phone number
+  // attached. Listing the number then looks correct and silently does nothing.
+  it('refuses a sender known only by linked id, and says why', () => {
+    const verdict = gate(message({ senderIds: ['130606214176782@lid'] }), config);
+    expect(verdict).toEqual({ accept: false, reason: 'sender is not on the allow list' });
+  });
+
+  it('matches on any of the sender identities', () => {
+    expect(gate(message({ senderIds: ['130606214176782@lid', '15551234567'] }), config).accept).toBe(true);
+  });
+
+  it('does not match a number that merely contains an allowed one', () => {
+    expect(gate(message({ senderIds: ['115551234567'] }), config).accept).toBe(false);
+    expect(gate(message({ senderIds: ['155512345678'] }), config).accept).toBe(false);
+  });
+});
+
+describe('gate — groups', () => {
+  const mentionOnly = parseConfig({
+    audience: { everyone: true },
+    groups: { enabled: true, replyTo: 'mention' },
+  });
+  const triggered = parseConfig({
+    audience: { everyone: true },
+    groups: { enabled: true, replyTo: 'trigger', triggers: ['tulip'] },
+  });
+
+  it('answers a real mention', () => {
+    expect(gate(message({ isGroup: true, mentionsMe: true }), mentionOnly).accept).toBe(true);
+  });
+
+  it('ignores an unaddressed group message', () => {
+    expect(gate(message({ isGroup: true }), mentionOnly).accept).toBe(false);
+  });
+
+  it('answers on a trigger word, case-insensitively', () => {
+    expect(gate(message({ isGroup: true, text: 'hey TULIP are you there' }), triggered).accept).toBe(true);
+  });
+
+  it('ignores a group message with no trigger', () => {
+    expect(gate(message({ isGroup: true, text: 'unrelated chatter' }), triggered)).toEqual({
+      accept: false,
+      reason: 'no trigger word in group',
+    });
+  });
+
+  it('treats a mention as consent even in trigger mode', () => {
+    expect(gate(message({ isGroup: true, text: 'no keyword', mentionsMe: true }), triggered).accept).toBe(true);
+  });
+});
+
+describe('isOperator', () => {
+  const config = parseConfig({
+    audience: { everyone: true },
+    operators: { numbers: ['15551234567'] },
+  });
+
+  it('recognises a listed operator', () => {
+    expect(isOperator(config, ['15551234567'])).toBe(true);
+  });
+
+  // The property that matters: opening the audience must not hand strangers
+  // the ability to restart sessions or read state.
+  it('is not widened by audience.everyone', () => {
+    expect(config.audience.everyone).toBe(true);
+    expect(isOperator(config, ['15559999999'])).toBe(false);
+  });
+
+  it('is empty by default', () => {
+    expect(isOperator(parseConfig({}), ['15551234567'])).toBe(false);
+  });
+});
+
+describe('config validation', () => {
+  it('defaults to the closed, restrictive end of every setting', () => {
+    const config = parseConfig({});
+    expect(config.audience.everyone).toBe(false);
+    expect(config.groups.enabled).toBe(false);
+    expect(config.panel.host).toBe('127.0.0.1');
+    expect(config.operators.numbers).toEqual([]);
+  });
+
+  it('rejects an unknown key rather than ignoring it', () => {
+    // A typo in a security-relevant key would otherwise leave the default in
+    // force while the operator believes they changed it.
+    expect(() => parseConfig({ audience: { everyOne: true } })).toThrow(/audience/);
+    expect(() => parseConfig({ audiance: {} })).toThrow();
+  });
+
+  it('rejects a phone number that is not bare international digits', () => {
+    expect(() => parseConfig({ operators: { numbers: ['+1 555 123 4567'] } })).toThrow(/bare international digits/);
+    expect(() => parseConfig({ operators: { numbers: ['0044123456789'] } })).toThrow();
+  });
+
+  it('rejects out-of-range limits', () => {
+    expect(() => parseConfig({ limits: { turnsPerDay: 0 } })).toThrow();
+    expect(() => parseConfig({ limits: { maxInboundChars: 10 } })).toThrow();
+  });
+});
