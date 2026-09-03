@@ -153,8 +153,8 @@ export const PANEL_HTML = `<!doctype html>
     backdrop-filter: blur(22px) saturate(150%);
     -webkit-backdrop-filter: blur(22px) saturate(150%);
     box-shadow: 0 10px 34px var(--glass-shadow);
-    padding: 30px 30px 26px;
-    margin-bottom: 20px;
+    padding: 30px 30px 28px;
+    margin-bottom: 18px;
   }
   .headline {
     font-size: clamp(27px, 5.2vw, 40px);
@@ -169,15 +169,20 @@ export const PANEL_HTML = `<!doctype html>
   .subhead {
     font-size: 15px;
     color: var(--ink-soft);
-    margin: 0 0 22px;
+    margin: 0;
     max-width: 54ch;
   }
 
-  /* ── Counts: pressed wells, because they are readouts, not buttons ──────── */
+  /* ── Counts: pressed wells, because they are readouts, not buttons ───────
+     They sit on the bare ground, not inside a glass card. A neumorphic shape
+     is *extruded from its background*, so putting one on a translucent panel
+     breaks the premise and it flattens into a plain rectangle — which is what
+     happened when these lived inside the verdict card. */
   .counts {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-    gap: 12px;
+    gap: 13px;
+    margin-bottom: 20px;
   }
   .count {
     background: var(--ground);
@@ -314,13 +319,14 @@ export const PANEL_HTML = `<!doctype html>
     <div class="verdict">
       <p class="headline" id="headline">Connecting…</p>
       <p class="subhead" id="subhead">Reading the bridge's state.</p>
-      <div class="counts">
-        <div class="count"><b id="c-in">–</b><small>received</small></div>
-        <div class="count"><b id="c-answered">–</b><small>answered</small></div>
-        <div class="count flag"><b id="c-refused">–</b><small>refused</small></div>
-        <div class="count"><b id="c-sent">–</b><small>sent</small></div>
-        <div class="count"><b id="c-waiting">–</b><small>waiting</small></div>
-      </div>
+    </div>
+
+    <div class="counts">
+      <div class="count"><b id="c-in">–</b><small>received</small></div>
+      <div class="count"><b id="c-answered">–</b><small>answered</small></div>
+      <div class="count flag"><b id="c-refused">–</b><small>refused</small></div>
+      <div class="count"><b id="c-sent">–</b><small>sent</small></div>
+      <div class="count"><b id="c-waiting">–</b><small>waiting</small></div>
     </div>
 
     <div class="panels">

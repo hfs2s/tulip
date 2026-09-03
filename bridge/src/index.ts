@@ -110,8 +110,17 @@ async function main(): Promise<void> {
     void currentDispatcher().pump();
   });
 
+  // WhatsApp reissues a pairing code every twenty seconds or so. Recording each
+  // one buries everything else in the feed under identical lines, which makes
+  // the panel useless at exactly the moment someone is setting Tulip up.
+  let qrNoted = false;
   wa.on('qr', () => {
+    if (qrNoted) return;
+    qrNoted = true;
     feed.event('whatsapp.qr', 'not paired — scan the code in the bridge logs');
+  });
+  wa.on('ready', () => {
+    qrNoted = false;
   });
 
   wa.on('fatal', (err: Error) => {
