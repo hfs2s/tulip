@@ -15,8 +15,10 @@
  * both. A glance tells you what you can act on before you have read a word.
  *
  * Neumorphism's known weakness is contrast, so it is confined to *surfaces*:
- * every piece of text sits at a normal contrast ratio against its background,
- * and the soft shadow language does the work of separating planes.
+ * the soft shadow language separates planes, and every text colour is measured
+ * against the surface it actually sits on rather than chosen by eye. The ratios
+ * are written next to the tokens. The first version of this palette failed that
+ * test at 2.6:1, which is what the style does to you if you let it.
  *
  * ── Two rules that make it safe to display strangers' messages ───────────────
  *
@@ -51,14 +53,19 @@ export const PANEL_HTML = `<!doctype html>
     --bloom-a: #f0a8c0;
     --bloom-b: #9fb8e8;
 
-    --ink: #2c2740;
-    --ink-soft: #6b6486;
-    --ink-faint: #918ba8;
+    /* The text ramp is measured, not eyeballed. Neumorphism's failure mode is
+       low contrast, and the first version of this palette put the faint tone at
+       2.6:1 against the glass — comfortably illegible, and exactly the trap the
+       style sets. Every value below clears 4.5:1 for small text on the glass it
+       is used over; the accents are also checked at the size they appear. */
+    --ink: #2c2740;        /* 11.6:1 */
+    --ink-soft: #565073;   /*  6.1:1 */
+    --ink-faint: #655e80;  /*  4.9:1 */
 
-    /* Stem green for answering, deep rose for stopped. Both drawn from the
-       flower rather than from a framework's success/danger pair. */
-    --stem: #3d8168;
-    --alarm: #b04a61;
+    /* Stem green for answering, deep rose for stopped. Drawn from the flower
+       rather than from a framework's success/danger pair. */
+    --stem: #356f59;       /*  4.8:1 */
+    --alarm: #9e3d53;      /*  5.3:1 */
 
     --glass: rgba(255, 255, 255, 0.42);
     --glass-edge: rgba(255, 255, 255, 0.65);
@@ -80,11 +87,11 @@ export const PANEL_HTML = `<!doctype html>
       --ground-dim: #16141f;
       --bloom-a: #8e3f60;
       --bloom-b: #35507f;
-      --ink: #efecf7;
-      --ink-soft: #b3acc8;
-      --ink-faint: #837c9c;
-      --stem: #6fc79f;
-      --alarm: #ef8ba0;
+      --ink: #efecf7;        /* 11.2:1 */
+      --ink-soft: #c2bbd6;   /*  7.1:1 */
+      --ink-faint: #a49dbe;  /*  5.1:1 */
+      --stem: #6fc79f;       /*  6.5:1 */
+      --alarm: #ef8ba0;      /*  5.5:1 */
       --glass: rgba(60, 54, 82, 0.44);
       --glass-edge: rgba(255, 255, 255, 0.12);
       --glass-shadow: rgba(0, 0, 0, 0.30);
