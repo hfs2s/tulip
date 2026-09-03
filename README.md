@@ -231,7 +231,7 @@ And changes what a public audience makes untenable:
 
 | | Iris | Tulip |
 |---|---|---|
-| Audience | six allow-listed numbers | anyone |
+| Audience | six allow-listed numbers | an allow list that can be opened to anyone |
 | Deployment | one process on the host | three containers, disjoint networks |
 | WhatsApp credentials | same filesystem as the agent | unreachable from the agent |
 | Egress | unrestricted | deny-by-default proxy, no route, no DNS |
@@ -239,12 +239,21 @@ And changes what a public audience makes untenable:
 | Host privileges | user account with passwordless sudo | uid 1000, all caps dropped, read-only root |
 | Abuse controls | none needed | per-sender token buckets, turn budgets, size caps |
 | Language | JavaScript | TypeScript strict, Zod at every boundary |
+| Terminal | ttyd proxied over a socket | a file exchange over the handoff volumes — no network between the halves |
+| Paid capabilities | keys in the agent's reach | performed by the bridge; no key enters the agent |
 
-Iris's bespoke integrations (a morning-accountability bridge, a ticketing
-integration, image generation, text-to-speech) are deliberately **not** carried
-over. Paid per-message capabilities exposed to the public are a cost-denial-of-
-service waiting to happen, and each one widens the attack surface for no benefit
-to a general assistant.
+Iris's bespoke business integrations — a morning-accountability bridge, a
+ticketing integration — are deliberately **not** carried over.
+
+Its paid capabilities *are*, but rebuilt rather than copied. Image generation,
+speech, web search and GIFs all run in the **bridge**: the agent names what it
+wants and the trusted side produces it, so no billed credential enters the
+container the threat model assumes an attacker owns, and the agent's egress
+allowlist gains no host. The original objection — that a paid per-message
+feature reachable by strangers is a cost-denial-of-service — is answered by
+bounding them, not by omitting them: each spends the same per-turn and per-chat
+allowance as an ordinary reply, and each has an operator switch independent of
+whether a key is configured.
 
 ## Licence
 

@@ -34,16 +34,18 @@ Pairing survives restarts and rebuilds — the credentials live in the `state`
 volume, not in the image. You only scan again if you unlink the device or delete
 that volume.
 
-### Before you point it at the public
+### Before anyone messages it
 
 ```bash
-scripts/verify-containment.sh
+scripts/preflight.sh            # host prerequisites and configuration
+scripts/verify-containment.sh   # 17 assertions against the running containers
 ```
 
-Fourteen assertions against the running containers: no route out, no DNS, no
-credentials, read-only root, no privilege escalation. It must pass. If it does
-not, the threat model does not currently hold and you should not open the
-audience.
+No route out, no DNS, no credentials, read-only root, no privilege escalation.
+Both must pass. If containment does not, the threat model does not currently
+hold — and that matters whether the audience is a short allow list or the whole
+internet, because an injection needs a borrowed phone or a forwarded document,
+not a hostile sender.
 
 ---
 
@@ -71,21 +73,32 @@ when they matter.
 
 ### The control panel
 
-Bound to loopback. From another machine, tunnel rather than rebind:
+Eight pages: overview, messages, chats, media, tools, terminal, settings, log.
+
+Where it lives depends on `TULIP_PANEL_BIND`. Published on loopback, reach it
+over a tunnel:
 
 ```bash
 ssh -N -L 8791:127.0.0.1:8791 you@the-host
 docker compose exec bridge cat /state/panel-token   # the token
 ```
 
-Then open `http://127.0.0.1:8791/?t=<token>`.
+The reference deployment publishes it on the host's private interface instead
+and puts a hostname in front, behind Cloudflare Access with an emailed sign-in
+code. Two independent gates: Access decides *who*, the token decides *what
+holds a session*.
 
-It shows live message flow, per-chat counters, and hold/block controls. It
-deliberately exposes no endpoint that writes configuration — who may talk to the
-agent is decided by `config.json`, not a browser form.
+**Settings is editable, and that is a deliberate reversal.** The panel used to
+write no configuration at all, which removed the class of "the panel was
+reachable and someone opened the allowlist". It was traded for a console whose
+controls work. What backs it instead is that every change is loud — old and new
+values into the structured log, and a distinct feed entry when the audience is
+opened. `panel.*` stays uneditable, because a surface that can widen its own
+exposure is a different kind of mistake.
 
-If you must expose it, put something that authenticates in front of it. The
-token is a bearer credential: anyone holding it can read every message.
+Treat panel access as full access. Anyone who can sign in can read every
+message, hold delivery, type into a live conversation, and change who the bot
+answers. There is no read-only role.
 
 ### Watching the agent work
 
@@ -98,12 +111,18 @@ docker compose exec agent tmux capture-pane -p -t tulip:c-<chatKey>   # look, sa
 docker compose exec -it agent tmux attach -t tulip     # attach; ctrl-b d to leave
 ```
 
-Attached, anything you type goes into a live conversation with a member of the
-public. Prefer `capture-pane` unless you mean to intervene.
+Attached, anything you type goes straight into a live conversation. Prefer
+`capture-pane` unless you mean to intervene.
 
-There is no web terminal, unlike Iris. Proxying one would require the bridge to
-reach the agent over the network, which would undo the disjoint-networks
-property everything else rests on.
+The panel's **Terminal** page does the same thing without a shell on the host.
+It is not a PTY: Iris proxies ttyd over a socket, and Tulip cannot, because the
+bridge and the agent share no network and Docker will not publish a port into an
+`internal` one. Proxying a shell through the bridge would hand the agent a route
+to the container holding the WhatsApp credentials, which is the single thing the
+topology exists to prevent. So the page exchanges files over the volumes that
+already carry everything else — a captured pane out, keystrokes in — and offers
+a readable view that strips the TUI chrome, plus the raw capture when you want
+it.
 
 ---
 
@@ -111,7 +130,8 @@ property everything else rests on.
 
 | You change | To apply |
 |---|---|
-| `config.json` | `docker compose restart bridge` |
+| Settings, in the panel | nothing — applied immediately and written to `config.json` |
+| `config.json` by hand | `docker compose restart bridge` |
 | `.env` | `docker compose up -d` (recreates the containers) |
 | `persona/` | `docker compose build agent && docker compose up -d agent` — each chat's `CLAUDE.md` is regenerated when its session next starts |
 | any TypeScript | `docker compose build && docker compose up -d` |
@@ -189,7 +209,10 @@ docker compose exec bridge tail -5 /state/feed.jsonl
   log; the socket may be reconnecting, or the device may have been unlinked.
 - **In the feed with `accepted: false`** → the gate or a limit refused it, and
   `reason` says which. Refusals are silent by design: replying would confirm to
-  a stranger that the number is live.
+  an unknown sender that the number is live. If the reason is "sender is not on
+  the allow list" for somebody who should be, read the `gate.deny` line in the
+  Log: WhatsApp is probably delivering them as a linked id, and the identifier
+  to copy is right there.
 - **In the feed, accepted, no `delivered`** → delivery is held (`!release`), or
   a turn is in flight ahead of it.
 - **Delivered but no reply** → the agent's problem. Read its pane.
