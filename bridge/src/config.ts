@@ -186,6 +186,20 @@ const Agent = z
      * See docs/THREAT-MODEL.md §T4.
      */
     crossChat: z.boolean().default(false),
+
+    /**
+     * Capability switches.
+     *
+     * Separate from whether a key is configured, and that separation is the
+     * point: a key lives in the environment and changing it needs a container
+     * restart, whereas an operator wanting to stop the bot generating pictures
+     * at two in the morning wants a switch. Each is *permission*; the key is
+     * *capability*. A feature runs only when it has both.
+     */
+    search: z.boolean().default(true),
+    gifs: z.boolean().default(true),
+    images: z.boolean().default(true),
+    voice: z.boolean().default(true),
   })
   .strict()
   .default({});

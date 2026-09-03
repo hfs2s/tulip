@@ -257,12 +257,16 @@ export function settingsView(deps: ApiDeps): Json {
     limits: c.limits,
     delivery: c.delivery,
     panel: { host: c.panel.host, port: c.panel.port },
+    // `keyed` is whether a credential exists; `agent.*` is whether the operator
+    // permits it. A capability needs both, and the panel shows which is missing.
     tools: {
-      search: (process.env['EXA_API_KEY'] ?? '').length > 0,
-      gifs: (process.env['GIPHY_API_KEY'] ?? '').length > 0,
+      keyed: {
+        search: (process.env['EXA_API_KEY'] ?? '').length > 0,
+        gifs: (process.env['GIPHY_API_KEY'] ?? '').length > 0,
+        images: (process.env['MINIMAX_API_KEY'] ?? '').length > 0,
+        voice: (process.env['MINIMAX_API_KEY'] ?? '').length > 0,
+      },
       gifRating: process.env['GIPHY_RATING'] ?? 'pg',
-      images: (process.env['MINIMAX_API_KEY'] ?? '').length > 0,
-      voice: (process.env['MINIMAX_API_KEY'] ?? '').length > 0,
     },
     model: {
       name: process.env['TULIP_MODEL'] || 'default',
@@ -318,6 +322,8 @@ const SettingsPatch = z
       burst: z.number().int().min(1).max(50).optional(),
       turnsPerDay: z.number().int().min(1).max(10_000).optional(),
       maxInboundChars: z.number().int().min(200).max(100_000).optional(),
+      maxMediaBytes: z.number().int().min(1024).max(100 * 1024 * 1024).optional(),
+      maxMediaPerMessage: z.number().int().min(0).max(10).optional(),
       newSendersPerHour: z.number().int().min(1).max(1000).optional(),
       outboundPerTurn: z.number().int().min(1).max(100).optional(),
       outboundPerChatPerHour: z.number().int().min(1).max(1000).optional(),
@@ -326,9 +332,16 @@ const SettingsPatch = z
     delivery: z.object({
       debounceMs: z.number().int().min(0).max(60_000).optional(),
       maxBatch: z.number().int().min(1).max(50).optional(),
+      stuckAfterMs: z.number().int().min(0).max(3_600_000).optional(),
     }).strict().optional(),
     /** Cross-chat sending. Off by default; see THREAT-MODEL §T4. */
-    agent: z.object({ crossChat: z.boolean().optional() }).strict().optional(),
+    agent: z.object({
+      crossChat: z.boolean().optional(),
+      search: z.boolean().optional(),
+      gifs: z.boolean().optional(),
+      images: z.boolean().optional(),
+      voice: z.boolean().optional(),
+    }).strict().optional(),
   })
   .strict();
 

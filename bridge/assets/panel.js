@@ -701,6 +701,10 @@ async function renderSettings() {
     modeSeg.appendChild(b);
   });
   field(groups, 'Group mode', 'observe delivers every message so the agent can react; it is the expensive one — every message becomes a model call.', modeSeg);
+  field(groups, 'Trigger words', 'Used only in trigger mode. A group message containing one of these is answered.',
+    listEditor(s.groups.triggers || [], 'e.g. juan', function (next, revert) {
+      saveSettings({ groups: { triggers: next } }, revert);
+    }));
   p.appendChild(groups);
 
   // ── Reach ─────────────────────────────────────────────────────────────────
@@ -722,7 +726,10 @@ async function renderSettings() {
    ['turnsPerDay', 'Turns per day', 1, 500],
    ['outboundPerTurn', 'Sends per turn', 1, 50],
    ['outboundPerChatPerHour', 'Sends per chat per hour', 1, 300],
-   ['maxInboundChars', 'Longest message accepted', 200, 20000]
+   ['maxInboundChars', 'Longest message accepted', 200, 20000],
+   ['newSendersPerHour', 'New senders per hour', 1, 200],
+   ['maxMediaPerMessage', 'Attachments per message', 0, 10],
+   ['turnTimeoutMs', 'Abandon a turn after (ms)', 30000, 1800000]
   ].forEach(function (row) {
     field(limits, row[1], null, numberControl(s.limits[row[0]], row[2], row[3], function (v) {
       var patch = { limits: {} };
@@ -732,20 +739,48 @@ async function renderSettings() {
   });
   p.appendChild(limits);
 
+  // ── Delivery ──────────────────────────────────────────────────────────────
+  var delivery = node('div', 'card');
+  delivery.appendChild(node('h2', null, 'Delivery'));
+  delivery.appendChild(node('p', 'sub', 'How messages are gathered before the agent sees them.'));
+  [['debounceMs', 'Wait before handing over (ms)', 0, 15000, 'Collects a burst of quick messages into one prompt.'],
+   ['maxBatch', 'Messages per turn', 1, 50, 'The rest wait for this chat’s next turn in the rotation.'],
+   ['stuckAfterMs', 'Warn when unanswered for (ms)', 0, 1800000, 'How long a message may sit before operators are told.']
+  ].forEach(function (row) {
+    field(delivery, row[1], row[4], numberControl(s.delivery[row[0]], row[2], row[3], function (v) {
+      var patch = { delivery: {} };
+      patch.delivery[row[0]] = v;
+      saveSettings(patch);
+    }));
+  });
+  p.appendChild(delivery);
+
   // ── Capabilities ──────────────────────────────────────────────────────────
   var tools = node('div', 'card');
   tools.appendChild(node('h2', null, 'Capabilities'));
-  tools.appendChild(node('p', 'sub', 'These are set by environment variables, not config, because they are credentials. They live in the bridge and never enter the agent container.'));
-  function readOnlyBadge(on, why) {
-    var b = node('span', 'badge ' + (on ? 'on' : 'off'), on ? 'enabled' : (why || 'no key set'));
-    return b;
-  }
-  field(tools, 'Web search', 'Exa. The agent asks; the bridge performs. Read THREAT-MODEL T6 — a prepared page is an injection vector with no sender to block.', readOnlyBadge(s.tools.search));
-  field(tools, 'GIFs', 'Giphy, rating ' + s.tools.gifRating + '.', readOnlyBadge(s.tools.gifs));
-  field(tools, 'Images', 'MiniMax image generation.', readOnlyBadge(s.tools.images));
-  field(tools, 'Voice notes', 'MiniMax text to speech.', readOnlyBadge(s.tools.voice));
-  field(tools, 'Model', 'What answers people.', node('span', 'value', s.model.name));
-  field(tools, 'Provider', 'Where inference goes.', node('span', 'value', s.model.provider));
+  tools.appendChild(node('p', 'sub', 'Two separate things: whether a credential exists, and whether you permit the agent to use it. A feature needs both. Keys live in the environment and changing one needs a container restart; these switches take effect immediately.'));
+
+  [['search', 'Web search', 'Exa. The agent asks; the bridge performs. Read THREAT-MODEL T6 — a prepared page is an injection vector with no sender to block.'],
+   ['gifs', 'GIFs', 'Giphy, rating ' + s.tools.gifRating + '.'],
+   ['images', 'Pictures', 'MiniMax image generation. Paid, per message.'],
+   ['voice', 'Voice notes', 'MiniMax speech. Falls back to text when it fails.']
+  ].forEach(function (row) {
+    var keyed = s.tools.keyed[row[0]];
+    var wrap = node('div');
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.gap = '12px';
+    if (!keyed) wrap.appendChild(node('span', 'badge off', 'no key set'));
+    wrap.appendChild(liveSwitch(s.agent[row[0]], function (on, input) {
+      var patch = { agent: {} };
+      patch.agent[row[0]] = on;
+      saveSettings(patch, function () { input.checked = !on; });
+    }));
+    field(tools, row[1], row[2] + (keyed ? '' : ' Currently unavailable: no key is configured.'), wrap);
+  });
+
+  field(tools, 'Model', 'Set by TULIP_MODEL in the environment; a change needs a container restart.', node('span', 'value', s.model.name));
+  field(tools, 'Provider', 'Where inference goes. Also environment.', node('span', 'value', s.model.provider));
   p.appendChild(tools);
 }
 

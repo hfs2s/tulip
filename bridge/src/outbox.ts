@@ -296,6 +296,18 @@ export class Outbox extends EventEmitter {
    * the answer and cannot forge, edit or replay one. The bridge stays the only
    * writer of anything the agent treats as having come from outside.
    */
+  /**
+   * A capability the operator has switched off.
+   *
+   * Recorded rather than silent: an agent quietly failing to send a picture and
+   * an operator having turned pictures off look identical from the outside, and
+   * only one of them is worth investigating.
+   */
+  private refuse(capability: string): void {
+    log('outbox.capabilityOff', { capability });
+    feed.event('capability.off', `${capability} is switched off; the agent asked for it`);
+  }
+
   /** Answer a `chats` request on the inbound volume, like a search result. */
   private async answerChats(
     chats: Array<{ chatKey: string; name: string; isGroup: boolean }>,
@@ -414,6 +426,7 @@ export class Outbox extends EventEmitter {
         break;
       }
       case 'gif': {
+        if (!this.deps.config.agent.gifs) return this.refuse('gifs');
         const gif = await findGif(action.query, {
           apiKey: process.env['GIPHY_API_KEY'] ?? '',
           rating: (process.env['GIPHY_RATING'] as Rating | undefined) ?? 'pg',
@@ -433,10 +446,18 @@ export class Outbox extends EventEmitter {
       // charged against the outbound allowance above — but they do leave the
       // deployment, which is why they are rate-limited by turn instead.
       case 'search': {
+        if (!this.deps.config.agent.search) {
+          await this.answer(action.id, 'search', { ok: false, error: 'web search is switched off by the operator' });
+          return;
+        }
         await this.answer(action.id, 'search', await search(action.query, action.results));
         break;
       }
       case 'fetch': {
+        if (!this.deps.config.agent.search) {
+          await this.answer(action.id, 'fetch', { ok: false, error: 'web access is switched off by the operator' });
+          return;
+        }
         await this.answer(action.id, 'fetch', await fetchPage(action.url));
         break;
       }
@@ -483,6 +504,7 @@ export class Outbox extends EventEmitter {
       }
 
       case 'image': {
+        if (!this.deps.config.agent.images) return this.refuse('images');
         const image = await generateImage(action.prompt);
         if (!image.ok) {
           log('outbox.imageFailed', { reason: image.error });
@@ -495,6 +517,7 @@ export class Outbox extends EventEmitter {
       }
 
       case 'voice': {
+        if (!this.deps.config.agent.voice) return this.refuse('voice');
         const audio = await synthesise(action.text);
         if (!audio.ok) {
           // Never drop the message: say it in text rather than stay silent.
