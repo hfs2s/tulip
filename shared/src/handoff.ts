@@ -193,6 +193,54 @@ export const OutboxAction = z.discriminatedUnion('kind', [
     .object({
       id: z.string().uuid(),
       turnId: TurnId,
+      kind: z.literal('sendTo'),
+      /**
+       * A chat the bridge has previously issued a key for.
+       *
+       * This is the one action that names a destination, and it exists only
+       * because an operator asked for it. It is refused unless
+       * `agent.crossChat` is on, and the key must be one the bridge issued —
+       * an invented one resolves to nothing.
+       *
+       * Note what it still cannot do: read another conversation. Sessions are
+       * per chat, so this carries the current conversation outward rather than
+       * fetching someone else's inward. See THREAT-MODEL.md §T4.
+       */
+      chatKey: ChatKey,
+      text: z.string().min(1).max(4096),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /** List the chats the agent may message. Also gated on `agent.crossChat`. */
+      kind: z.literal('chats'),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      kind: z.literal('image'),
+      /** A description. The bridge generates and sends it; no key reaches the agent. */
+      prompt: z.string().min(1).max(1000),
+      caption: z.string().max(1024).nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      kind: z.literal('voice'),
+      /** Spoken aloud and sent as a WhatsApp voice note. */
+      text: z.string().min(1).max(2000),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
       kind: z.literal('search'),
       /** A search phrase. Performed by the bridge; see bridge/src/exa.ts. */
       query: z.string().min(1).max(400),
@@ -277,7 +325,7 @@ export const AgentStatus = z
 export const ToolResult = z
   .object({
     actionId: z.string().uuid(),
-    kind: z.enum(['search', 'fetch']),
+    kind: z.enum(['search', 'fetch', 'chats']),
     at: z.string().datetime(),
     ok: z.boolean(),
     /** Present when ok is false. Short, and safe to show a person. */

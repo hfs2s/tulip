@@ -170,9 +170,30 @@ const Delivery = z
   .strict()
   .default({});
 
+const Agent = z
+  .object({
+    /**
+     * May the agent send to a chat other than the one it is answering?
+     *
+     * Off by default, and the default is the security story: outbound actions
+     * normally carry a turn, the bridge holds the only turn → chat map, and
+     * "send this to somebody else" is not expressible. Turning this on adds an
+     * action that names a chat, which makes it expressible.
+     *
+     * What it does *not* undo is session isolation. Each chat is a separate
+     * Claude Code session, so the agent still cannot read another conversation —
+     * it can carry the current one outward, not fetch someone else's inward.
+     * See docs/THREAT-MODEL.md §T4.
+     */
+    crossChat: z.boolean().default(false),
+  })
+  .strict()
+  .default({});
+
 export const ConfigSchema = z
   .object({
     audience: Audience,
+    agent: Agent,
     operators: Operators,
     groups: Groups,
     limits: Limits,

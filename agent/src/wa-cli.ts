@@ -24,6 +24,11 @@ import { readTurn, workspaceFor, WORKSPACE_ROOT } from './workspace.js';
 const USAGE = `usage:
   tulip-wa send <text>|-      reply to the person you are answering ("-" reads stdin)
   tulip-wa file <path> [text] send a file, with an optional caption
+  tulip-wa image <prompt>     generate a picture and send it  [--caption "…"]
+  tulip-wa voice <text>       say it aloud as a voice note
+  tulip-wa chats              list chats you may message (if enabled)
+  tulip-wa send --to <key> <text>
+                              message a different chat (if enabled)
   tulip-wa search <query>     search the web (waits for the answer)
   tulip-wa fetch <url>        read one page (waits for the answer)
   tulip-wa gif <search> [--caption "…"]
@@ -192,6 +197,21 @@ const [command, ...rest] = process.argv.slice(2);
 
 switch (command) {
   case 'send': {
+    // `--to <chatKey>` addresses another conversation. It works only when an
+    // operator has switched cross-chat on; otherwise the bridge drops it. There
+    // is deliberately no way to name a phone number — you never see one.
+    const toIndex = rest.indexOf('--to');
+    if (toIndex !== -1) {
+      const chatKey = rest[toIndex + 1];
+      const text = rest.slice(toIndex + 2).join(' ').trim();
+      if (!chatKey || !/^[0-9a-f]{16}$/.test(chatKey)) {
+        die('tulip-wa send --to: need a 16-character chat key from `tulip-wa chats`');
+      }
+      if (!text) die('tulip-wa send --to: nothing to send');
+      queue({ kind: 'sendTo', chatKey, text: text.slice(0, 4000) });
+      break;
+    }
+
     const joined = rest.join(' ');
     const text = (joined === '-' || joined === '' ? readFileSync(0, 'utf8') : joined).replace(/\s+$/, '');
     if (text.length === 0) die('tulip-wa send: nothing to send');
@@ -218,6 +238,38 @@ switch (command) {
     const query = (idx === -1 ? rest : rest.slice(0, idx)).join(' ').trim();
     if (query.length === 0) die('tulip-wa gif: need something to search for');
     queue({ kind: 'gif', query: query.slice(0, 100), caption });
+    break;
+  }
+
+  case 'image': {
+    const idx = rest.indexOf('--caption');
+    const caption = idx === -1 ? null : rest.slice(idx + 1).join(' ') || null;
+    const prompt = (idx === -1 ? rest : rest.slice(0, idx)).join(' ').trim();
+    if (prompt.length === 0) die('tulip-wa image: describe the picture you want');
+    queue({ kind: 'image', prompt: prompt.slice(0, 1000), caption });
+    break;
+  }
+
+  case 'voice': {
+    const text = rest.join(' ').trim() || readFileSync(0, 'utf8').trim();
+    if (text.length === 0) die('tulip-wa voice: need something to say');
+    queue({ kind: 'voice', text: text.slice(0, 2000) });
+    break;
+  }
+
+  case 'chats': {
+    const id = queue({ kind: 'chats' });
+    const result = await awaitResult(id, 15_000);
+    if (result === null || !result.ok || result.items.length === 0) {
+      process.stdout.write(
+        'No other chats available. Messaging other conversations is off unless an operator turns it on.\n',
+      );
+      break;
+    }
+    process.stdout.write('Chats you may message with `tulip-wa send --to <key>`:\n');
+    for (const item of result.items) {
+      process.stdout.write(`  ${item.url}  ${item.title}\n`);
+    }
     break;
   }
 

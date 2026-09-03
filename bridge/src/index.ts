@@ -96,6 +96,8 @@ async function main(): Promise<void> {
     wa,
     turns,
     limiter,
+    config,
+    chats,
     lastMessageIn: (chatKey) => currentDispatcher().lastMessageIn(chatKey),
   });
 

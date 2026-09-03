@@ -16,9 +16,11 @@
  *     display name, exactly as the agent sees them.
  */
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { TerminalRequest, TerminalScreen, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
+import { parseConfig } from './config.js';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import type { Dispatcher } from './dispatcher.js';
@@ -245,8 +247,12 @@ export function logTail(lines: number): Json {
 export function settingsView(deps: ApiDeps): Json {
   const c = deps.config;
   return {
-    audience: { everyone: c.audience.everyone, numbers: c.audience.numbers.length, jids: c.audience.jids.length },
-    operators: { numbers: c.operators.numbers.length, jids: c.operators.jids.length },
+    // The actual values, not counts. An allow list you cannot read is one you
+    // cannot audit, and the panel already sits behind whatever authenticates
+    // in front of it — hiding the numbers from the operator protects nobody.
+    audience: { everyone: c.audience.everyone, numbers: c.audience.numbers, jids: c.audience.jids },
+    operators: { numbers: c.operators.numbers, jids: c.operators.jids },
+    agent: c.agent,
     groups: c.groups,
     limits: c.limits,
     delivery: c.delivery,
@@ -255,12 +261,149 @@ export function settingsView(deps: ApiDeps): Json {
       search: (process.env['EXA_API_KEY'] ?? '').length > 0,
       gifs: (process.env['GIPHY_API_KEY'] ?? '').length > 0,
       gifRating: process.env['GIPHY_RATING'] ?? 'pg',
+      images: (process.env['MINIMAX_API_KEY'] ?? '').length > 0,
+      voice: (process.env['MINIMAX_API_KEY'] ?? '').length > 0,
     },
     model: {
       name: process.env['TULIP_MODEL'] || 'default',
       provider: process.env['ANTHROPIC_BASE_URL'] || 'api.anthropic.com',
     },
   };
+}
+
+/**
+ * What the panel may change.
+ *
+ * This reverses an earlier decision, deliberately and with the cost written
+ * down. The panel used to expose nothing that wrote configuration, on the
+ * grounds that it removed the class of "the panel was reachable and someone
+ * opened the allowlist". That is a real protection and it is now gone: an
+ * attacker holding the panel token *can* open this bot to the world.
+ *
+ * It was traded for something an operator genuinely needs — a console where the
+ * controls work, rather than a row of disabled switches with no explanation.
+ * What backs it instead:
+ *
+ *   - every change is written to the feed and the structured log, with the old
+ *     and new values, so opening the audience is loud rather than silent;
+ *   - the panel is not reachable without both the bearer token and whatever
+ *     authenticates in front of it (Cloudflare Access, in this deployment);
+ *   - `panel.*` is deliberately absent below. The bind address decides who can
+ *     reach this surface at all, and a surface that can widen its own exposure
+ *     is a different kind of mistake.
+ *
+ * See docs/THREAT-MODEL.md §T8.
+ */
+const PhoneNumber = z.string().regex(/^[1-9][0-9]{6,15}$/, 'bare international digits, no + or spaces');
+const LinkedId = z.string().regex(/^[0-9]{5,25}(@lid)?$/, 'digits, optionally @lid');
+
+const SettingsPatch = z
+  .object({
+    audience: z.object({
+      everyone: z.boolean().optional(),
+      numbers: z.array(PhoneNumber).max(500).optional(),
+      jids: z.array(LinkedId).max(500).optional(),
+    }).strict().optional(),
+    operators: z.object({
+      numbers: z.array(PhoneNumber).max(50).optional(),
+      jids: z.array(LinkedId).max(50).optional(),
+    }).strict().optional(),
+    groups: z.object({
+      enabled: z.boolean().optional(),
+      replyTo: z.enum(['mention', 'trigger', 'observe']).optional(),
+      triggers: z.array(z.string().min(1).max(32)).max(8).optional(),
+    }).strict().optional(),
+    limits: z.object({
+      messagesPerHour: z.number().int().min(1).max(1000).optional(),
+      burst: z.number().int().min(1).max(50).optional(),
+      turnsPerDay: z.number().int().min(1).max(10_000).optional(),
+      maxInboundChars: z.number().int().min(200).max(100_000).optional(),
+      newSendersPerHour: z.number().int().min(1).max(1000).optional(),
+      outboundPerTurn: z.number().int().min(1).max(100).optional(),
+      outboundPerChatPerHour: z.number().int().min(1).max(1000).optional(),
+      turnTimeoutMs: z.number().int().min(30_000).max(3_600_000).optional(),
+    }).strict().optional(),
+    delivery: z.object({
+      debounceMs: z.number().int().min(0).max(60_000).optional(),
+      maxBatch: z.number().int().min(1).max(50).optional(),
+    }).strict().optional(),
+    /** Cross-chat sending. Off by default; see THREAT-MODEL §T4. */
+    agent: z.object({ crossChat: z.boolean().optional() }).strict().optional(),
+  })
+  .strict();
+
+const CONFIG_FILE = process.env['TULIP_CONFIG'] ?? '/config/config.json';
+
+/**
+ * Apply a settings change.
+ *
+ * Merged into the live config object *in place*, because every component holds
+ * a reference to it — mutating is what makes a change take effect without a
+ * restart that would drop the WhatsApp socket.
+ *
+ * The file is rewritten from its own raw contents rather than from the parsed
+ * object, so the `_comment` keys that document it survive the round trip.
+ */
+export function updateSettings(deps: ApiDeps, body: unknown): { ok: boolean; message: string } {
+  const patch = SettingsPatch.safeParse(body);
+  if (!patch.success) {
+    return { ok: false, message: patch.error.issues[0]?.message ?? 'invalid settings' };
+  }
+
+  // Validate the *result*, not just the patch: a field may be individually
+  // valid and still produce a configuration the rest of the system rejects.
+  const merged = structuredClone(deps.config) as Record<string, unknown>;
+  for (const [section, values] of Object.entries(patch.data)) {
+    merged[section] = { ...(merged[section] as object), ...values };
+  }
+  let next;
+  try {
+    next = parseConfig(merged);
+  } catch (err) {
+    return { ok: false, message: String((err as Error).message).split('\n').slice(0, 2).join(' ') };
+  }
+
+  const before = {
+    everyone: deps.config.audience.everyone,
+    allowed: deps.config.audience.numbers.length + deps.config.audience.jids.length,
+    groups: deps.config.groups.enabled,
+  };
+
+  Object.assign(deps.config, next);
+
+  // Preserve the documentation in the file it is documenting.
+  let raw: Record<string, unknown> = {};
+  try {
+    raw = JSON.parse(readFileSync(CONFIG_FILE, 'utf8')) as Record<string, unknown>;
+  } catch {
+    /* first write, or the file is gone */
+  }
+  for (const [section, values] of Object.entries(patch.data)) {
+    raw[section] = { ...(raw[section] as object), ...values };
+  }
+  try {
+    writeJsonAtomic(CONFIG_FILE, raw, 0o600);
+  } catch (err) {
+    return { ok: false, message: 'changed in memory, but the file could not be written: ' + String((err as Error).message) };
+  }
+
+  const after = {
+    everyone: next.audience.everyone,
+    allowed: next.audience.numbers.length + next.audience.jids.length,
+    groups: next.groups.enabled,
+  };
+  log('settings.changed', {
+    sections: Object.keys(patch.data).join(','),
+    everyone: `${before.everyone} -> ${after.everyone}`,
+    allowed: `${before.allowed} -> ${after.allowed}`,
+    groups: `${before.groups} -> ${after.groups}`,
+  });
+  feed.event('settings.changed', Object.keys(patch.data).join(', ') + ' updated from the panel');
+  if (!before.everyone && after.everyone) {
+    feed.event('audience.opened', 'this number now answers anyone who messages it');
+  }
+
+  return { ok: true, message: 'Saved.' };
 }
 
 // ─── Terminal ────────────────────────────────────────────────────────────────

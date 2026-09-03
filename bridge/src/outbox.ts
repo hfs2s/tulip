@@ -23,9 +23,12 @@ import type { OutboxAction as OutboxActionType } from '@tulip/shared';
 import { feed } from './feed.js';
 import { findGif, type Rating } from './giphy.js';
 import { fetchPage, search, type ExaOutcome } from './exa.js';
+import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
 import type { Limiter } from './ratelimit.js';
 import type { TurnRegistry } from './turns.js';
+import type { Config } from './config.js';
+import type { ChatRegistry } from './chats.js';
 import type { WhatsApp } from './whatsapp.js';
 
 /** Attempts before an action is abandoned. */
@@ -165,6 +168,9 @@ export function resolveOutboundFile(name: string, directory = outPaths.files): F
 
 export interface OutboxDeps {
   readonly wa: WhatsApp;
+  /** Live config: cross-chat sending is a switch an operator can flip. */
+  readonly config: Config;
+  readonly chats: ChatRegistry;
   readonly turns: TurnRegistry;
   readonly limiter: Limiter;
   /** Resolve the newest inbound message in a chat, so `react` has a target. */
@@ -290,7 +296,24 @@ export class Outbox extends EventEmitter {
    * the answer and cannot forge, edit or replay one. The bridge stays the only
    * writer of anything the agent treats as having come from outside.
    */
-  private async answer(actionId: string, kind: 'search' | 'fetch', outcome: ExaOutcome): Promise<void> {
+  /** Answer a `chats` request on the inbound volume, like a search result. */
+  private async answerChats(
+    chats: Array<{ chatKey: string; name: string; isGroup: boolean }>,
+    actionId?: string,
+  ): Promise<void> {
+    if (!actionId) return;
+    await this.answer(actionId, 'chats', {
+      ok: true,
+      items: chats.map((c) => ({
+        title: c.name + (c.isGroup ? ' (group)' : ''),
+        url: c.chatKey,
+        published: null,
+        text: '',
+      })),
+    });
+  }
+
+  private async answer(actionId: string, kind: 'search' | 'fetch' | 'chats', outcome: ExaOutcome): Promise<void> {
     const result = ToolResult.safeParse({
       actionId,
       kind,
@@ -417,6 +440,74 @@ export class Outbox extends EventEmitter {
         await this.answer(action.id, 'fetch', await fetchPage(action.url));
         break;
       }
+      // The one action that names a destination, and the only one gated on an
+      // operator switch. Off by default; see THREAT-MODEL.md T4.
+      case 'sendTo': {
+        if (!this.deps.config.agent.crossChat) {
+          log('outbox.crossChatRefused', { note: 'agent.crossChat is off' });
+          feed.event('crossChat.refused', 'the agent tried to message another chat');
+          return;
+        }
+        const jid = this.deps.chats.jidFor(action.chatKey);
+        if (jid === null) {
+          log('outbox.unknownChat', { chatKey: action.chatKey });
+          return; // a key the bridge never issued resolves to nothing
+        }
+        if (this.deps.chats.isBlocked(action.chatKey)) {
+          log('outbox.blockedChat', { chatKey: action.chatKey });
+          return;
+        }
+        await this.deps.wa.sendText(jid, action.text);
+        feed.outbound(action.chatKey, 'text', action.text);
+        // Recorded against both chats, so a message that crossed conversations
+        // is visible from the one it came from as well as the one it went to.
+        feed.event('crossChat.sent', `${turn.chatKey} -> ${action.chatKey}`);
+        break;
+      }
+
+      case 'chats': {
+        if (!this.deps.config.agent.crossChat) {
+          await this.answerChats([]);
+          return;
+        }
+        await this.answerChats(
+          this.deps.chats
+            .all()
+            .filter((c) => !c.blocked)
+            .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+            .slice(0, 30)
+            .map((c) => ({ chatKey: c.chatKey, name: c.name ?? 'someone', isGroup: c.isGroup })),
+          action.id,
+        );
+        break;
+      }
+
+      case 'image': {
+        const image = await generateImage(action.prompt);
+        if (!image.ok) {
+          log('outbox.imageFailed', { reason: image.error });
+          feed.event('image.failed', image.error);
+          return;
+        }
+        await this.deps.wa.sendImage(turn.chatJid, image.data, action.caption);
+        feed.outbound(turn.chatKey, 'image', action.caption ?? '[image]');
+        break;
+      }
+
+      case 'voice': {
+        const audio = await synthesise(action.text);
+        if (!audio.ok) {
+          // Never drop the message: say it in text rather than stay silent.
+          log('outbox.voiceFallback', { reason: audio.error });
+          await this.deps.wa.sendText(turn.chatJid, action.text);
+          feed.outbound(turn.chatKey, 'text', action.text);
+          return;
+        }
+        await this.deps.wa.sendVoice(turn.chatJid, audio.data);
+        feed.outbound(turn.chatKey, 'voice', action.text);
+        break;
+      }
+
       case 'react': {
         const target = this.deps.lastMessageIn(turn.chatKey);
         if (!target) {

@@ -48,6 +48,7 @@ import {
   send,
   settingsView,
   snapshot,
+  updateSettings,
   terminalKeys,
   terminalScreen,
   terminalWatch,
@@ -281,7 +282,15 @@ export function startPanel(deps: ApiDeps): Server | null {
           return;
         }
         if (url.pathname === '/api/logs') return send(res, headers, 200, logTail(num('n', 200, 1000)));
-        if (url.pathname === '/api/settings') return send(res, headers, 200, settingsView(deps));
+        if (url.pathname === '/api/settings' && req.method === 'GET') {
+          return send(res, headers, 200, settingsView(deps));
+        }
+        // Method guard matters: without it this also swallows the POST and
+        // silently returns the current values instead of applying the change.
+        if (url.pathname === '/api/settings' && req.method === 'POST') {
+          const result = updateSettings(deps, await readBody(req));
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
 
         if (url.pathname === '/api/terminal' && req.method === 'GET') {
           return send(res, headers, 200, terminalScreen());

@@ -83,6 +83,11 @@ services:
       # Web search and page reading, for the same reason and on the same terms:
       # the agent asks, the bridge performs. Rotated on rate limits. See
       # bridge/src/exa.ts for why `fetch` is not an HTTP request from here.
+      # Pictures and speech, same terms: the agent asks, the bridge produces.
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      MINIMAX_GROUP_ID: ${MINIMAX_GROUP_ID:-}
+      MINIMAX_VOICE_ID: ${MINIMAX_VOICE_ID:-}
+      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-}
       EXA_API_KEY: ${EXA_API_KEY:-}
       EXA_BACKUP_API_KEY: ${EXA_BACKUP_API_KEY:-}
       EXA_BACKUP_API_KEY2: ${EXA_BACKUP_API_KEY2:-}
@@ -90,7 +95,9 @@ services:
       - state:/state
       - handoff-in:/handoff/in
       - handoff-out:/handoff/out
-      - ./config.json:/config/config.json:ro
+      # Read-write: the panel can change settings, which means the bridge
+      # rewrites this file. It is the trusted container; the agent has no mount.
+      - ./config.json:/config/config.json
     tmpfs:
       - /tmp:mode=1777,size=64m,noexec,nosuid,nodev
     ports:

@@ -276,6 +276,28 @@ export class WhatsApp extends EventEmitter {
     }
   }
 
+  /** Send a generated image. Buffer rather than a path: nothing touches disk. */
+  async sendImage(chatJid: string, image: Buffer, caption: string | null): Promise<void> {
+    await this.require().sendMessage(chatJid, {
+      image,
+      ...(caption === null ? {} : { caption }),
+    });
+  }
+
+  /**
+   * Send a voice note.
+   *
+   * `ptt: true` is what makes WhatsApp render it as a held-to-record voice
+   * message rather than an audio file attachment.
+   */
+  async sendVoice(chatJid: string, audio: Buffer): Promise<void> {
+    await this.require().sendMessage(chatJid, {
+      audio,
+      mimetype: 'audio/ogg; codecs=opus',
+      ptt: true,
+    });
+  }
+
   /**
    * Send an animated GIF.
    *
