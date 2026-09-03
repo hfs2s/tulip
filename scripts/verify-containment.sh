@@ -104,8 +104,8 @@ check "/usr is not writable" fails \
   "touch /usr/local/bin/tamper 2>/dev/null"
 check "sudo is not installed" fails \
   "command -v sudo"
-check "there are no setuid binaries" succeeds \
-  "test -z \"\$(find / -xdev -perm -4000 -type f 2>/dev/null | head -1)\""
+check "there are no setuid or setgid binaries" succeeds \
+  "test -z \"\$(find / -xdev -type f \\( -perm -4000 -o -perm -2000 \\) 2>/dev/null | head -1)\""
 # cap_drop: [ALL] — this is the capability that would let it re-mount things.
 check "CAP_SYS_ADMIN is not held" fails \
   "grep -q 'CapEff:\\s*0000000000200000' /proc/self/status"

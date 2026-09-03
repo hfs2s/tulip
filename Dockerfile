@@ -60,6 +60,18 @@ COPY package.json ./
 # on first boot.
 RUN mkdir -p /state /handoff/in /handoff/out /config \
  && chown -R node:node /state /handoff /config
+
+# Strip every setuid and setgid bit in the image.
+#
+# `no-new-privileges: true` already means the kernel refuses to honour them, so
+# this is belt and braces — but it is the belt that can be *checked*, and
+# `scripts/verify-containment.sh` asserts it. The Debian base ships the usual
+# set (su, mount, passwd, chsh…), none of which a service account needs. The
+# setgid one worth naming is utempter, which tmux uses to write utmp records:
+# without it tmux works and simply does not record a login, which is correct
+# behaviour for a container nobody logs into.
+RUN find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod -s {} + 2>/dev/null || true
+
 USER node
 ENV TULIP_STATE_DIR=/state TULIP_IN_DIR=/handoff/in TULIP_OUT_DIR=/handoff/out
 CMD ["node", "bridge/dist/index.js"]
@@ -97,6 +109,17 @@ RUN printf '#!/bin/sh\nexec node /app/agent/dist/wa-cli.js "$@"\n' > /usr/local/
  && mkdir -p /workspace /handoff/in /handoff/out \
  && chown -R node:node /workspace /handoff
 
+# Strip every setuid and setgid bit in the image.
+#
+# `no-new-privileges: true` already means the kernel refuses to honour them, so
+# this is belt and braces — but it is the belt that can be *checked*, and
+# `scripts/verify-containment.sh` asserts it. The Debian base ships the usual
+# set (su, mount, passwd, chsh…), none of which a service account needs. The
+# setgid one worth naming is utempter, which tmux uses to write utmp records:
+# without it tmux works and simply does not record a login, which is correct
+# behaviour for a container nobody logs into.
+RUN find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod -s {} + 2>/dev/null || true
+
 USER node
 # HOME is the workspace volume: Claude Code writes its config and transcripts
 # under it, and the root filesystem is read-only at run time.
@@ -117,5 +140,17 @@ CMD ["node", "agent/dist/supervisor.js"]
 # two hundred lines.
 FROM base AS egress
 COPY --from=builder /app/egress/dist ./egress/dist
+
+# Strip every setuid and setgid bit in the image.
+#
+# `no-new-privileges: true` already means the kernel refuses to honour them, so
+# this is belt and braces — but it is the belt that can be *checked*, and
+# `scripts/verify-containment.sh` asserts it. The Debian base ships the usual
+# set (su, mount, passwd, chsh…), none of which a service account needs. The
+# setgid one worth naming is utempter, which tmux uses to write utmp records:
+# without it tmux works and simply does not record a login, which is correct
+# behaviour for a container nobody logs into.
+RUN find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod -s {} + 2>/dev/null || true
+
 USER node
 CMD ["node", "egress/dist/index.js"]
