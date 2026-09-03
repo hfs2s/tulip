@@ -122,6 +122,32 @@ spawns, not immediately — a resident session keeps the file it started with.
 `!reset <key>` forces the issue for one chat; restarting the agent container
 does it for all of them without losing any context.
 
+### Letting somebody in
+
+Two separate lists, for two separate surfaces, and it is easy to change the
+wrong one.
+
+**To let somebody message the bot** — Settings → Audience, or `config.json`:
+
+- Add their number to `audience.numbers` (bare international digits).
+- If their messages are still refused, WhatsApp is delivering them as a linked
+  id with no number attached. Open the Log page, find the `gate.deny` line for
+  their attempt, and copy the identifier it recorded into `audience.jids`. This
+  is the common case on modern clients, and it is why the refusal records every
+  identifier the gate actually saw — so allowing someone is a copy, not a guess.
+- Operators are a separate list and are never widened by "open to anyone".
+
+**To let somebody into the control panel** — this is Cloudflare Access, not
+Tulip. The panel's own token is a bearer credential shared by whoever holds it;
+Access is what identifies a person. Add their address to the allow policy on the
+`tulip (raspberry pi)` application in the Cloudflare Zero Trust dashboard, under
+Access → Applications. The application is pinned to the One-time PIN identity
+provider, so they will sign in with a code emailed to that address and nothing
+else.
+
+Adding a panel user gives them everything: reading every message, holding
+delivery, and changing the audience. There is no read-only role.
+
 ### Adding a host to the egress allowlist
 
 Every entry is a channel out of the jail. Prefer an exact hostname to a

@@ -10,9 +10,37 @@ written to be checked, not to be reassuring.
 
 ---
 
+## 0. What is actually deployed
+
+**This document is written for the open case — a number anyone may message — and
+the reference deployment is currently the closed one.** Its allow list holds a
+handful of people and will grow slowly; the panel is reachable only after an
+emailed sign-in code to a single address, behind Cloudflare Access.
+
+The controls below were designed for the harder configuration and hold *a
+fortiori* for this one, so nothing here needs weakening to describe it. Two
+honest consequences of the difference:
+
+- **T5 is much less pressing.** Abuse and cost-denial-of-service assume an
+  anonymous attacker who can acquire another number for free. Against a short
+  allow list the rate limits are protecting against accident and runaway loops
+  rather than malice, and the blast radius of either is one known person.
+- **T1 and T6 are unchanged.** A prompt injection does not need a hostile
+  sender: a borrowed phone, a forwarded document, or a web page written by
+  somebody not in the room all reach the same agent. Everything about the
+  container, the volumes and the egress applies exactly as written.
+
+The one setting that moves between the two worlds is `audience.everyone`, and
+it can now be flipped from the control panel — so this section is a statement
+about a moment, not a property. Check `config.json`, or the Settings page,
+rather than trusting this paragraph.
+
+---
+
 ## 1. System description
 
-Tulip exposes a WhatsApp number that anyone may message. Inbound messages are
+Tulip exposes a WhatsApp number. In the open configuration anyone may message
+it; in the deployed one, an allow list decides. Inbound messages are
 delivered to a Claude Code agent running with `--dangerously-skip-permissions`,
 which composes replies and sends them back through the same number.
 
