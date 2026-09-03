@@ -1040,46 +1040,61 @@ async function refresh() {
  * one frame rather than a render loop, which is what makes a full-viewport
  * canvas an acceptable way to carry a background texture.
  *
+ * **The noise texture has to finish loading first.** The shader samples a
+ * pre-computed randomiser for its fibre and speckle layers rather than
+ * generating noise per pixel, and `ShaderMount` throws outright if that image
+ * is not decoded yet — "image for uniform u_noiseTexture must be fully loaded".
+ * `getShaderNoiseTexture()` hands back an `HTMLImageElement` that usually is
+ * not, so mounting immediately fails every time. It failed silently here, which
+ * is why the catch below now says something: a backdrop that does not appear is
+ * cosmetic, but a backdrop that cannot appear and reports nothing is a bug that
+ * survives a deploy.
+ *
  * Not gated on `prefers-reduced-motion`, unlike the masthead's gradient: there
  * is no motion here to reduce, and a person who asked for less animation still
  * wants the page to have its surface.
  */
 function mountPaper() {
-  try {
-    if (typeof PaperShaders === 'undefined' || !PaperShaders.ShaderMount) return;
-    if (!PaperShaders.paperTextureFragmentShader) return;
-    var host = el('paper');
-    if (!host) return;
+  if (typeof PaperShaders === 'undefined' || !PaperShaders.ShaderMount) return;
+  if (!PaperShaders.paperTextureFragmentShader) return;
+  var host = el('paper');
+  if (!host) return;
 
-    var uniforms = Object.assign({}, PaperShaders.defaultPatternSizing || {}, {
-      u_image: undefined,
-      u_imageAspectRatio: 1,
-      u_colorBack: [0, 0, 0, 1],
-      u_colorFront: [0.047, 0.051, 0.055, 1],
-      u_contrast: 0.17,
-      u_roughness: 0.68,
-      u_fiber: 0.3,
-      u_fiberSize: 0.13,
-      u_crumples: 0,
-      u_crumpleSize: 0.01,
-      u_folds: 0,
-      u_foldCount: 1,
-      u_drops: 0.07,
-      u_fade: 0,
-      u_seed: 5.8,
-      u_scale: 0.6,
-      u_fit: 2
-    });
-
-    // The shader samples a pre-computed randomiser rather than generating noise
-    // per pixel. Without it the fibre and speckle layers have nothing to read.
-    if (PaperShaders.getShaderNoiseTexture) {
-      var noise = PaperShaders.getShaderNoiseTexture();
+  function mount(noise) {
+    try {
+      var uniforms = Object.assign({}, PaperShaders.defaultPatternSizing || {}, {
+        u_image: undefined,
+        u_imageAspectRatio: 1,
+        u_colorBack: [0, 0, 0, 1],
+        u_colorFront: [0.047, 0.051, 0.055, 1],
+        u_contrast: 0.17,
+        u_roughness: 0.68,
+        u_fiber: 0.3,
+        u_fiberSize: 0.13,
+        u_crumples: 0,
+        u_crumpleSize: 0.01,
+        u_folds: 0,
+        u_foldCount: 1,
+        u_drops: 0.07,
+        u_fade: 0,
+        u_seed: 5.8,
+        u_scale: 0.6,
+        u_fit: 2
+      });
       if (noise) uniforms.u_noiseTexture = noise;
+      new PaperShaders.ShaderMount(host, PaperShaders.paperTextureFragmentShader, uniforms, undefined, 0);
+    } catch (err) {
+      console.warn('[tulip] paper texture did not mount:', err && err.message ? err.message : err);
     }
+  }
 
-    new PaperShaders.ShaderMount(host, PaperShaders.paperTextureFragmentShader, uniforms, undefined, 0);
-  } catch (err) { /* a surface is never worth a broken page */ }
+  var noise = PaperShaders.getShaderNoiseTexture ? PaperShaders.getShaderNoiseTexture() : null;
+  if (!noise) { mount(null); return; }
+  if (noise.complete && noise.naturalWidth > 0) { mount(noise); return; }
+  noise.addEventListener('load', function () { mount(noise); }, { once: true });
+  noise.addEventListener('error', function () {
+    console.warn('[tulip] paper texture: the noise source failed to load');
+  }, { once: true });
 }
 
 function mountShader() {
