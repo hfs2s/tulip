@@ -563,70 +563,119 @@ async function saveSettings(patch, revert) {
 }
 
 /**
- * An editable list of identifiers.
+ * A modal.
  *
- * Shows every entry rather than a count. A list you cannot read is a list you
- * cannot audit, and this page already sits behind whatever authenticates in
- * front of it — hiding the numbers from the operator protects nobody.
+ * Escape and a backdrop click both close it, and focus moves to the first
+ * control on open — a dialog you cannot dismiss from the keyboard is a trap.
  */
-function listEditor(values, placeholder, onSave) {
-  var wrap = node('div');
-  wrap.style.display = 'flex';
-  wrap.style.flexDirection = 'column';
-  wrap.style.gap = '8px';
-  wrap.style.minWidth = '280px';
+function openModal(title, description, build) {
+  var scrim = el('scrim');
+  clear(scrim);
 
-  var current = values.slice();
+  var modal = node('div', 'modal');
+  var head = node('div', 'modal-head');
+  var titles = node('div');
+  titles.appendChild(node('h3', null, title));
+  if (description) titles.appendChild(node('p', null, description));
+  head.appendChild(titles);
+  var close = node('button', 'sm', 'Close');
+  close.type = 'button';
+  head.appendChild(close);
+  modal.appendChild(head);
 
-  function paint() {
-    clear(wrap);
-    if (!current.length) wrap.appendChild(node('div', 'hint', 'Empty.'));
-    current.forEach(function (v, i) {
-      var row = node('div');
-      row.style.display = 'flex';
-      row.style.gap = '8px';
-      row.style.alignItems = 'center';
-      var val = node('span', 'value', v);
-      val.style.flex = '1';
-      row.appendChild(val);
-      var rm = node('button', 'sm danger', 'Remove');
-      rm.type = 'button';
-      rm.addEventListener('click', function () {
-        var next = current.slice(0, i).concat(current.slice(i + 1));
-        onSave(next, function () { paint(); });
-        current = next;
-        paint();
-      });
-      row.appendChild(rm);
-      wrap.appendChild(row);
-    });
+  var body = node('div', 'modal-body');
+  modal.appendChild(body);
+  scrim.appendChild(modal);
+  scrim.classList.add('on');
 
-    var add = node('div');
-    add.style.display = 'flex';
-    add.style.gap = '8px';
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.placeholder = placeholder;
-    input.style.flex = '1';
-    var go = node('button', 'sm', 'Add');
-    go.type = 'button';
-    function commit() {
-      var v = input.value.trim().replace(/[^0-9@a-z]/gi, '');
-      if (!v) return;
-      var next = current.concat([v]);
-      onSave(next, function () { current = current.slice(); paint(); });
-      current = next;
-      paint();
-    }
-    go.addEventListener('click', commit);
-    input.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') commit(); });
-    add.appendChild(input);
-    add.appendChild(go);
-    wrap.appendChild(add);
+  function dismiss() {
+    scrim.classList.remove('on');
+    clear(scrim);
+    document.removeEventListener('keydown', onKey);
   }
+  function onKey(ev) { if (ev.key === 'Escape') dismiss(); }
+  close.addEventListener('click', dismiss);
+  scrim.addEventListener('click', function (ev) { if (ev.target === scrim) dismiss(); });
+  document.addEventListener('keydown', onKey);
 
-  paint();
-  return wrap;
+  build(body, modal, dismiss);
+  var first = modal.querySelector('input, button');
+  if (first) first.focus();
+  return dismiss;
+}
+
+/**
+ * A field that summarises a list and opens it in a modal.
+ *
+ * Inline editors for five separate lists turned Settings into a column of
+ * boxes you had to scroll past to reach anything else. The summary is what an
+ * operator reads; the list is what they occasionally change.
+ */
+function listField(parent, name, hint, values, placeholder, help, onSave) {
+  var current = values.slice();
+  var summary = node('div', 'summary');
+  var count = node('span', 'value');
+  var edit = node('button', 'sm', 'Edit');
+  edit.type = 'button';
+
+  function label() {
+    count.textContent = current.length === 0 ? 'none' : plural(current.length, 'entry', 'entries');
+  }
+  label();
+  summary.appendChild(count);
+  summary.appendChild(edit);
+
+  edit.addEventListener('click', function () {
+    openModal(name, help, function (body) {
+      var list = node('div');
+
+      function paint() {
+        clear(list);
+        if (!current.length) list.appendChild(node('p', 'hint', 'Nothing here yet.'));
+        current.forEach(function (v, i) {
+          var row = node('div', 'entry');
+          row.appendChild(node('span', 'value', v));
+          var rm = node('button', 'sm danger', 'Remove');
+          rm.type = 'button';
+          rm.addEventListener('click', function () {
+            var before = current.slice();
+            current = current.slice(0, i).concat(current.slice(i + 1));
+            paint(); label();
+            onSave(current, function () { current = before; paint(); label(); });
+          });
+          row.appendChild(rm);
+          list.appendChild(row);
+        });
+
+        var adder = node('div', 'adder');
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = placeholder;
+        var add = node('button', 'primary', 'Add');
+        add.type = 'button';
+        function commit() {
+          var v = input.value.trim().replace(/[^0-9@a-z]/gi, '');
+          if (!v) return;
+          if (current.indexOf(v) >= 0) { toast('Already in the list.'); return; }
+          var before = current.slice();
+          current = current.concat([v]);
+          input.value = '';
+          paint(); label();
+          onSave(current, function () { current = before; paint(); label(); });
+        }
+        add.addEventListener('click', commit);
+        input.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') commit(); });
+        adder.appendChild(input);
+        adder.appendChild(add);
+        list.appendChild(adder);
+      }
+
+      paint();
+      body.appendChild(list);
+    });
+  });
+
+  field(parent, name, hint, summary);
 }
 
 function numberControl(value, min, max, onSave) {
@@ -662,25 +711,25 @@ async function renderSettings() {
       saveSettings({ audience: { everyone: on } }, function () { input.checked = !on; });
     }));
 
-  field(audience, 'Allowed numbers', 'Consulted when not open to everyone. Bare international digits.',
-    listEditor(s.audience.numbers, 'e.g. 15551234567', function (next, revert) {
-      saveSettings({ audience: { numbers: next } }, revert);
-    }));
+  listField(audience, 'Allowed numbers', 'Consulted when not open to everyone.',
+    s.audience.numbers, 'e.g. 15551234567',
+    'Bare international digits — no plus sign, no spaces. Changes save as you make them.',
+    function (next, revert) { saveSettings({ audience: { numbers: next } }, revert); });
 
-  field(audience, 'Allowed linked ids', 'WhatsApp often delivers a sender as a @lid with no number attached. Copy the value from a refusal in the Log.',
-    listEditor(s.audience.jids, 'e.g. 111111111111111@lid', function (next, revert) {
-      saveSettings({ audience: { jids: next } }, revert);
-    }));
+  listField(audience, 'Allowed linked ids', 'For senders WhatsApp delivers without a number.',
+    s.audience.jids, 'e.g. 111111111111111@lid',
+    'WhatsApp increasingly delivers a sender as a @lid with no phone number attached, and a numbers-only list can never match them. Copy the value from a refusal on the Log page.',
+    function (next, revert) { saveSettings({ audience: { jids: next } }, revert); });
 
-  field(audience, 'Operator numbers', 'Who may run ! commands and receives alerts. Never widened by the switch above.',
-    listEditor(s.operators.numbers, 'bare digits', function (next, revert) {
-      saveSettings({ operators: { numbers: next } }, revert);
-    }));
+  listField(audience, 'Operator numbers', 'Who may run ! commands and receives alerts.',
+    s.operators.numbers, 'bare digits',
+    'Never widened by "open to anyone" — that would hand a stranger the ability to hold delivery and read state.',
+    function (next, revert) { saveSettings({ operators: { numbers: next } }, revert); });
 
-  field(audience, 'Operator linked ids', 'The same people, as WhatsApp actually delivers them.',
-    listEditor(s.operators.jids, 'digits or @lid', function (next, revert) {
-      saveSettings({ operators: { jids: next } }, revert);
-    }));
+  listField(audience, 'Operator linked ids', 'The same people, as WhatsApp actually delivers them.',
+    s.operators.jids, 'digits or @lid',
+    'An operator whose commands are silently ignored has no way into their own system, so this matters more than the numbers list.',
+    function (next, revert) { saveSettings({ operators: { jids: next } }, revert); });
   p.appendChild(audience);
 
   // ── Groups ────────────────────────────────────────────────────────────────
@@ -701,10 +750,10 @@ async function renderSettings() {
     modeSeg.appendChild(b);
   });
   field(groups, 'Group mode', 'observe delivers every message so the agent can react; it is the expensive one — every message becomes a model call.', modeSeg);
-  field(groups, 'Trigger words', 'Used only in trigger mode. A group message containing one of these is answered.',
-    listEditor(s.groups.triggers || [], 'e.g. juan', function (next, revert) {
-      saveSettings({ groups: { triggers: next } }, revert);
-    }));
+  listField(groups, 'Trigger words', 'Used only in trigger mode.',
+    s.groups.triggers || [], 'e.g. juan',
+    'A group message containing one of these is answered. Matching is case-insensitive.',
+    function (next, revert) { saveSettings({ groups: { triggers: next } }, revert); });
   p.appendChild(groups);
 
   // ── Reach ─────────────────────────────────────────────────────────────────
