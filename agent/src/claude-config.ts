@@ -57,8 +57,20 @@ export function seedClaudeConfig(projectDir: string): void {
     hasCompletedProjectOnboarding: true,
   };
 
+  // Claude Code asks whether to trust an API key it finds in the environment,
+  // and defaults to "No (recommended)". That default is right for a laptop and
+  // wrong here: the key was put there deliberately by the compose file, and
+  // there is nobody to answer. Approvals are recorded by the key's last twenty
+  // characters, so only that suffix is ever written down.
+  const apiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
+  const responses =
+    (config['customApiKeyResponses'] as { approved?: string[]; rejected?: string[] } | undefined) ?? {};
+  const approved = new Set(responses.approved ?? []);
+  if (apiKey.length >= 20) approved.add(apiKey.slice(-20));
+
   const seeded: Record<string, unknown> = {
     ...config,
+    customApiKeyResponses: { approved: [...approved], rejected: responses.rejected ?? [] },
     // A theme must be chosen or the picker blocks the prompt. Nobody is looking
     // at this terminal, so the value is arbitrary; having one is not.
     theme: config['theme'] ?? 'dark',

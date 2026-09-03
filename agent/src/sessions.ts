@@ -44,19 +44,26 @@ const WORKING = /esc to interrupt/i;
  * message ends up typed but never submitted, which looks exactly like a
  * delivered message that was simply ignored.
  */
-const DIALOGS: ReadonlyArray<readonly [RegExp, string]> = [
-  [/Is this a project you created or one you trust|Yes, I trust this folder/i, 'Enter'],
-  [/How is Claude doing this session/i, '0'],
+/**
+ * Each entry is a pattern and the *sequence* of keys that clears it.
+ *
+ * A sequence, not a key, because at least one of these needs two: the API-key
+ * prompt defaults to "No (recommended)", so it takes an Up to move the
+ * selection and then an Enter to confirm. An earlier single-key version pressed
+ * Up forever and never confirmed, which reads in the log as a dialog that will
+ * not die — and looks from outside like an agent silently ignoring people.
+ */
+const DIALOGS: ReadonlyArray<readonly [RegExp, readonly string[]]> = [
+  [/Is this a project you created or one you trust|Yes, I trust this folder/i, ['Enter']],
+  [/How is Claude doing this session/i, ['0']],
   // First-run onboarding. `claude-config.ts` answers these in the config file
   // before the spawn, which is deterministic; these patterns are the backstop
   // for a release that adds a screen the config does not cover. Accepting the
-  // highlighted default is right for all of them — the questions are cosmetic.
-  [/Choose the text style|Syntax theme:|Let's get started/i, 'Enter'],
-  [/Press Enter to continue|to continue…/i, 'Enter'],
-  // "Detected a custom API key in your environment — use it?" defaults to
-  // "No (recommended)", so Enter is the wrong key: Up selects Yes first.
-  // claude-config.ts pre-approves the key, making this the backstop.
-  [/Detected a custom API key in your environment/i, 'Up'],
+  // highlighted default is right for these — the questions are cosmetic.
+  [/Choose the text style|Syntax theme:|Let's get started/i, ['Enter']],
+  [/Press Enter to continue|to continue…/i, ['Enter']],
+  // The exception: here the highlighted default is the wrong answer.
+  [/Detected a custom API key in your environment/i, ['Up', 'Enter']],
 ];
 
 /**
@@ -215,8 +222,11 @@ export class SessionPool {
       const screen = await capture(window, 40);
       const hit = DIALOGS.find(([pattern]) => pattern.test(screen));
       if (!hit) return;
-      log('session.dialog', { window, dismissedWith: hit[1] });
-      await sendKey(window, hit[1]);
+      log('session.dialog', { window, dismissedWith: hit[1].join(' ') });
+      for (const key of hit[1]) {
+        await sendKey(window, key);
+        await sleep(200);
+      }
       await sleep(800);
     }
     log('session.dialogStuck', { window, note: 'a dialog is still on screen after three attempts' });
