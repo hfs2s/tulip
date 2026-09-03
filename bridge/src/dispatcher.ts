@@ -56,6 +56,12 @@ export class Dispatcher extends EventEmitter {
   private readonly ready: string[] = [];
   private pumping = false;
   private inFlight: { turnId: string; chatKey: string; startedAt: number } | null = null;
+  /**
+   * The newest inbound message per chat, so a `react` action has something to
+   * point at. Deliberately in memory only: a reaction to a message from before
+   * the last restart is not worth persisting state for.
+   */
+  private readonly lastInbound = new Map<string, { id: string; participant?: string }>();
 
   constructor(private readonly deps: DispatcherDeps) {
     super();
@@ -164,6 +170,13 @@ export class Dispatcher extends EventEmitter {
     list.push(queued);
     this.pending.set(chatKey, list);
     this.queue.add(chatKey, envelope);
+
+    this.lastInbound.set(
+      chatKey,
+      envelope.isGroup && envelope.senderIds[0] !== undefined
+        ? { id: envelope.id, participant: envelope.senderIds[0] }
+        : { id: envelope.id },
+    );
 
     log('msg.queued', { chatKey, chars: envelope.text.length, waiting: list.length });
     void wa.readReceipt(envelope.chatJid, envelope.id, envelope.isGroup ? envelope.senderIds[0] : undefined);
@@ -326,6 +339,11 @@ export class Dispatcher extends EventEmitter {
       await sleep(500);
     }
     log('turn.noAck', { turnId, note: 'agent never acknowledged; continuing' });
+  }
+
+  /** The message a `react` action should attach to, if there is one. */
+  lastMessageIn(chatKey: string): { id: string; participant?: string } | null {
+    return this.lastInbound.get(chatKey) ?? null;
   }
 
   /** For the panel and the watchdog. */

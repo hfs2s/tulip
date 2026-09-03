@@ -257,10 +257,14 @@ export class WhatsApp extends EventEmitter {
   async sendFile(chatJid: string, file: string, mimetype: string, caption: string | null): Promise<void> {
     const buffer = readFileSync(file);
     const socket = this.require();
+    // Spread rather than `caption: caption ?? undefined`: under
+    // exactOptionalPropertyTypes an explicit `undefined` is not the same as an
+    // absent key, and Baileys declares the property as optional-not-nullable.
+    const withCaption = caption === null ? {} : { caption };
     if (mimetype.startsWith('image/')) {
-      await socket.sendMessage(chatJid, { image: buffer, caption: caption ?? undefined });
+      await socket.sendMessage(chatJid, { image: buffer, ...withCaption });
     } else if (mimetype.startsWith('video/')) {
-      await socket.sendMessage(chatJid, { video: buffer, caption: caption ?? undefined });
+      await socket.sendMessage(chatJid, { video: buffer, ...withCaption });
     } else if (mimetype.startsWith('audio/')) {
       await socket.sendMessage(chatJid, { audio: buffer, mimetype });
     } else {
@@ -274,7 +278,10 @@ export class WhatsApp extends EventEmitter {
 
   async react(chatJid: string, messageId: string, emoji: string, participant?: string): Promise<void> {
     await this.require().sendMessage(chatJid, {
-      react: { text: emoji, key: { remoteJid: chatJid, id: messageId, fromMe: false, participant } },
+      react: {
+        text: emoji,
+        key: { remoteJid: chatJid, id: messageId, fromMe: false, participant: participant ?? null },
+      },
     });
   }
 
@@ -290,7 +297,7 @@ export class WhatsApp extends EventEmitter {
 
   async readReceipt(chatJid: string, id: string, participant?: string): Promise<void> {
     try {
-      await this.require().readMessages([{ remoteJid: chatJid, id, participant }]);
+      await this.require().readMessages([{ remoteJid: chatJid, id, participant: participant ?? null }]);
     } catch {
       /* best effort */
     }

@@ -217,7 +217,13 @@ export async function toEnvelope(
   const chatJid = bare(message.key.remoteJid) ?? 'unknown@s.whatsapp.net';
   const group = isGroup(chatJid);
   const senderJid = bare(group ? (message.key.participant ?? message.participant) : message.key.remoteJid);
-  const senderPn = message.key.senderPn ? bare(message.key.senderPn) : null;
+  // `senderPn` is present on the wire but absent from this Baileys version's
+  // key type. It carries the phone-number identity for a sender WhatsApp
+  // delivered as a bare @lid, which is the difference between an allowlist
+  // entry matching and silently not matching — so it is read defensively
+  // rather than dropped for want of a declaration.
+  const senderPnRaw = (message.key as { senderPn?: unknown }).senderPn;
+  const senderPn = typeof senderPnRaw === 'string' ? bare(senderPnRaw) : null;
   const content = unwrap(message.message);
   const ts = (Number(message.messageTimestamp) || Math.floor(Date.now() / 1000)) * 1000;
   const id = message.key.id ?? `${ts}`;
