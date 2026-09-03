@@ -172,11 +172,20 @@ cd tulip
 cp .env.example .env                 # add ANTHROPIC_API_KEY
 cp config.example.json config.json   # add your operator number
 
+scripts/preflight.sh                 # host prerequisites and configuration
 docker compose build
 docker compose up -d
+scripts/verify-containment.sh        # 17 assertions against the running containers
 
-docker compose logs -f tulip-bridge  # a QR code appears on first run
+docker compose logs -f bridge        # a QR code appears on first run
 ```
+
+`preflight.sh` checks what the host must provide and the compose file merely
+asks for — Docker discards a resource limit it cannot enforce with one warning
+line, so a cap can be absent for months while the configuration still claims it.
+`verify-containment.sh` checks the running containers: no route out, no DNS, no
+credentials, read-only root, no path to privilege. **Both should pass before the
+number is given to anyone.**
 
 Scan the QR with the WhatsApp account Tulip will *be* — a number of its own, not
 a personal one. See [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for pairing,
