@@ -1032,6 +1032,56 @@ async function refresh() {
 // Optional by design: the bundle is vendored at image build time and is simply
 // absent in a development tree, so this is wrapped rather than assumed. The
 // library already pauses itself when the tab is hidden.
+/**
+ * The page's paper surface.
+ *
+ * Paper Shaders' `paperTexture`, at the settings chosen in their editor. Speed 0
+ * because this is a static surface — it draws once and then holds, so it costs
+ * one frame rather than a render loop, which is what makes a full-viewport
+ * canvas an acceptable way to carry a background texture.
+ *
+ * Not gated on `prefers-reduced-motion`, unlike the masthead's gradient: there
+ * is no motion here to reduce, and a person who asked for less animation still
+ * wants the page to have its surface.
+ */
+function mountPaper() {
+  try {
+    if (typeof PaperShaders === 'undefined' || !PaperShaders.ShaderMount) return;
+    if (!PaperShaders.paperTextureFragmentShader) return;
+    var host = el('paper');
+    if (!host) return;
+
+    var uniforms = Object.assign({}, PaperShaders.defaultPatternSizing || {}, {
+      u_image: undefined,
+      u_imageAspectRatio: 1,
+      u_colorBack: [0, 0, 0, 1],
+      u_colorFront: [0.047, 0.051, 0.055, 1],
+      u_contrast: 0.17,
+      u_roughness: 0.68,
+      u_fiber: 0.3,
+      u_fiberSize: 0.13,
+      u_crumples: 0,
+      u_crumpleSize: 0.01,
+      u_folds: 0,
+      u_foldCount: 1,
+      u_drops: 0.07,
+      u_fade: 0,
+      u_seed: 5.8,
+      u_scale: 0.6,
+      u_fit: 2
+    });
+
+    // The shader samples a pre-computed randomiser rather than generating noise
+    // per pixel. Without it the fibre and speckle layers have nothing to read.
+    if (PaperShaders.getShaderNoiseTexture) {
+      var noise = PaperShaders.getShaderNoiseTexture();
+      if (noise) uniforms.u_noiseTexture = noise;
+    }
+
+    new PaperShaders.ShaderMount(host, PaperShaders.paperTextureFragmentShader, uniforms, undefined, 0);
+  } catch (err) { /* a surface is never worth a broken page */ }
+}
+
 function mountShader() {
   try {
     if (typeof PaperShaders === 'undefined' || !PaperShaders.ShaderMount) return;
@@ -1070,6 +1120,7 @@ function mountTopbarMark() {
 buildNav();
 mountTopbarMark();
 wireNavToggle();
+mountPaper();
 mountShader();
 go((location.hash || '#/overview').replace('#/', '') || 'overview');
 window.addEventListener('hashchange', function () { go((location.hash || '#/overview').replace('#/', '')); });
