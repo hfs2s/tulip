@@ -44,6 +44,13 @@ export async function serverRunning(): Promise<boolean> {
   return (await tmux(['has-session', '-t', `=${SESSION}`])).ok;
 }
 
+/** Every window in the session, in tmux's own order. */
+export async function listWindows(): Promise<string[]> {
+  const result = await tmux(['list-windows', '-t', `=${SESSION}`, '-F', '#{window_name}']);
+  if (!result.ok) return [];
+  return result.stdout.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+}
+
 export async function windowExists(window: string): Promise<boolean> {
   const result = await tmux(['list-windows', '-t', `=${SESSION}`, '-F', '#{window_name}']);
   if (!result.ok) return false;

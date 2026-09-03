@@ -32,7 +32,12 @@ COPY shared ./shared
 COPY bridge ./bridge
 COPY agent ./agent
 COPY egress ./egress
+COPY scripts ./scripts
 RUN npx tsc --build --force
+# The panel serves its own fonts and shader bundle rather than pulling them from
+# a CDN, which is what lets its CSP stay at 'self' on a page that renders
+# message text written by strangers. Vendored here, beside the compiled bridge.
+RUN node scripts/build-panel-assets.mjs
 
 # ─── Runtime dependencies only ────────────────────────────────────────────────
 FROM base AS prod-deps

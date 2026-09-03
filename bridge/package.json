@@ -7,16 +7,20 @@
   "license": "MIT",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc --build && node ../scripts/build-panel-assets.mjs",
     "start": "node dist/index.js"
   },
   "dependencies": {
     "@tulip/shared": "*",
     "baileys": "7.0.0-rc13",
     "qrcode-terminal": "^0.12.0",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "@fontsource-variable/onest": "^5.2.5",
+    "@fontsource-variable/inter": "^5.2.5",
+    "@paper-design/shaders": "0.0.80"
   },
   "devDependencies": {
-    "@types/qrcode-terminal": "^0.12.2"
+    "@types/qrcode-terminal": "^0.12.2",
+    "esbuild": "^0.24.0"
   }
 }

@@ -298,6 +298,51 @@ export const ToolResult = z
   })
   .strict();
 
+/**
+ * What the operator's terminal is asking for.
+ *
+ * Written by the bridge, read by the agent. The agent captures a pane only
+ * while `watchUntil` is in the future, so nobody pays for a screen capture loop
+ * that no human is looking at.
+ *
+ * `keySeq` is what makes key delivery exactly-once across a polling boundary:
+ * the agent records the last sequence it applied and ignores anything at or
+ * below it, so a file read twice does not type twice.
+ */
+export const TerminalRequest = z
+  .object({
+    /** tmux window to show — `c-<chatKey>`, or null for whichever is active. */
+    window: z.string().max(64).nullable(),
+    /** Capture while this is in the future. ISO 8601. */
+    watchUntil: z.string().datetime(),
+    /** Monotonic. The agent applies keys only when this exceeds what it has seen. */
+    keySeq: z.number().int().nonnegative(),
+    /**
+     * Keys to type, in tmux `send-keys` terms — literal text, or a key name
+     * such as `Enter` or `C-c`.
+     *
+     * This types into a live conversation with a member of the public. It is
+     * gated by the panel's token and by whatever authenticates in front of it,
+     * and the panel says so before it will send anything.
+     */
+    keys: z.array(z.object({ text: z.string().max(2000), literal: z.boolean() }).strict()).max(32),
+  })
+  .strict();
+
+/** The captured pane, written by the agent for the panel to display. */
+export const TerminalScreen = z
+  .object({
+    at: z.string().datetime(),
+    window: z.string().max(64).nullable(),
+    /** Every window the agent currently has open, for the picker. */
+    windows: z.array(z.string().max(64)).max(64),
+    /** Rendered pane text. Capped: this is displayed, not stored. */
+    content: z.string().max(40_000),
+    /** The highest keySeq the agent has applied. Lets the panel show delivery. */
+    keySeq: z.number().int().nonnegative(),
+  })
+  .strict();
+
 // ─── Inferred types ──────────────────────────────────────────────────────────
 
 export type ChatKey = z.infer<typeof ChatKey>;
@@ -310,3 +355,5 @@ export type CurrentTurn = z.infer<typeof CurrentTurn>;
 export type OutboxAction = z.infer<typeof OutboxAction>;
 export type AgentStatus = z.infer<typeof AgentStatus>;
 export type ToolResult = z.infer<typeof ToolResult>;
+export type TerminalRequest = z.infer<typeof TerminalRequest>;
+export type TerminalScreen = z.infer<typeof TerminalScreen>;

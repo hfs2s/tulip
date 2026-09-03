@@ -41,6 +41,24 @@ export const inPaths = {
    */
   results: `${IN_DIR}/results`,
   result: (actionId: string) => `${IN_DIR}/results/${actionId}.json`,
+
+  /**
+   * The operator's terminal request: which window to show, and keys to type.
+   *
+   * A terminal is bytes in both directions, and the two halves of Tulip already
+   * pass bytes in both directions — through these volumes. So the terminal uses
+   * that rather than a socket. Docker will not publish a port into an
+   * `internal: true` network (verified: an identical server answers on a normal
+   * network and not on this one), and proxying ttyd through the bridge would
+   * hand the bridge a route to the agent and the agent a route to the container
+   * holding the WhatsApp credentials — which is the one thing the topology
+   * exists to prevent.
+   *
+   * What this buys is a pane view and key injection rather than a true PTY. It
+   * is what Iris's terminal was before it grew a websocket, and it is what an
+   * operator actually needs: watch the agent work, and take over when you want.
+   */
+  terminal: `${IN_DIR}/terminal.json`,
 } as const;
 
 /** Outbound: written by the agent, consumed and deleted by the bridge. */
@@ -57,4 +75,7 @@ export const outPaths = {
   file: (name: string) => `${OUT_DIR}/files/${name}`,
   /** The agent's self-report. Advisory; never used for a delivery decision. */
   status: `${OUT_DIR}/status.json`,
+
+  /** The captured pane, written only while an operator is watching. */
+  screen: `${OUT_DIR}/screen.json`,
 } as const;

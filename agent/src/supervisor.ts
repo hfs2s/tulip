@@ -14,7 +14,16 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AgentStatus, CurrentTurn, InboxBatch, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
+import {
+  AgentStatus,
+  CurrentTurn,
+  InboxBatch,
+  TerminalRequest,
+  TerminalScreen,
+  inPaths,
+  outPaths,
+  writeJsonAtomic,
+} from '@tulip/shared';
 import type { CurrentTurn as CurrentTurnType } from '@tulip/shared';
 import { log } from './log.js';
 import { SessionPool, type Session } from './sessions.js';
@@ -198,6 +207,59 @@ function stripEmptyEnv(): void {
   }
 }
 
+/** The highest key sequence already typed. Makes delivery exactly-once. */
+let appliedKeySeq = 0;
+
+/**
+ * Serve the operator's terminal.
+ *
+ * Captures a pane only while somebody is watching, so an unattended deployment
+ * does no work for it. Keys are applied at most once: the request carries a
+ * monotonic sequence and anything at or below what has been applied is ignored,
+ * which is what makes a polled file safe to read twice.
+ */
+async function serveTerminal(): Promise<void> {
+  let request: TerminalRequest;
+  try {
+    const parsed = TerminalRequest.safeParse(JSON.parse(readFileSync(inPaths.terminal, 'utf8')));
+    if (!parsed.success) return;
+    request = parsed.data;
+  } catch {
+    return; // nobody is watching
+  }
+
+  if (Date.parse(request.watchUntil) < Date.now()) return;
+
+  const { listWindows, capture, sendKey, sendLine } = await import('./tmux.js');
+  const windows = await listWindows();
+  const window = request.window !== null && windows.includes(request.window)
+    ? request.window
+    : (windows[0] ?? null);
+
+  if (request.keySeq > appliedKeySeq && window !== null) {
+    for (const key of request.keys) {
+      if (key.literal) await sendLine(window, key.text);
+      else await sendKey(window, key.text);
+    }
+    appliedKeySeq = request.keySeq;
+    log('terminal.keys', { window, count: request.keys.length, seq: request.keySeq });
+  }
+
+  const screen = TerminalScreen.safeParse({
+    at: new Date().toISOString(),
+    window,
+    windows,
+    content: window === null ? '(no session is running)' : (await capture(window, 200)).slice(-40_000),
+    keySeq: appliedKeySeq,
+  });
+  if (!screen.success) return;
+  try {
+    writeJsonAtomic(outPaths.screen, screen.data, 0o644);
+  } catch {
+    /* the terminal is a convenience; never let it fail a turn */
+  }
+}
+
 async function main(): Promise<void> {
   stripEmptyEnv();
   log('supervisor.start', {
@@ -209,6 +271,9 @@ async function main(): Promise<void> {
   publishStatus();
 
   setInterval(publishStatus, STATUS_MS).unref();
+  setInterval(() => {
+    void serveTerminal().catch((err: unknown) => log('terminal.error', { err: String((err as Error).message) }));
+  }, 1000).unref();
   setInterval(() => {
     void pool.reap(IDLE_REAP_MS);
   }, 60_000).unref();

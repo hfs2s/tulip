@@ -1,52 +1,65 @@
 /**
- * The operator's control panel.
+ * The operator's control panel — server, authentication, and routing.
  *
- * Small, dependency-free, and read-mostly. Its security model is one bearer
- * token, so the hardening is concentrated on not leaking it and not letting it
- * be guessed:
+ * Its security model is one bearer token, so the hardening is concentrated on
+ * not leaking it and not letting it be guessed:
  *
- *   - **Published on the host's loopback only.** Note the layer: the process
- *     binds 0.0.0.0 *inside its container*, and `docker-compose.yml` publishes
- *     it as `127.0.0.1:8791:8791`. Binding loopback inside the container would
- *     not be safer, it would make the panel unreachable — Docker forwards a
- *     published port to the container's ethernet address, never its loopback.
- *     Reaching the panel from another machine means an SSH tunnel, or an
- *     explicit decision to publish it with something authenticating in front.
+ *   - **Published on one interface, chosen deliberately.** Note the layer: the
+ *     process binds 0.0.0.0 *inside its container*, and `docker-compose.yml`
+ *     publishes it wherever `TULIP_PANEL_BIND` says. Binding loopback inside
+ *     the container would not be safer, it would make the panel unreachable —
+ *     Docker forwards a published port to the container's ethernet address,
+ *     never its loopback.
  *   - **Constant-time comparison, against a properly parsed cookie.** Iris
  *     compares with `cookie.includes('iris_token=' + t)`, which is both timing-
  *     variable and substring-matched: a cookie named `xiris_token` satisfies it.
  *   - **No endpoint writes configuration.** Who may talk to the agent is
  *     decided by a file on disk, not by a browser form. That removes the entire
- *     class of "the panel was exposed and someone opened the allowlist".
+ *     class of "the panel was reachable and someone opened the allowlist".
  *   - **Failed authentication is rate-limited per address**, so the token
- *     cannot be brute-forced from the network it is bound to.
+ *     cannot be brute-forced from whatever network it is published on.
  *
- * There is deliberately no terminal here. Iris proxies ttyd so an operator can
- * type into the live session from a browser; that requires the bridge to be
- * able to reach the agent over the network, which would undo the disjoint-
- * networks property that the rest of the design rests on. `docker compose exec`
- * is the supported way in.
+ * Everything served is same-origin: the page, its script, the shader bundle,
+ * the fonts and the icon. That is what lets the CSP stay at `'self'` on a page
+ * which renders message text written by strangers.
+ *
+ * **The terminal.** Iris proxies ttyd over a socket. Tulip cannot: the bridge
+ * and the agent share no network, Docker will not publish a port into an
+ * `internal` network, and proxying a shell through the bridge would hand the
+ * agent a route to the container holding the WhatsApp credentials. So the
+ * terminal is a file exchange over the volumes that already carry everything
+ * else — see `panel-api.ts`.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { writeFileAtomic } from '@tulip/shared';
-import type { ChatRegistry } from './chats.js';
-import type { Config } from './config.js';
-import type { Dispatcher } from './dispatcher.js';
 import { feed } from './feed.js';
-import { readStatus } from './handoff.js';
 import { log } from './log.js';
 import { paths } from './paths.js';
-import type { Limiter } from './ratelimit.js';
-import { state } from './state.js';
-import type { WhatsApp } from './whatsapp.js';
-import { PANEL_HTML, PANEL_JS } from './panel-html.js';
+import { FAVICON, PANEL_HTML, PANEL_JS } from './panel-html.js';
+import {
+  chatHistory,
+  logTail,
+  mediaFile,
+  mediaList,
+  runAction,
+  send,
+  settingsView,
+  snapshot,
+  terminalKeys,
+  terminalScreen,
+  terminalWatch,
+  type ApiDeps,
+} from './panel-api.js';
 
 const COOKIE = 'tulip_token';
 /** Failed authentications per address before it is refused outright. */
 const MAX_FAILURES = 10;
 const FAILURE_WINDOW_MS = 60_000;
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Stable across restarts, so a bookmarked URL keeps working. */
 function loadToken(): string {
@@ -86,15 +99,41 @@ function cookieValue(header: string | undefined, name: string): string | null {
   return null;
 }
 
-export interface PanelDeps {
-  readonly config: Config;
-  readonly wa: WhatsApp;
-  readonly chats: ChatRegistry;
-  readonly limiter: Limiter;
-  readonly dispatcher: () => Dispatcher;
+function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+      if (raw.length > 64_000) reject(new Error('body too large'));
+    });
+    req.on('end', () => {
+      try {
+        resolve(raw ? (JSON.parse(raw) as Record<string, unknown>) : {});
+      } catch {
+        reject(new Error('body must be JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
 }
 
-export function startPanel(deps: PanelDeps): Server | null {
+/**
+ * Read a build artefact sitting beside the compiled panel.
+ *
+ * The shader bundle and the fonts are vendored at image build time rather than
+ * loaded from a CDN, which is the only way the CSP can stay at `'self'`. Both
+ * are absent in a development tree, and the page is written to work without
+ * them.
+ */
+function asset(name: string): Buffer | null {
+  try {
+    return readFileSync(join(HERE, name));
+  } catch {
+    return null;
+  }
+}
+
+export function startPanel(deps: ApiDeps): Server | null {
   if (!deps.config.panel.enabled) return null;
 
   const token = loadToken();
@@ -127,130 +166,140 @@ export function startPanel(deps: PanelDeps): Server | null {
   };
 
   const server = createServer((req, res) => {
-    const url = new URL(req.url ?? '/', 'http://panel.invalid');
-    const address = req.socket.remoteAddress ?? 'unknown';
+    void (async (): Promise<void> => {
+      const url = new URL(req.url ?? '/', 'http://panel.invalid');
+      const address = req.socket.remoteAddress ?? 'unknown';
 
-    // Applied to every response, authenticated or not. The panel renders
-    // message text written by strangers, so the CSP is the thing standing
-    // between that and script execution in an operator's browser.
-    const headers: Record<string, string> = {
-      'content-security-policy':
-        "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; " +
-        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-      'x-content-type-options': 'nosniff',
-      'referrer-policy': 'no-referrer',
-      'cache-control': 'no-store',
-    };
+      // Applied to every response, authenticated or not. The panel renders
+      // message text written by strangers, so this is what stands between that
+      // and script execution in an operator's browser. Everything it permits is
+      // same-origin.
+      const headers: Record<string, string> = {
+        'content-security-policy':
+          "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+          "font-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; " +
+          "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        'x-content-type-options': 'nosniff',
+        'referrer-policy': 'no-referrer',
+        'cache-control': 'no-store',
+      };
 
-    if (throttled(address)) {
-      res.writeHead(429, { ...headers, 'content-type': 'text/plain' }).end('too many attempts\n');
-      return;
-    }
-
-    if (!authenticate(req, url)) {
-      noteFailure(address);
-      res.writeHead(401, { ...headers, 'content-type': 'text/plain' })
-        .end(`add ?t=<token> — the token is in ${paths.panelToken} inside the bridge container\n`);
-      return;
-    }
-
-    // Move the token out of the URL as soon as it has been presented, so it
-    // stops appearing in the address bar and in any onward Referer.
-    if (url.searchParams.has('t')) {
-      headers['set-cookie'] = `${COOKIE}=${token}; Path=/; Max-Age=31536000; SameSite=Strict; HttpOnly`;
-    }
-
-    try {
-      if (url.pathname === '/') {
-        res.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8' }).end(PANEL_HTML);
+      if (throttled(address)) {
+        res.writeHead(429, { ...headers, 'content-type': 'text/plain' }).end('too many attempts\n');
+        return;
+      }
+      if (!authenticate(req, url)) {
+        noteFailure(address);
+        res
+          .writeHead(401, { ...headers, 'content-type': 'text/plain' })
+          .end(`add ?t=<token> — the token is in ${paths.panelToken} inside the bridge container\n`);
         return;
       }
 
-      if (url.pathname === '/panel.js') {
-        res.writeHead(200, { ...headers, 'content-type': 'text/javascript; charset=utf-8' }).end(PANEL_JS);
-        return;
+      // Move the token out of the URL as soon as it has been presented, so it
+      // stops appearing in the address bar and in any onward Referer.
+      if (url.searchParams.has('t')) {
+        headers['set-cookie'] = `${COOKIE}=${token}; Path=/; Max-Age=31536000; SameSite=Strict; HttpOnly`;
       }
 
-      if (url.pathname === '/api/state') {
-        const status = readStatus();
-        const snapshot = deps.dispatcher().snapshot();
-        const recent = feed.recent(500).filter((e) => e.ts > Date.now() - 24 * 3600 * 1000);
-        res.writeHead(200, { ...headers, 'content-type': 'application/json' }).end(
-          JSON.stringify({
-            now: Date.now(),
-            whatsapp: { connected: deps.wa.connected, name: deps.wa.me?.name ?? null },
-            agent: {
-              reporting: status !== null,
-              busyTurn: status?.busyTurn ?? null,
-              fatal: status?.fatal ?? null,
-              sessions: status?.sessions.length ?? 0,
-            },
-            audience: { everyone: deps.config.audience.everyone, groups: deps.config.groups.enabled },
-            hold: state.holdInfo(),
-            queue: snapshot,
-            today: {
-              in: recent.filter((e) => e.kind === 'in').length,
-              accepted: recent.filter((e) => e.kind === 'in' && e.accepted === true).length,
-              refused: recent.filter((e) => e.kind === 'in' && e.accepted === false).length,
-              out: recent.filter((e) => e.kind === 'out').length,
-            },
-            chats: deps.chats
-              .all()
-              .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
-              .slice(0, 30)
-              .map((c) => ({
-                chatKey: c.chatKey,
-                name: c.name,
-                isGroup: c.isGroup,
-                blocked: c.blocked,
-                messages: c.messages,
-                lastSeenAt: c.lastSeenAt,
-                turnsToday: deps.limiter.stats(c.chatKey)?.turnsToday ?? 0,
-              })),
-          }),
-        );
-        return;
-      }
+      const num = (name: string, fallback: number, cap: number): number =>
+        Math.min(Math.max(Number(url.searchParams.get(name)) || fallback, 1), cap);
 
-      if (url.pathname === '/api/feed') {
-        const n = Math.min(Number(url.searchParams.get('n')) || 100, 500);
-        res.writeHead(200, { ...headers, 'content-type': 'application/json' }).end(JSON.stringify(feed.recent(n)));
-        return;
-      }
+      try {
+        if (url.pathname === '/') {
+          res.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8' }).end(PANEL_HTML);
+          return;
+        }
+        if (url.pathname === '/panel.js') {
+          res.writeHead(200, { ...headers, 'content-type': 'text/javascript; charset=utf-8' }).end(PANEL_JS);
+          return;
+        }
+        if (url.pathname === '/favicon.svg') {
+          res
+            .writeHead(200, { ...headers, 'content-type': 'image/svg+xml', 'cache-control': 'private, max-age=86400' })
+            .end(FAVICON);
+          return;
+        }
+        if (url.pathname === '/shaders.js') {
+          const bundle = asset('shaders.js');
+          if (!bundle) {
+            // Absent in a development tree. The page checks and skips the effect.
+            res.writeHead(404, { ...headers, 'content-type': 'text/javascript' }).end('/* not bundled */');
+            return;
+          }
+          res
+            .writeHead(200, { ...headers, 'content-type': 'text/javascript', 'cache-control': 'private, max-age=86400' })
+            .end(bundle);
+          return;
+        }
+        if (/^\/fonts\/[A-Za-z0-9._-]+\.woff2$/.test(url.pathname)) {
+          const file = asset(join('fonts', url.pathname.slice('/fonts/'.length)));
+          if (!file) {
+            res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
+            return;
+          }
+          res
+            .writeHead(200, { ...headers, 'content-type': 'font/woff2', 'cache-control': 'private, max-age=604800' })
+            .end(file);
+          return;
+        }
 
-      if (url.pathname === '/api/stream') {
-        res.writeHead(200, {
-          ...headers,
-          'content-type': 'text/event-stream',
-          connection: 'keep-alive',
-        });
-        res.write(': connected\n\n');
-        streams.add(res);
-        const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
-        req.on('close', () => {
-          clearInterval(ping);
-          streams.delete(res);
-        });
-        return;
-      }
+        if (url.pathname === '/api/state') return send(res, headers, 200, snapshot(deps));
+        if (url.pathname === '/api/feed') return send(res, headers, 200, feed.recent(num('n', 120, 500)));
+        if (url.pathname === '/api/chat') {
+          return send(res, headers, 200, chatHistory(deps, url.searchParams.get('key') ?? '', num('n', 200, 1000)));
+        }
+        if (url.pathname === '/api/media/list') return send(res, headers, 200, mediaList(deps, num('n', 120, 500)));
+        if (url.pathname === '/api/media') {
+          mediaFile(res, headers, url.searchParams.get('key') ?? '', url.searchParams.get('name') ?? '');
+          return;
+        }
+        if (url.pathname === '/api/logs') return send(res, headers, 200, logTail(num('n', 200, 1000)));
+        if (url.pathname === '/api/settings') return send(res, headers, 200, settingsView(deps));
 
-      // The only mutating endpoints. Note what is absent: nothing here edits
-      // the audience, the limits, or anything else that decides who may reach
-      // the agent. Those live in a file, deliberately.
-      if (req.method === 'POST' && url.pathname.startsWith('/api/action/')) {
-        const action = url.pathname.slice('/api/action/'.length);
-        const key = url.searchParams.get('key') ?? '';
-        const result = runAction(deps, action, key);
-        res.writeHead(result.ok ? 200 : 400, { ...headers, 'content-type': 'application/json' })
-          .end(JSON.stringify(result));
-        return;
-      }
+        if (url.pathname === '/api/terminal' && req.method === 'GET') {
+          return send(res, headers, 200, terminalScreen());
+        }
+        if (url.pathname === '/api/terminal/watch' && req.method === 'POST') {
+          const body = await readBody(req);
+          const window = typeof body['window'] === 'string' ? body['window'] : null;
+          return send(res, headers, 200, terminalWatch(window, 90));
+        }
+        if (url.pathname === '/api/terminal/keys' && req.method === 'POST') {
+          const body = await readBody(req);
+          const window = typeof body['window'] === 'string' ? body['window'] : null;
+          const raw = Array.isArray(body['keys']) ? body['keys'] : [];
+          const keys = raw
+            .filter((k): k is Record<string, unknown> => typeof k === 'object' && k !== null)
+            .map((k) => ({ text: String(k['text'] ?? '').slice(0, 2000), literal: k['literal'] !== false }))
+            .filter((k) => k.text.length > 0)
+            .slice(0, 32);
+          return send(res, headers, 200, terminalKeys(window, keys));
+        }
 
-      res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
-    } catch (err) {
-      log('panel.error', { path: url.pathname, err: String((err as Error).message) });
-      res.writeHead(500, { ...headers, 'content-type': 'text/plain' }).end('internal error\n');
-    }
+        if (url.pathname === '/api/stream') {
+          res.writeHead(200, { ...headers, 'content-type': 'text/event-stream', connection: 'keep-alive' });
+          res.write(': connected\n\n');
+          streams.add(res);
+          const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
+          req.on('close', () => {
+            clearInterval(ping);
+            streams.delete(res);
+          });
+          return;
+        }
+
+        if (url.pathname.startsWith('/api/action/') && req.method === 'POST') {
+          const result = runAction(deps, url.pathname.slice('/api/action/'.length), url.searchParams.get('key') ?? '');
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+
+        res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
+      } catch (err) {
+        log('panel.error', { path: url.pathname, err: String((err as Error).message) });
+        res.writeHead(500, { ...headers, 'content-type': 'text/plain' }).end('internal error\n');
+      }
+    })();
   });
 
   feed.on('entry', (row: unknown) => {
@@ -273,31 +322,4 @@ export function startPanel(deps: PanelDeps): Server | null {
   });
 
   return server;
-}
-
-function runAction(deps: PanelDeps, action: string, key: string): { ok: boolean; message: string } {
-  switch (action) {
-    case 'hold':
-      state.setHold(true, 'panel');
-      feed.event('hold.on', 'delivery held from the panel');
-      return { ok: true, message: 'holding' };
-
-    case 'release':
-      state.setHold(false, 'panel');
-      feed.event('hold.off', 'delivery released from the panel');
-      void deps.dispatcher().pump();
-      return { ok: true, message: 'released' };
-
-    case 'block':
-    case 'unblock': {
-      if (!/^[0-9a-f]{16}$/.test(key)) return { ok: false, message: 'a 16-character chat key is required' };
-      if (!deps.chats.setBlocked(key, action === 'block')) return { ok: false, message: 'no such chat' };
-      deps.chats.flush();
-      feed.event(action === 'block' ? 'chat.blocked' : 'chat.unblocked', key);
-      return { ok: true, message: `${action}ed ${key}` };
-    }
-
-    default:
-      return { ok: false, message: `unknown action: ${action}` };
-  }
 }
