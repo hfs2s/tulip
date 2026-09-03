@@ -1,0 +1,49 @@
+{
+  "_comment": "Copy to config.json. That file is gitignored: it names real phone numbers, and this is a public repository. Every key is optional and every default is the restrictive one.",
+
+  "_audience": "everyone:true means anyone who messages this number is answered, and every inbound message becomes untrusted input to an agent holding a shell. That is the configuration Tulip is designed for and the one docs/THREAT-MODEL.md assumes. Set false to fall back to the numbers list.",
+  "audience": {
+    "everyone": true,
+    "numbers": []
+  },
+
+  "_operators": "Who may run ! control commands and who receives watchdog alerts. NEVER widened by audience.everyone. Bare international digits, no + and no spaces. Leave empty and you have no way to hold delivery or block someone from your phone.",
+  "operators": {
+    "numbers": ["15551234567"]
+  },
+
+  "_groups": "Off by default. A public assistant added to a group answers people who never chose to talk to it, in a room whose history it cannot see. replyTo 'mention' answers only a real @mention or a reply; 'trigger' also answers on a trigger word.",
+  "groups": {
+    "enabled": false,
+    "replyTo": "mention",
+    "triggers": []
+  },
+
+  "_limits": "Abuse and cost control. Turns are the expensive unit — each is a model call — so turnsPerDay is the ceiling one person can put on your bill. messagesPerHour and burst shape the rate; the burst exists so someone typing four short lines in a row is not throttled for being human.",
+  "limits": {
+    "messagesPerHour": 20,
+    "burst": 5,
+    "turnsPerDay": 40,
+    "maxInboundChars": 4000,
+    "maxMediaBytes": 16777216,
+    "maxMediaPerMessage": 4,
+    "newSendersPerHour": 30,
+    "outboundPerTurn": 8,
+    "outboundPerChatPerHour": 60,
+    "turnTimeoutMs": 600000
+  },
+
+  "_panel": "The control panel can read every message and hold delivery, and it authenticates with one bearer token. Loopback by default; reach it over an SSH tunnel rather than binding it wider. If you do expose it, put something that authenticates in front.",
+  "panel": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8791
+  },
+
+  "_delivery": "debounceMs collects a burst of quick messages into one prompt. maxBatch caps how many are handed over at once; the rest wait for this chat's next turn in the rotation.",
+  "delivery": {
+    "debounceMs": 3000,
+    "maxBatch": 20,
+    "stuckAfterMs": 300000
+  }
+}

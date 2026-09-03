@@ -1,0 +1,173 @@
+# Tulip — the deployment topology.
+#
+# This file is where the containment actually lives. The application code
+# assumes the properties declared here and would be unsafe without them, so it
+# is worth reading as a security document rather than as configuration:
+#
+#   · tulip-agent has NO route to the internet (tulip-lan is `internal: true`)
+#   · tulip-agent has NO working DNS (its resolver is 127.0.0.1, where nothing
+#     listens) — which closes DNS tunnelling, the usual way out of a proxy jail
+#   · tulip-agent and tulip-bridge share NO network at all; their entire
+#     interface is two volumes with opposite permissions
+#   · the WhatsApp credentials are mounted in exactly one container
+#   · every service is non-root, read-only, capability-free and unprivileged
+#
+# Changing any of it changes docs/THREAT-MODEL.md. Update both in one commit.
+
+name: tulip
+
+x-hardening: &hardening
+  # Applied to all three services. Being the trusted side of a boundary is not
+  # a reason to be the soft one — the bridge holds the credentials, so it is the
+  # most valuable target here, not the least.
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  init: true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+networks:
+  # Reaches the internet. The bridge needs it for WhatsApp; the proxy needs it
+  # to be a proxy.
+  wan:
+    driver: bridge
+
+  # Does not. `internal: true` means Docker installs no default route in the
+  # namespace, so packets aimed at the internet are dropped by the kernel rather
+  # than by a policy something could be talked out of. The subnet is fixed so
+  # the proxy can be given a static address to pin.
+  lan:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
+
+volumes:
+  # WhatsApp credentials and bridge state. Mounted in tulip-bridge and nowhere
+  # else. This single line is the largest security improvement over the design
+  # Tulip is forked from, where the agent could read the auth store with `cat`.
+  state:
+
+  # The handoff. Two volumes rather than one, because the permissions differ:
+  # the read-only inbound mount is what makes it impossible for the agent to
+  # forge a batch, rewrite the current-turn pointer, or replay an old turn.
+  handoff-in:
+  handoff-out:
+
+  # The agent's home: per-chat workspaces, Claude Code config and transcripts.
+  # Mounted in tulip-agent and nowhere else.
+  workspace:
+
+services:
+  # ── The trusted half ────────────────────────────────────────────────────────
+  bridge:
+    <<: *hardening
+    container_name: tulip-bridge
+    build:
+      context: .
+      target: bridge
+    networks: [wan]
+    volumes:
+      - state:/state
+      - handoff-in:/handoff/in
+      - handoff-out:/handoff/out
+      - ./config.json:/config/config.json:ro
+    tmpfs:
+      - /tmp:mode=1777,size=64m,noexec,nosuid,nodev
+    ports:
+      # Loopback only. Publishing this is an explicit decision; see
+      # docs/OPERATIONS.md before changing the left-hand side.
+      - "127.0.0.1:8791:8791"
+    mem_limit: 768m
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(require('node:fs').existsSync('/state/bridge.lock') ? 0 : 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ── The untrusted half ──────────────────────────────────────────────────────
+  agent:
+    <<: *hardening
+    container_name: tulip-agent
+    build:
+      context: .
+      target: agent
+    depends_on:
+      - egress
+    networks: [lan]
+
+    # No usable resolver. Nothing listens on 127.0.0.1:53 inside this container,
+    # so every external name lookup fails immediately. This is what closes DNS
+    # tunnelling — an HTTP-proxy-only jail with working DNS is not a jail.
+    dns:
+      - 127.0.0.1
+
+    # The one name it needs, pinned rather than resolved.
+    extra_hosts:
+      - "egress:172.31.240.10"
+
+    environment:
+      # The only credential in this container, and the only one that has to be.
+      # Use a dedicated, budget-capped key: it is reachable by anyone who
+      # achieves code execution here, which the threat model assumes they do.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
+      HTTPS_PROXY: http://egress:3128
+      HTTP_PROXY: http://egress:3128
+      # Belt and braces: even if something ignored the proxy variables, there is
+      # no route for it to use.
+      NO_PROXY: ""
+      TULIP_MODEL: ${TULIP_MODEL:-}
+      TULIP_MAX_LIVE_SESSIONS: ${TULIP_MAX_LIVE_SESSIONS:-3}
+      TULIP_SESSION_IDLE_MS: ${TULIP_SESSION_IDLE_MS:-1800000}
+
+    volumes:
+      # Read-only. The agent may read its batches and the media it was sent; it
+      # may not write here, so it cannot forge or tamper with either.
+      - handoff-in:/handoff/in:ro
+      # Read-write: this is how it speaks.
+      - handoff-out:/handoff/out
+      - workspace:/workspace
+
+    tmpfs:
+      # nosuid and nodev, but *not* noexec. The agent can already execute code
+      # by design — it has node and a shell — so noexec here would buy nothing
+      # while breaking ordinary tool use. The controls that matter are that
+      # there is nothing to steal and nowhere to send it.
+      - /tmp:mode=1777,size=512m,nosuid,nodev
+
+    mem_limit: 3g
+    pids_limit: 512
+    cpus: 3.0
+
+  # ── The one hole in the wall ────────────────────────────────────────────────
+  egress:
+    <<: *hardening
+    container_name: tulip-egress
+    build:
+      context: .
+      target: egress
+    networks:
+      lan:
+        ipv4_address: 172.31.240.10
+      wan:
+    environment:
+      # Deny-by-default: an unset or empty list refuses every CONNECT. Add hosts
+      # only with a reason, and note that each one is a channel out of the jail.
+      TULIP_EGRESS_ALLOW: ${TULIP_EGRESS_ALLOW:-api.anthropic.com}
+      TULIP_EGRESS_MAX_TUNNELS: ${TULIP_EGRESS_MAX_TUNNELS:-32}
+    tmpfs:
+      - /tmp:mode=1777,size=16m,noexec,nosuid,nodev
+    mem_limit: 128m
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3128/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -1,0 +1,19 @@
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+coverage
+.git
+.github
+docs
+*.md
+!persona/*.md
+
+# Never let a secret into a build context. A file copied into a layer is in the
+# image even if a later layer deletes it.
+.env
+.env.*
+config.json
+config.local.json
+*.key
+*.pem
