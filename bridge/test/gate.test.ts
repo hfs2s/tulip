@@ -140,6 +140,16 @@ describe('config validation', () => {
     expect(config.operators.numbers).toEqual([]);
   });
 
+  it('ignores underscore-prefixed documentation keys', () => {
+    // JSON has no comments, and this file needs them. The concession is narrow:
+    // see the next test.
+    const config = parseConfig({
+      _comment: 'this file decides who may talk to a shell',
+      audience: { _note: 'the public switch', everyone: true, numbers: [] },
+    });
+    expect(config.audience.everyone).toBe(true);
+  });
+
   it('rejects an unknown key rather than ignoring it', () => {
     // A typo in a security-relevant key would otherwise leave the default in
     // force while the operator believes they changed it.

@@ -31,6 +31,14 @@ Two Docker volumes form the entire interface between trusted and untrusted:
 | `tulip-in` | read-write | **read-only** | message batches, current-turn pointer, received media |
 | `tulip-out` | read-write | read-write | outbound actions, agent status, files to send |
 
+**How far the agent's self-report is believed.** The agent writes a status file
+saying whether a turn is running. The bridge uses it to advance the queue
+*early*, and never to wait longer: a turn is abandoned at `turnTimeoutMs`
+whatever the file claims. So a lying agent can make itself receive the next
+batch sooner — harmless, it is the same agent — or claim to be busy forever,
+which the timer overrides. Neither affects another chat, and no security
+decision anywhere reads this file.
+
 `tulip-session` (WhatsApp credentials) and `tulip-workspace` (the agent's home
 and transcripts) are each mounted in exactly one container.
 
@@ -81,7 +89,10 @@ audited. Instead the consequences are removed:
   (`cap_drop: [ALL]`), `no-new-privileges`, and a `read_only` root filesystem.
   There is no `sudo`, no setuid binary, and no package manager.
 - Writable paths are exactly three: the workspace volume, the outbox volume, and
-  a `noexec,nosuid` tmpfs at `/tmp`.
+  a `nosuid,nodev` tmpfs at `/tmp`. That tmpfs is deliberately **not** `noexec`:
+  the agent can already execute code by design — it has Node and a shell — so
+  `noexec` there would break ordinary tool use while buying nothing. The bridge
+  and proxy, which execute nothing, do mount `/tmp` `noexec`.
 - The container holds no credential except `ANTHROPIC_API_KEY`, which is scoped
   to a single purpose and is revocable in one click.
 - It has no route to anything (T2), so the `curl` in the example cannot resolve
@@ -143,8 +154,10 @@ Two independent controls:
   discarded. The agent has no vocabulary in which to express "send this
   elsewhere".
 
-Cross-chat sending is available *only* to operators, via a separate,
-config-gated path that the agent cannot invoke.
+There is no cross-chat send path at all, for anyone. The bridge originates
+messages to operators on its own — watchdog alerts and control-command replies —
+but that is the bridge addressing a configured number, not a capability the
+agent can reach or name.
 
 ### T5 — Abuse, cost denial-of-service, and spam
 
@@ -231,7 +244,7 @@ been read carefully.
 | R3 | **Anthropic API key theft** from inside the agent container. | Unavoidable: the agent must authenticate to run. Bounded by using a dedicated, budget-capped key that grants nothing but inference, and by making rotation a one-line operation. |
 | R4 | **Baileys is an unofficial WhatsApp client.** Its protocol handling is reverse-engineered and it may be broken or banned at any time. | Accepted; there is no official self-hosted alternative. Blast radius is one phone number. |
 | R5 | **DNS through the Docker daemon.** The `127.0.0.1` resolver closes the container's own path out, but the daemon's embedded DNS remains an implementation detail we do not control. | Verified closed in `scripts/verify-containment.sh`, which asserts resolution and egress both fail from inside the agent. Re-run after any Docker upgrade. |
-| R6 | **A compromised agent can fill its volumes.** | Bounded by volume size limits and pids/memory caps; a full workspace degrades Tulip and nothing else. |
+| R6 | **A compromised agent can exhaust host resources.** | Bounded by `pids_limit`, `cpus` and `mem_limit` — *provided the host kernel exposes those cgroup controllers*. It may not: Raspberry Pi OS ships with the memory controller **disabled**, and Docker discards a limit it cannot enforce with a single warning line during startup. `scripts/preflight.sh` checks for this explicitly, because a resource cap that is written down but not in force is worse than one that was never claimed. Enable it with `cgroup_enable=memory cgroup_memory=1` in `/boot/firmware/cmdline.txt` and reboot. |
 | R7 | **The operator's control panel token is a bearer credential.** Anyone holding it can restart sessions and read message history. | Loopback-bound by default; exposing it is an explicit operator decision documented in `OPERATIONS.md`. |
 
 ---
@@ -241,19 +254,33 @@ been read carefully.
 Controls that are not tested are claims. These run against a live deployment:
 
 ```bash
-scripts/verify-containment.sh
+scripts/preflight.sh           # host prerequisites and configuration
+scripts/verify-containment.sh  # the running containers
 ```
+
+`preflight.sh` checks what the *host* must provide and the compose file merely
+asks for — the cgroup controllers behind the resource limits, the panel's bind
+address, whether an operator number exists to alert. `verify-containment.sh`
+checks the properties of the running containers themselves.
 
 It asserts, from inside the running agent container, that:
 
 1. DNS resolution of an external name fails.
-2. A direct TCP connection to an external address fails.
-3. `CONNECT` to a non-allowlisted host through the proxy is refused.
-4. `CONNECT` to `api.anthropic.com` succeeds.
-5. The WhatsApp session directory is not present or readable.
-6. The root filesystem is read-only.
-7. Privilege escalation is unavailable — no `sudo`, no setuid binaries.
-8. The process is not uid 0.
+2. A direct TCP connection to a public address fails.
+3. A direct connection to the bridge's network fails.
+4. `CONNECT` to a non-allowlisted host through the proxy is refused.
+5. `CONNECT` to `api.anthropic.com` succeeds.
+6. The WhatsApp session directory is not present.
+7. The bridge's state volume is not mounted.
+8. The chat-key map is unreachable.
+9. The inbound handoff volume cannot be written to.
+10. The process is not uid 0.
+11. The root filesystem is read-only.
+12. `/usr` is not writable.
+13. `sudo` is not installed and no setuid binary exists.
+14. `CAP_SYS_ADMIN` is not held.
+
+Plus two assertions about the bridge, which is hardened identically.
 
 Unit tests cover the trust-boundary logic directly: the outbox validator, the
 turn-pinning resolver, the gate, the rate limiter, and the proxy allowlist —

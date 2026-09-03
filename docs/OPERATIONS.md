@@ -1,0 +1,241 @@
+# Operating Tulip
+
+Everything an operator needs after the first `docker compose up`. Read
+[`THREAT-MODEL.md`](THREAT-MODEL.md) first if you are deciding whether to run
+this at all.
+
+---
+
+## First run
+
+```bash
+cp .env.example .env                 # ANTHROPIC_API_KEY — use a dedicated, capped key
+cp config.example.json config.json   # your operator number, at minimum
+docker compose build
+docker compose up -d
+```
+
+Then pair the number:
+
+```bash
+docker compose logs -f bridge
+```
+
+A QR code appears. Scan it from the phone that owns the number Tulip will *be* —
+WhatsApp → Settings → Linked devices → Link a device.
+
+> **One number, one auth store.** Two Baileys clients on the same credentials
+> kick each other off in a loop and can log the device out, forcing a re-scan.
+> Never point a second bridge, a "quick test", or a restored backup at a number
+> that is already paired. The bridge takes a pidfile lock to make the common
+> case impossible, but the lock cannot see another machine.
+
+Pairing survives restarts and rebuilds — the credentials live in the `state`
+volume, not in the image. You only scan again if you unlink the device or delete
+that volume.
+
+### Before you point it at the public
+
+```bash
+scripts/verify-containment.sh
+```
+
+Fourteen assertions against the running containers: no route out, no DNS, no
+credentials, read-only root, no privilege escalation. It must pass. If it does
+not, the threat model does not currently hold and you should not open the
+audience.
+
+---
+
+## Day to day
+
+### From WhatsApp
+
+Any number in `operators.numbers` can send:
+
+| Command | Effect |
+|---|---|
+| `!status` | bridge, agent and queue state |
+| `!hold` | stop handing messages to the agent; they keep arriving and queueing |
+| `!release` | hand over everything held |
+| `!chats` | recent chats, with their keys |
+| `!block <key>` | stop answering a chat |
+| `!unblock <key>` | answer it again |
+| `!reset <key>` | abandon that chat's context; its next message starts fresh |
+| `!help` | the list |
+
+These are handled entirely inside the bridge, before the gate and before the
+agent sees anything. That is the point: you need them *because* something is
+wrong with the agent, so routing them through it would make them useless exactly
+when they matter.
+
+### The control panel
+
+Bound to loopback. From another machine, tunnel rather than rebind:
+
+```bash
+ssh -N -L 8791:127.0.0.1:8791 you@the-host
+docker compose exec bridge cat /state/panel-token   # the token
+```
+
+Then open `http://127.0.0.1:8791/?t=<token>`.
+
+It shows live message flow, per-chat counters, and hold/block controls. It
+deliberately exposes no endpoint that writes configuration — who may talk to the
+agent is decided by `config.json`, not a browser form.
+
+If you must expose it, put something that authenticates in front of it. The
+token is a bearer credential: anyone holding it can read every message.
+
+### Watching the agent work
+
+The agent is a real Claude Code session in tmux, and you can take it over
+mid-conversation exactly as with Iris:
+
+```bash
+docker compose exec agent tmux ls                      # one window per live chat
+docker compose exec agent tmux capture-pane -p -t tulip:c-<chatKey>   # look, safely
+docker compose exec -it agent tmux attach -t tulip     # attach; ctrl-b d to leave
+```
+
+Attached, anything you type goes into a live conversation with a member of the
+public. Prefer `capture-pane` unless you mean to intervene.
+
+There is no web terminal, unlike Iris. Proxying one would require the bridge to
+reach the agent over the network, which would undo the disjoint-networks
+property everything else rests on.
+
+---
+
+## Changing things
+
+| You change | To apply |
+|---|---|
+| `config.json` | `docker compose restart bridge` |
+| `.env` | `docker compose up -d` (recreates the containers) |
+| `persona/` | `docker compose build agent && docker compose up -d agent` — each chat's `CLAUDE.md` is regenerated when its session next starts |
+| any TypeScript | `docker compose build && docker compose up -d` |
+| `docker-compose.yml` | `docker compose up -d`, then **re-run `verify-containment.sh`** |
+
+A persona edit reaches a conversation when that conversation's session next
+spawns, not immediately — a resident session keeps the file it started with.
+`!reset <key>` forces the issue for one chat; restarting the agent container
+does it for all of them without losing any context.
+
+### Adding a host to the egress allowlist
+
+Every entry is a channel out of the jail. Prefer an exact hostname to a
+wildcard, add one only with a reason, and record the reason:
+
+```bash
+# .env
+TULIP_EGRESS_ALLOW=api.anthropic.com,example.com
+docker compose up -d egress
+```
+
+Then re-run the containment check, and update the threat model if the reachable
+surface has meaningfully changed.
+
+---
+
+## When something is wrong
+
+**Start here.** The failures below look alike from outside — someone messages
+Tulip and nothing happens — and they have entirely different causes.
+
+```bash
+docker compose ps                        # is everything up?
+docker compose logs --tail=50 bridge     # did the message arrive at all?
+docker compose logs --tail=50 agent      # did a turn start?
+docker compose logs --tail=20 egress     # was something refused?
+```
+
+### "I messaged it and nothing happened"
+
+The feed records **every** inbound message before any gating decision, precisely
+so this question is answerable. Look at the panel, or:
+
+```bash
+docker compose exec bridge tail -5 /state/feed.jsonl
+```
+
+- **Not in the feed at all** → it never arrived. Check `wa.open` in the bridge
+  log; the socket may be reconnecting, or the device may have been unlinked.
+- **In the feed with `accepted: false`** → the gate or a limit refused it, and
+  `reason` says which. Refusals are silent by design: replying would confirm to
+  a stranger that the number is live.
+- **In the feed, accepted, no `delivered`** → delivery is held (`!release`), or
+  a turn is in flight ahead of it.
+- **Delivered but no reply** → the agent's problem. Read its pane.
+
+### The agent is not reporting
+
+`agent.reporting: false` in the panel means no status file. The container is
+down, wedged, or was never able to start a session. Check its log, then:
+
+```bash
+docker compose restart agent
+```
+
+Restarting loses no conversation. Session ids are derived from the chat, so
+every context resumes from disk on the next message.
+
+### A fatal agent state
+
+Expired credentials, no credit, or a usage limit produce a session that accepts
+input, looks healthy, and fails every turn instantly. The bridge detects these
+by reading the pane, reports them in the panel, and messages your operator
+number once. They need a human — usually a new `ANTHROPIC_API_KEY` in `.env`
+followed by `docker compose up -d agent`.
+
+### Someone is abusing it
+
+```
+!block <key>          from your phone, immediately
+```
+
+Then, if it is broader than one person, `!hold` and lower `limits` in
+`config.json`. `newSendersPerHour` is the one that blunts a flood of throwaway
+numbers.
+
+### WhatsApp logged the device out
+
+The bridge exits deliberately rather than pretending to be healthy. Re-pair by
+scanning again; if it recurs, something else is authenticating with the same
+credentials — find it before scanning a third time.
+
+---
+
+## Backups
+
+One volume matters:
+
+```bash
+docker run --rm -v tulip_state:/state -v "$PWD":/backup alpine \
+  tar czf /backup/tulip-state.tgz -C /state .
+```
+
+That archive contains the WhatsApp credentials and every message. Treat it
+exactly as you would the phone. Store it encrypted, and never in this
+repository — `.gitignore` already refuses the obvious names, and
+`npm run check:secrets` fails the build if one is staged.
+
+The `workspace` volume holds conversation context. Losing it costs memory, not
+correctness: each chat starts fresh and carries on. The `handoff-*` volumes are
+transient by construction and need no backup.
+
+---
+
+## Upgrading
+
+```bash
+git pull
+npm run verify                       # secrets, types, tests
+docker compose build
+docker compose up -d
+scripts/verify-containment.sh
+```
+
+The last line is not optional. Docker upgrades have changed networking defaults
+before, and the containment properties are environmental — they can be undone by
+something that never touched this repository.

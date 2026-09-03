@@ -128,12 +128,36 @@ export const ConfigSchema = z
 export type Config = z.infer<typeof ConfigSchema>;
 
 /**
+ * Strip documentation keys.
+ *
+ * JSON has no comments, and a configuration file that decides who may talk to a
+ * machine holding a shell is exactly the kind that needs them — so keys
+ * beginning with `_` are treated as prose and removed before validation.
+ *
+ * This is the *only* concession to unknown keys, and it is a narrow one: `_note`
+ * is dropped, while `audiance` is still a fatal error. That distinction is the
+ * point. A typo in a security-relevant key must not leave the restrictive
+ * default silently in force while the operator believes they changed it.
+ */
+function stripComments(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripComments);
+  if (typeof value !== 'object' || value === null) return value;
+
+  const out: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value)) {
+    if (key.startsWith('_')) continue;
+    out[key] = stripComments(nested);
+  }
+  return out;
+}
+
+/**
  * Parse and validate. Unknown keys are an error rather than being ignored: a
  * typo in a security-relevant key would otherwise leave the default silently in
  * force while the operator believes they have changed it.
  */
 export function parseConfig(raw: unknown): Config {
-  const result = ConfigSchema.safeParse(raw);
+  const result = ConfigSchema.safeParse(stripComments(raw));
   if (!result.success) {
     const problems = result.error.issues
       .map((i) => `  ${i.path.join('.') || '(root)'}: ${i.message}`)
