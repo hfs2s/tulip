@@ -62,8 +62,14 @@ const DIALOGS: ReadonlyArray<readonly [RegExp, readonly string[]]> = [
   // highlighted default is right for these — the questions are cosmetic.
   [/Choose the text style|Syntax theme:|Let's get started/i, ['Enter']],
   [/Press Enter to continue|to continue…/i, ['Enter']],
-  // The exception: here the highlighted default is the wrong answer.
+  // The two exceptions, where the highlighted default is the wrong answer.
   [/Detected a custom API key in your environment/i, ['Up', 'Enter']],
+  // Bypass Permissions acceptance. Defaults to "No, exit", so Down then Enter.
+  // The screen is asking whether this is a restricted, disposable environment;
+  // for this container the answer is yes, and saying so is the entire point of
+  // docs/THREAT-MODEL.md. Nobody is here to read it, so it is answered once and
+  // the acknowledgement persists in the workspace volume.
+  [/Bypass Permissions mode|accept all responsibility for actions taken/i, ['Down', 'Enter']],
 ];
 
 /**
