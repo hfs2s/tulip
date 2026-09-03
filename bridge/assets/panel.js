@@ -611,7 +611,11 @@ function openModal(title, description, build) {
  * boxes you had to scroll past to reach anything else. The summary is what an
  * operator reads; the list is what they occasionally change.
  */
-function listField(parent, name, hint, values, placeholder, help, onSave) {
+function listField(parent, name, hint, values, placeholder, help, onSave, sanitize) {
+  // Per-field, because this editor backs both phone numbers and group trigger
+  // words. One shared numeric sanitizer quietly rewrote "call me" to "callme"
+  // with no error — the operator saw their trigger accepted and it never fired.
+  var clean = sanitize || function (v) { return v.replace(/[^0-9@a-z]/gi, ''); };
   var current = values.slice();
   var summary = node('div', 'summary');
   var count = node('span', 'value');
@@ -654,7 +658,7 @@ function listField(parent, name, hint, values, placeholder, help, onSave) {
         var add = node('button', 'primary', 'Add');
         add.type = 'button';
         function commit() {
-          var v = input.value.trim().replace(/[^0-9@a-z]/gi, '');
+          var v = clean(input.value.trim());
           if (!v) return;
           if (current.indexOf(v) >= 0) { toast('Already in the list.'); return; }
           var before = current.slice();
@@ -676,6 +680,100 @@ function listField(parent, name, hint, values, placeholder, help, onSave) {
   });
 
   field(parent, name, hint, summary);
+}
+
+/**
+ * People the agent may write to first.
+ *
+ * A pair rather than a bare number, because the agent is only ever shown the
+ * label — it has no way to see a phone number, and that stays true here. This
+ * list is also the only thing that authorises the agent to open a conversation:
+ * a WhatsApp message asking it to contact somebody is not evidence of anything,
+ * so the operator's list is where the permission actually lives.
+ */
+function contactsField(parent, values, onSave) {
+  var current = values.slice();
+  var summary = node('div', 'summary');
+  var count = node('span', 'value');
+  var edit = node('button', 'sm', 'Edit');
+  edit.type = 'button';
+
+  function label() {
+    count.textContent = current.length === 0 ? 'nobody' : plural(current.length, 'contact', 'contacts');
+  }
+  label();
+  summary.appendChild(count);
+  summary.appendChild(edit);
+
+  edit.addEventListener('click', function () {
+    openModal('Contacts',
+      'Somebody here can be messaged first — an introduction, or passing something on. Adding a contact does not let them message Tulip; that is the audience list, deliberately separate.',
+      function (body) {
+        var list = node('div');
+
+        function save(before) {
+          onSave(current.slice(), function () { current = before; paint(); label(); });
+        }
+
+        function paint() {
+          clear(list);
+          if (!current.length) list.appendChild(node('p', 'hint', 'Nobody yet.'));
+          current.forEach(function (c, i) {
+            var row = node('div', 'entry');
+            row.appendChild(node('span', 'value', c.label + ' · +' + c.number));
+            var rm = node('button', 'sm danger', 'Remove');
+            rm.type = 'button';
+            rm.addEventListener('click', function () {
+              var before = current.slice();
+              current = current.slice(0, i).concat(current.slice(i + 1));
+              paint(); label();
+              save(before);
+            });
+            row.appendChild(rm);
+            list.appendChild(row);
+          });
+
+          var adder = node('div', 'adder');
+          var name = document.createElement('input');
+          name.type = 'text';
+          name.placeholder = 'Name';
+          var number = document.createElement('input');
+          number.type = 'text';
+          number.placeholder = 'Number, e.g. 15551234567';
+          var add = node('button', 'primary', 'Add');
+          add.type = 'button';
+
+          function commit() {
+            var l = name.value.trim().slice(0, 64);
+            var n = number.value.replace(/[^0-9]/g, '');
+            if (!l || !n) { toast('A contact needs a name and a number.'); return; }
+            if (n.length < 6) { toast('That number looks too short.'); return; }
+            for (var i = 0; i < current.length; i++) {
+              if (current[i].number === n) { toast('Already a contact.'); return; }
+            }
+            var before = current.slice();
+            current = current.concat([{ label: l, number: n }]);
+            name.value = ''; number.value = '';
+            paint(); label();
+            save(before);
+          }
+          add.addEventListener('click', commit);
+          function onEnter(ev) { if (ev.key === 'Enter') commit(); }
+          name.addEventListener('keydown', onEnter);
+          number.addEventListener('keydown', onEnter);
+
+          adder.appendChild(name);
+          adder.appendChild(number);
+          adder.appendChild(add);
+          list.appendChild(adder);
+        }
+
+        paint();
+        body.appendChild(list);
+      });
+  });
+
+  field(parent, 'Contacts', 'People the agent may message first. It sees the name, never the number.', summary);
 }
 
 function numberControl(value, min, max, onSave) {
@@ -750,20 +848,25 @@ async function renderSettings() {
     modeSeg.appendChild(b);
   });
   field(groups, 'Group mode', 'observe delivers every message so the agent can react; it is the expensive one — every message becomes a model call.', modeSeg);
-  listField(groups, 'Trigger words', 'Used only in trigger mode.',
+  listField(groups, 'Trigger words', 'Used only in trigger mode. Phrases are allowed.',
     s.groups.triggers || [], 'e.g. juan',
-    'A group message containing one of these is answered. Matching is case-insensitive.',
-    function (next, revert) { saveSettings({ groups: { triggers: next } }, revert); });
+    'A group message containing one of these is answered. Matching is case-insensitive, and a phrase with spaces is fine.',
+    function (next, revert) { saveSettings({ groups: { triggers: next } }, revert); },
+    function (v) { return v.replace(/\s+/g, ' ').slice(0, 32); });
   p.appendChild(groups);
 
   // ── Reach ─────────────────────────────────────────────────────────────────
   var reach = node('div', 'card');
   reach.appendChild(node('h2', null, 'Reach'));
   reach.appendChild(node('p', 'sub', 'By default a reply can only go to the person being answered, and that is enforced outside the agent rather than asked of it.'));
-  field(reach, 'Message other chats', 'Lets the agent send to any chat it already knows. It still cannot read another conversation — sessions are separate — but it can carry this one into another. See THREAT-MODEL T4.',
+  field(reach, 'Message other chats', 'Lets the agent write to the contacts below, and reply onward to chats it already knows. It still cannot read another conversation — sessions are separate — but it can carry this one into another. See THREAT-MODEL T4.',
     liveSwitch(s.agent && s.agent.crossChat, function (on, input) {
       saveSettings({ agent: { crossChat: on } }, function () { input.checked = !on; });
     }));
+
+  contactsField(reach, s.agent && s.agent.contacts ? s.agent.contacts : [],
+    function (next, revert) { saveSettings({ agent: { contacts: next } }, revert); });
+
   p.appendChild(reach);
 
   // ── Limits ────────────────────────────────────────────────────────────────

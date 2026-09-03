@@ -143,10 +143,17 @@ export const CurrentTurn = z
 /**
  * Everything the agent is able to ask for.
  *
- * Note what is absent and cannot be added by an attacker: a recipient, a file
- * path, a shell command, a URL. The bridge derives the destination from
- * `turnId`, opens files only from its own directory, and performs only the
- * actions below. A GIF is a *search phrase*, not a URL, for the same reason.
+ * Note what is absent and cannot be added by an attacker: a file path, a shell
+ * command, a URL. The bridge opens files only from its own directory and
+ * performs only the actions below. A GIF is a *search phrase*, not a URL, for
+ * the same reason.
+ *
+ * A recipient is the one exception, and it is worth stating precisely because
+ * it used to be on that list. Every action but `sendTo` derives its destination
+ * from `turnId`, which the bridge resolves through a map the agent cannot
+ * write. `sendTo` names a chat — but only by a key the bridge itself issued,
+ * only when an operator has switched `agent.crossChat` on, and it still cannot
+ * *read* the chat it names. See THREAT-MODEL.md §T4.
  */
 export const OutboxAction = z.discriminatedUnion('kind', [
   z
@@ -342,7 +349,16 @@ export const ToolResult = z
           })
           .strict(),
       )
-      .max(10),
+      /**
+       * Generous, because two callers with different shapes share this type.
+       * A search returns at most ten items but each carries up to 4000
+       * characters of page text; the chat listing returns many more items that
+       * are a name and a key apiece. This bound was 10, which silently made a
+       * listing of more than ten chats fail to parse — and a `chats` request
+       * that produces no answer file is indistinguishable, from inside the
+       * agent, from the feature being switched off.
+       */
+      .max(40),
   })
   .strict();
 

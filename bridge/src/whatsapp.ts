@@ -15,7 +15,7 @@
  */
 import { EventEmitter } from 'node:events';
 import { existsSync, readFileSync, readFileSync as read, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
@@ -254,8 +254,22 @@ export class WhatsApp extends EventEmitter {
     await this.require().sendMessage(chatJid, { text });
   }
 
-  async sendFile(chatJid: string, file: string, mimetype: string, caption: string | null): Promise<void> {
-    const buffer = readFileSync(file);
+  /**
+   * Send a file the agent staged.
+   *
+   * Takes the bytes, not a path, and that is a security property rather than a
+   * style preference: `resolveOutboundFile` validates one open descriptor, and
+   * reopening the name here would have reintroduced exactly the race those
+   * checks exist to close. `name` is for the WhatsApp filename only and is
+   * never touched as a path.
+   */
+  async sendFile(
+    chatJid: string,
+    buffer: Buffer,
+    mimetype: string,
+    name: string,
+    caption: string | null,
+  ): Promise<void> {
     const socket = this.require();
     // Spread rather than `caption: caption ?? undefined`: under
     // exactOptionalPropertyTypes an explicit `undefined` is not the same as an
@@ -271,7 +285,7 @@ export class WhatsApp extends EventEmitter {
       await socket.sendMessage(chatJid, {
         document: buffer,
         mimetype,
-        fileName: file.split('/').pop() ?? 'file',
+        fileName: basename(name) || 'file',
       });
     }
   }

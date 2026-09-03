@@ -14,7 +14,19 @@
  *   - **Files are resolved, not trusted.** `resolveOutboundFile` below is the
  *     single most dangerous function in the bridge, and is commented as such.
  */
-import { createReadStream, lstatSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import { basename, join, resolve, sep } from 'node:path';
 import { mkdirSync, statSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
@@ -65,11 +77,18 @@ const MAGIC: ReadonlyArray<readonly [string, readonly number[]]> = [
 ];
 
 export type FileResolution =
-  | { ok: true; path: string; mimetype: string; bytes: number }
+  /**
+   * The bytes, not a path — and that distinction is the entire point.
+   *
+   * `unlinkPath` exists solely so the caller can delete the staged file
+   * afterwards. It must never be reopened to read content: doing so
+   * reintroduces the race this function was rewritten to close.
+   */
+  | { ok: true; data: Buffer; mimetype: string; bytes: number; unlinkPath: string }
   | { ok: false; reason: string };
 
 /**
- * Resolve a file name the agent supplied to a path the bridge may open.
+ * Read a file the agent staged, or refuse it.
  *
  * **The attack this exists to stop.** The agent shares a writable volume with
  * the bridge, but not a filesystem namespace — so a symlink the agent creates
@@ -80,21 +99,46 @@ export type FileResolution =
  * compromise reachable through an interface that otherwise looks like "send a
  * picture".
  *
- * Four independent checks, in order of what they stop:
+ * **Why this returns bytes rather than a path.** An earlier version ran the
+ * checks below and handed the *path* back; the caller then opened it again to
+ * send it, and the magic-byte check had opened it a third time. Every check was
+ * individually correct and the whole was still defeatable, because the agent
+ * writes to that directory and only had to swap the name between the last check
+ * and the next open — the classic check-by-path / use-by-path race (CWE-367).
+ * With 8 sends a turn it had as many attempts as it liked, driven by a shell
+ * loop that does not have to win on the first try.
  *
- *   0. the outbox directory is itself a real directory, not a symlink the
- *      agent swapped in to move the whole check somewhere useful;
- *   1. the name is a bare basename — no separators, no traversal;
- *   2. `lstat` says regular file — a symlink is refused rather than followed,
- *      which is the check that stops the attack above outright;
- *   3. `realpath` still lies inside the files directory — belt and braces,
- *      covering a symlinked ancestor rather than a symlinked leaf;
- *   4. the extension is on the allowlist, the size is under the cap, and for
- *      the common formats the leading bytes match the claimed type.
+ * So: **exactly one `open()` for the lifetime of the data.** Everything below —
+ * the type, the size, the magic bytes, the content that is actually sent — is
+ * derived from that one descriptor. There is no second resolution of the name
+ * for an attacker to race, because the name is never resolved twice.
+ *
+ * The checks, in order of what they stop:
+ *
+ *   0. the name is a bare basename — no separators, no traversal;
+ *   1. the extension is on the allowlist (cheap, and done before any syscall);
+ *   2. the outbox directory is itself a real directory, not a symlink the agent
+ *      swapped in to move every later check somewhere useful;
+ *   3. `O_NOFOLLOW` on the open — the kernel refuses a symlinked leaf, and it
+ *      does so atomically, which is what a separate `lstat` could never be;
+ *   4. on Linux, `/proc/self/fd` says what was *actually* opened, which catches
+ *      a swapped *ancestor* that `O_NOFOLLOW` on the leaf cannot see;
+ *   5. `fstat` on the descriptor — regular file, non-empty, under the cap;
+ *   6. the leading bytes match the claimed type, for the formats where that is
+ *      cheap. Note that `.json`, `.txt`, `.md` and `.csv` have no signature to
+ *      check, which is exactly why steps 2–4 have to be airtight rather than
+ *      merely careful: `chats.json` is the phone-number map.
  */
 export function resolveOutboundFile(name: string, directory = outPaths.files): FileResolution {
   if (name !== basename(name) || name.includes('..') || name.startsWith('.')) {
     return { ok: false, reason: 'file must be a plain name inside the outbox' };
+  }
+
+  const dot = name.lastIndexOf('.');
+  const extension = dot === -1 ? '' : name.slice(dot).toLowerCase();
+  const mimetype = SENDABLE[extension];
+  if (mimetype === undefined) {
+    return { ok: false, reason: `files of type "${extension || 'none'}" may not be sent` };
   }
 
   const root = resolve(directory);
@@ -102,9 +146,8 @@ export function resolveOutboundFile(name: string, directory = outPaths.files): F
   // The outbox directory itself must be a real directory. The agent has write
   // access to this volume, so it can `rmdir out/files && ln -s /state
   // out/files` — after which every check below would faithfully confine to the
-  // wrong root, and `chats.json` (the phone-number map) would pass the
-  // extension allowlist. Checking the container before its contents is what
-  // makes the containment argument mean anything.
+  // wrong root. Racy on its own, which is why step 4 rechecks against what the
+  // kernel actually opened; this is the cheap early rejection.
   try {
     const rootStat = lstatSync(root);
     if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
@@ -119,51 +162,81 @@ export function resolveOutboundFile(name: string, directory = outPaths.files): F
     return { ok: false, reason: 'file resolves outside the outbox' };
   }
 
-  let stat;
+  // The one and only open. O_NOFOLLOW makes the kernel fail with ELOOP if the
+  // final component is a symlink, atomically — no window between deciding and
+  // opening.
+  let fd: number;
   try {
-    stat = lstatSync(candidate);
-  } catch {
-    return { ok: false, reason: 'file does not exist' };
+    fd = openSync(candidate, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP') return { ok: false, reason: 'file is a symlink' };
+    if (code === 'ENOENT') return { ok: false, reason: 'file does not exist' };
+    return { ok: false, reason: 'file could not be opened' };
   }
 
-  // lstat, not stat: a symlink must be refused, never followed.
-  if (stat.isSymbolicLink()) return { ok: false, reason: 'file is a symlink' };
-  if (!stat.isFile()) return { ok: false, reason: 'file is not a regular file' };
-  if (stat.size === 0) return { ok: false, reason: 'file is empty' };
-  if (stat.size > MAX_FILE_BYTES) return { ok: false, reason: `file exceeds ${MAX_FILE_BYTES} bytes` };
-
-  // Guards against a symlinked *ancestor*, which lstat on the leaf would miss.
   try {
-    const real = realpathSync(candidate);
-    const realRoot = realpathSync(root);
-    if (real !== join(realRoot, name) && !real.startsWith(realRoot + sep)) {
-      return { ok: false, reason: 'file resolves outside the outbox' };
+    // What did we actually open? On Linux this is authoritative and settles the
+    // swapped-ancestor case: if `files` was replaced by a link to /state, the
+    // descriptor's real path is under /state and does not match. Absent on
+    // macOS, where a developer runs the suite — there the lstat above plus
+    // realpath below are the best available, and production is Linux.
+    const opened = describeFd(fd);
+    if (opened !== null) {
+      if (opened !== join(root, name)) {
+        return { ok: false, reason: 'file resolves outside the outbox' };
+      }
+    } else {
+      try {
+        const real = realpathSync(candidate);
+        const realRoot = realpathSync(root);
+        if (real !== join(realRoot, name) && !real.startsWith(realRoot + sep)) {
+          return { ok: false, reason: 'file resolves outside the outbox' };
+        }
+      } catch {
+        return { ok: false, reason: 'file could not be resolved' };
+      }
     }
-  } catch {
-    return { ok: false, reason: 'file could not be resolved' };
-  }
 
-  const dot = name.lastIndexOf('.');
-  const extension = dot === -1 ? '' : name.slice(dot).toLowerCase();
-  const mimetype = SENDABLE[extension];
-  if (mimetype === undefined) {
-    return { ok: false, reason: `files of type "${extension || 'none'}" may not be sent` };
-  }
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) return { ok: false, reason: 'file is not a regular file' };
+    if (stat.size === 0) return { ok: false, reason: 'file is empty' };
+    if (stat.size > MAX_FILE_BYTES) return { ok: false, reason: `file exceeds ${MAX_FILE_BYTES} bytes` };
 
-  const expected = MAGIC.find(([type]) => type === mimetype);
-  if (expected) {
-    let head: Buffer;
-    try {
-      head = readFileSync(candidate).subarray(0, expected[1].length);
-    } catch {
-      return { ok: false, reason: 'file could not be read' };
+    // Read from the descriptor, never from the name. These are the bytes that
+    // get sent; nothing re-reads the file afterwards.
+    const data = Buffer.allocUnsafe(stat.size);
+    let read = 0;
+    while (read < stat.size) {
+      const n = readSync(fd, data, read, stat.size - read, read);
+      if (n <= 0) break;
+      read += n;
     }
-    if (!expected[1].every((byte, i) => head[i] === byte)) {
+    if (read !== stat.size) return { ok: false, reason: 'file could not be read' };
+
+    const expected = MAGIC.find(([type]) => type === mimetype);
+    if (expected && !expected[1].every((byte, i) => data[i] === byte)) {
       return { ok: false, reason: `file does not contain ${mimetype} data` };
     }
-  }
 
-  return { ok: true, path: candidate, mimetype, bytes: stat.size };
+    return { ok: true, data, mimetype, bytes: stat.size, unlinkPath: candidate };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * The real path behind an open descriptor, on Linux. Null anywhere else.
+ *
+ * Null means "cannot tell", never "fine" — the caller falls back to a weaker
+ * check rather than treating an unknown as a pass.
+ */
+function describeFd(fd: number): string | null {
+  try {
+    return readlinkSync(`/proc/self/fd/${fd}`);
+  } catch {
+    return null;
+  }
 }
 
 export interface OutboxDeps {
@@ -310,7 +383,7 @@ export class Outbox extends EventEmitter {
 
   /** Answer a `chats` request on the inbound volume, like a search result. */
   private async answerChats(
-    chats: Array<{ chatKey: string; name: string; isGroup: boolean }>,
+    chats: Array<{ chatKey: string; name: string; isGroup: boolean; contact: boolean }>,
     actionId?: string,
   ): Promise<void> {
     if (!actionId) return;
@@ -320,7 +393,11 @@ export class Outbox extends EventEmitter {
         title: c.name + (c.isGroup ? ' (group)' : ''),
         url: c.chatKey,
         published: null,
-        text: '',
+        // The one thing the agent needs in order to apply the rule it is given:
+        // a contact is somebody an operator listed, so approaching them
+        // unprompted is expected. Any other row is a chat that happened to
+        // write in once, and messaging it out of the blue is not.
+        text: c.contact ? 'contact' : 'has messaged before',
       })),
     });
   }
@@ -418,11 +495,13 @@ export class Outbox extends EventEmitter {
           feed.event('outbox.fileRefused', `${action.file}: ${file.reason}`);
           return;
         }
-        await this.deps.wa.sendFile(turn.chatJid, file.path, file.mimetype, action.caption);
+        await this.deps.wa.sendFile(turn.chatJid, file.data, file.mimetype, action.file, action.caption);
         feed.outbound(turn.chatKey, file.mimetype, action.caption);
         // Sent files are removed: the volume is not storage, and leaving them
-        // lets a compromised agent fill the disk one send at a time.
-        rmSync(file.path, { force: true });
+        // lets a compromised agent fill the disk one send at a time. Deleting
+        // by name is safe in a way that *reading* by name is not — if the agent
+        // has swapped a symlink in since, this unlinks the link, not its target.
+        rmSync(file.unlinkPath, { force: true });
         break;
       }
       case 'gif': {
@@ -488,16 +567,32 @@ export class Outbox extends EventEmitter {
 
       case 'chats': {
         if (!this.deps.config.agent.crossChat) {
-          await this.answerChats([]);
+          // Reported as a refusal rather than an empty list, the way `search`
+          // and `fetch` report being switched off. An empty list cannot be told
+          // apart from "switched on, but nobody to write to", and the agent
+          // acting on that guess is how it ends up telling somebody the feature
+          // is off when it is on.
+          await this.answer(action.id, 'chats', {
+            ok: false,
+            error: 'cross-chat messaging is switched off by the operator',
+          });
           return;
         }
         await this.answerChats(
           this.deps.chats
             .all()
             .filter((c) => !c.blocked)
-            .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+            // Operator-listed destinations first, then by recency. A contact is
+            // the answer to "who can I introduce myself to", and burying it
+            // under whoever messaged most recently is how it goes unnoticed.
+            .sort((a, b) => Number(b.contact) - Number(a.contact) || b.lastSeenAt - a.lastSeenAt)
             .slice(0, 30)
-            .map((c) => ({ chatKey: c.chatKey, name: c.name ?? 'someone', isGroup: c.isGroup })),
+            .map((c) => ({
+              chatKey: c.chatKey,
+              name: c.name ?? 'someone',
+              isGroup: c.isGroup,
+              contact: c.contact,
+            })),
           action.id,
         );
         break;
@@ -551,5 +646,3 @@ export class Outbox extends EventEmitter {
     log('outbox.sent', { chatKey: turn.chatKey, kind: action.kind });
   }
 }
-
-export { createReadStream };

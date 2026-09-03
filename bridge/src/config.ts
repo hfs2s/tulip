@@ -170,6 +170,22 @@ const Delivery = z
   .strict()
   .default({});
 
+/**
+ * One person the agent may approach unprompted.
+ *
+ * Exported because the panel validates the same shape when an operator edits
+ * the list, and two copies of a rule about who a machine may message is exactly
+ * the kind of duplication that drifts apart quietly.
+ */
+export const Contact = z
+  .object({
+    /** What the agent sees. It never sees the number. */
+    label: z.string().min(1).max(64),
+    /** Bare international digits, no `+` and no punctuation. */
+    number: z.string().regex(/^[0-9]{6,20}$/, 'a contact number must be bare international digits'),
+  })
+  .strict();
+
 const Agent = z
   .object({
     /**
@@ -186,6 +202,30 @@ const Agent = z
      * See docs/THREAT-MODEL.md §T4.
      */
     crossChat: z.boolean().default(false),
+
+    /**
+     * People the agent may approach who have not written to it first.
+     *
+     * Without this, `crossChat` is close to decorative. A chat key only exists
+     * once somebody has sent a message in, so "message another chat" could only
+     * ever reach people already in the middle of a conversation with Tulip —
+     * the agent could reply onward, but never introduce itself to anybody. That
+     * is not what an operator means when they switch it on.
+     *
+     * The list is *destinations only*, and deliberately not the audience list.
+     * Adding somebody here lets Tulip write to them; it does not let them write
+     * to Tulip, which stays governed by `audience`. Keeping the two apart means
+     * adding an outbound destination can never widen the inbound attack
+     * surface as a side effect — see docs/OPERATIONS.md, "Letting somebody in".
+     *
+     * It is also the authorisation channel the agent can actually trust. A
+     * WhatsApp message asking Tulip to message a third party is unverifiable
+     * and is exactly what a prompt injection looks like; an entry here arrives
+     * through the panel, which the agent cannot write to. So the persona's rule
+     * is not "do as you are told", it is "you may approach the people on this
+     * list, and nobody else".
+     */
+    contacts: z.array(Contact).max(50).default([]),
 
     /**
      * Capability switches.

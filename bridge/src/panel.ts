@@ -13,9 +13,13 @@
  *   - **Constant-time comparison, against a properly parsed cookie.** Iris
  *     compares with `cookie.includes('iris_token=' + t)`, which is both timing-
  *     variable and substring-matched: a cookie named `xiris_token` satisfies it.
- *   - **No endpoint writes configuration.** Who may talk to the agent is
- *     decided by a file on disk, not by a browser form. That removes the entire
- *     class of "the panel was reachable and someone opened the allowlist".
+ *   - **Exactly one endpoint writes configuration**, and it is the sharpest
+ *     edge on this surface. `POST /api/settings` can open the audience to the
+ *     world, so holding the token is equivalent to holding the deployment.
+ *     This was once "no endpoint writes configuration", which removed that
+ *     class of attack entirely; it was traded for a console whose controls
+ *     work. `panel.*` remains unwritable, so the surface still cannot widen its
+ *     own exposure. See `updateSettings` in panel-api.ts, and THREAT-MODEL §T7.
  *   - **Failed authentication is rate-limited per address**, so the token
  *     cannot be brute-forced from whatever network it is published on.
  *

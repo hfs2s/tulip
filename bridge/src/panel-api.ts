@@ -5,22 +5,27 @@
  * the failure throttle stays small enough to read in one sitting. Everything
  * here runs *after* the token check; nothing here re-implements it.
  *
- * Two rules hold across every handler:
+ * Two rules hold across every handler, and both have exceptions worth stating
+ * precisely, because each one used to be absolute:
  *
- *   - **Read-mostly.** The only mutating routes are operational — hold, release,
- *     block, kick delivery, and typing into the terminal. Nothing here edits who
- *     may talk to the agent; that lives in a file on disk, which removes the
- *     whole class of "the panel was reachable and someone opened the allowlist".
- *   - **No phone numbers leave.** The panel is a browser page that may be open
- *     on a laptop in a café. Chats are identified by their opaque key and their
- *     display name, exactly as the agent sees them.
+ *   - **Operational routes mutate freely; configuration mutates through exactly
+ *     one door.** Hold, release, block, kick and terminal input are ordinary.
+ *     Configuration is `POST /api/settings` alone — `updateSettings`, whose
+ *     docblock carries the argument for why that door exists and what it cost.
+ *     It genuinely does edit who may talk to the agent.
+ *   - **Chats carry no phone number; the settings view does.** Every chat here
+ *     is an opaque key and a display name, exactly as the agent sees them, and
+ *     that is the rule that matters for a page which may be open on a laptop in
+ *     a café. The audience, operator and contact lists are the deliberate
+ *     exception: an allow list you cannot read is one you cannot audit, and the
+ *     operator reading it is the person who wrote it.
  */
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { TerminalRequest, TerminalScreen, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
-import { parseConfig } from './config.js';
+import { parseConfig, Contact } from './config.js';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import type { Dispatcher } from './dispatcher.js';
@@ -235,14 +240,14 @@ export function logTail(lines: number): Json {
   }
 }
 
-// ─── Settings (read-only) ────────────────────────────────────────────────────
+// ─── Settings ────────────────────────────────────────────────────────────────
 
 /**
  * What the deployment is currently configured to do.
  *
- * Read-only, deliberately, and the page says so. The audience and the operator
- * list are shown as counts rather than values: this is a browser page, and the
- * values are phone numbers.
+ * Reading is separated from writing only because they are different HTTP verbs;
+ * both are exposed. See `updateSettings` below for why the panel writes
+ * configuration at all, and what backs that decision.
  */
 export function settingsView(deps: ApiDeps): Json {
   const c = deps.config;
@@ -341,6 +346,12 @@ const SettingsPatch = z
       gifs: z.boolean().optional(),
       images: z.boolean().optional(),
       voice: z.boolean().optional(),
+      /**
+       * Imported from `config.ts` rather than restated. This one decides who a
+       * machine holding a shell may open a conversation with, and a second copy
+       * of that rule is a copy that will eventually disagree with the first.
+       */
+      contacts: z.array(Contact).max(50).optional(),
     }).strict().optional(),
   })
   .strict();
@@ -409,6 +420,15 @@ export function updateSettings(deps: ApiDeps, body: unknown): { ok: boolean; mes
   }
 
   Object.assign(deps.config, next);
+
+  // Contacts are the one setting with state behind it: a destination has to
+  // exist in the chat registry before the agent can be given a key for it.
+  // Re-synced here rather than on the next restart, so "add a contact" and
+  // "the agent can write to them" are the same action.
+  if (patch.data.agent?.contacts !== undefined) {
+    deps.chats.syncContacts(next.agent.contacts, Date.now());
+    deps.chats.flush();
+  }
 
   const after = {
     everyone: next.audience.everyone,

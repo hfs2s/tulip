@@ -61,6 +61,7 @@ async function main(): Promise<void> {
   banner(config);
 
   const chats = new ChatRegistry();
+  chats.syncContacts(config.agent.contacts, Date.now());
   const limiter = new Limiter(
     {
       messagesPerHour: config.limits.messagesPerHour,

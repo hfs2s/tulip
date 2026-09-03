@@ -229,13 +229,42 @@ Two independent controls:
 - **Destination pinning.** Outbound actions written by the agent carry a
   `turnId`, never a destination. The bridge holds the only `turnId → chat` map
   and resolves it itself; an action naming an unknown or expired turn is
-  discarded. The agent has no vocabulary in which to express "send this
-  elsewhere".
+  discarded.
 
-There is no cross-chat send path at all, for anyone. The bridge originates
-messages to operators on its own — watchdog alerts and control-command replies —
-but that is the bridge addressing a configured number, not a capability the
-agent can reach or name.
+**Destination pinning has one deliberate exception, and this section used to
+deny it existed.** `agent.crossChat` — default off — enables a `sendTo` action
+that names a chat. An operator asked for it, because without it the agent could
+never introduce itself to anybody or pass on a message it was asked to pass on.
+What that costs, precisely:
+
+| | Pinning only (default) | With `agent.crossChat` |
+|---|---|---|
+| Can address | the chat whose turn it is answering | that, plus any chat key the bridge has issued |
+| Can name a phone number | no | **still no** — keys are opaque and deployment-local |
+| Can read another conversation | no | **still no** — sessions are per chat |
+| Recorded | outbound in the chat's feed | that, plus a `crossChat.sent` event naming both chats |
+
+The load-bearing observation is that the two controls are independent, and only
+the weaker one moved. Session isolation is what makes exfiltration pointless:
+another person's messages were never in the context window, so a compromised
+agent that gains a destination gains a way to send *its own* conversation
+onward, not a way to fetch somebody else's. `sendTo` widens who can be told
+something; it does not widen what there is to tell.
+
+Destinations come from `agent.contacts`, curated in the panel, and from chats
+that have written in. The list is deliberately **not** the audience list:
+adding an outbound destination never grants anyone inbound access, so a contact
+cannot become a sender as a side effect.
+
+**Residual:** with the switch on, an injection that survives the persona can
+message an operator-listed contact. It is bounded by the outbound rate limits,
+it is logged on both sides, and the content is limited to one conversation the
+attacker already controls. If that trade is not worth it for a deployment,
+`crossChat: false` restores destination pinning completely and is the default.
+
+The bridge separately originates messages to operators on its own — watchdog
+alerts and control-command replies — but that is the bridge addressing a
+configured number, not a capability the agent can reach or name.
 
 ### T5 — Abuse, cost denial-of-service, and spam
 

@@ -210,3 +210,74 @@ describe('OutboxAction schema', () => {
     expect(OutboxAction.safeParse({ ...base, kind: 'text', text: '' }).success).toBe(false);
   });
 });
+
+/**
+ * The race the single-open discipline exists to close.
+ *
+ * A security review found that the checks validated a path and then handed the
+ * path back, after which the caller opened it a second time to read the bytes.
+ * Every individual check was correct; the whole was still defeatable, because
+ * the agent writes to this directory and only had to swap the name in between
+ * — the classic check-by-path / use-by-path race (CWE-367).
+ *
+ * These tests pin the property that closes it: what comes back is the *content
+ * read from the descriptor that was validated*, so there is no second
+ * resolution of the name for anything to race. Swapping the file afterwards
+ * changes what is on disk and cannot change what is about to be sent.
+ */
+describe('resolveOutboundFile — returns validated bytes, not a re-openable path', () => {
+  it('returns the content it checked', () => {
+    const { files } = scratch();
+    writeFileSync(join(files, 'chart.png'), PNG);
+    const result = resolveOutboundFile('chart.png', files);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Buffer.compare(result.data, PNG)).toBe(0);
+    expect(result.bytes).toBe(PNG.length);
+  });
+
+  it('a swap after resolution cannot change what was resolved', () => {
+    const { files, secret } = scratch();
+    const staged = join(files, 'holiday.png');
+    writeFileSync(staged, PNG);
+
+    const result = resolveOutboundFile('holiday.png', files);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // The agent wins the race: same name, now pointing at the credentials.
+    rmSync(staged);
+    symlinkSync(secret, staged);
+
+    // Irrelevant. The bytes were taken from the descriptor that passed the
+    // checks, and nothing reopens the name.
+    expect(Buffer.compare(result.data, PNG)).toBe(0);
+    expect(result.data.toString()).not.toContain('credentials');
+  });
+
+  it('refuses a .json symlink to the credentials, which has no magic bytes to catch it', () => {
+    const { files, secret } = scratch();
+    symlinkSync(secret, join(files, 'notes.json'));
+    expect(resolveOutboundFile('notes.json', files)).toMatchObject({
+      ok: false,
+      reason: 'file is a symlink',
+    });
+  });
+
+  it('refuses everything in a swapped outbox directory', () => {
+    const { files, secret } = scratch();
+    const parent = join(files, '..');
+    rmSync(files, { recursive: true });
+    symlinkSync(join(secret, '..'), join(parent, 'files'));
+    expect(resolveOutboundFile('creds.json', files)).toMatchObject({ ok: false });
+  });
+
+  it('hands back a path only for unlinking, and it stays inside the outbox', () => {
+    const { files } = scratch();
+    writeFileSync(join(files, 'a.jpg'), JPEG);
+    const result = resolveOutboundFile('a.jpg', files);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.unlinkPath).toBe(join(files, 'a.jpg'));
+  });
+});

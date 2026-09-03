@@ -13,6 +13,7 @@
  * continuity: new keys are issued and conversations start fresh.
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { chatKeyFor, newSalt, writeFileAtomic, writeJsonAtomic } from '@tulip/shared';
 import { z } from 'zod';
 import { log } from './log.js';
@@ -30,6 +31,16 @@ const ChatRecord = z
     messages: z.number().int().nonnegative().default(0),
     /** Set by an operator via `!block`. Checked before every other gate. */
     blocked: z.boolean().default(false),
+    /**
+     * Created from `agent.contacts` rather than by somebody messaging in.
+     *
+     * Two things depend on knowing the difference. The panel says which rows an
+     * operator put there by hand, and the agent is told which destinations it
+     * may approach unprompted — a contact is a standing invitation, a chat that
+     * merely wrote in once is not. Defaulted, so records persisted before this
+     * field existed load unchanged.
+     */
+    contact: z.boolean().default(false),
   })
   .strict();
 
@@ -58,7 +69,10 @@ export class ChatRegistry {
    * simultaneously losing its memory.
    */
   private loadSalt(): string {
-    mkdirSync(paths.root, { recursive: true });
+    // The directory this instance was actually given, not the global state
+    // root. They are the same in production; injecting a path and then creating
+    // a different one made the registry untestable without touching /state.
+    mkdirSync(dirname(this.saltFile), { recursive: true });
     if (existsSync(this.saltFile)) {
       const existing = readFileSync(this.saltFile, 'utf8').trim();
       if (/^[0-9a-f]{64}$/.test(existing)) return existing;
@@ -107,10 +121,70 @@ export class ChatRegistry {
         lastSeenAt: now,
         messages: 0,
         blocked: false,
+        contact: false,
       });
       this.dirty = true;
     }
     return chatKey;
+  }
+
+  /**
+   * Reconcile the operator's contact list into the registry.
+   *
+   * Called on boot and whenever the list is edited. Registering a contact is
+   * the only way a chat record comes into being without somebody having sent a
+   * message, which is the whole point: it gives the agent a destination for
+   * somebody who has never written to it.
+   *
+   * Removal deliberately does *not* delete the record. A contact that has since
+   * held a real conversation has history, a session and possibly a block on it,
+   * and dropping a row would orphan all of that — plus reissue a different key
+   * for the same person if they were ever added back, silently resetting their
+   * conversation. So removal clears the flag and leaves the chat alone; a
+   * contact who never wrote in simply stops being offered as a destination.
+   */
+  syncContacts(contacts: ReadonlyArray<{ label: string; number: string }>, now: number): void {
+    const wanted = new Set<string>();
+
+    for (const { label, number } of contacts) {
+      const jid = `${number}@s.whatsapp.net`;
+      const chatKey = chatKeyFor(jid, this.salt);
+      wanted.add(chatKey);
+
+      const existing = this.byKey.get(chatKey);
+      if (existing) {
+        // The operator's label wins over the WhatsApp display name, which is
+        // supplied by the other end and is not trustworthy.
+        if (existing.contact !== true || existing.name !== label) {
+          existing.contact = true;
+          existing.name = label;
+          this.dirty = true;
+        }
+        continue;
+      }
+
+      this.byKey.set(chatKey, {
+        chatKey,
+        jid,
+        isGroup: false,
+        name: label,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        messages: 0,
+        blocked: false,
+        contact: true,
+      });
+      this.dirty = true;
+    }
+
+    for (const record of this.byKey.values()) {
+      if (record.contact && !wanted.has(record.chatKey)) {
+        record.contact = false;
+        this.dirty = true;
+      }
+    }
+
+    if (this.dirty) log('chats.contactsSynced', { count: wanted.size });
   }
 
   /**
