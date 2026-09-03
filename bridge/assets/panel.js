@@ -1040,61 +1040,86 @@ async function refresh() {
  * one frame rather than a render loop, which is what makes a full-viewport
  * canvas an acceptable way to carry a background texture.
  *
- * **The noise texture has to finish loading first.** The shader samples a
- * pre-computed randomiser for its fibre and speckle layers rather than
- * generating noise per pixel, and `ShaderMount` throws outright if that image
- * is not decoded yet — "image for uniform u_noiseTexture must be fully loaded".
- * `getShaderNoiseTexture()` hands back an `HTMLImageElement` that usually is
- * not, so mounting immediately fails every time. It failed silently here, which
- * is why the catch below now says something: a backdrop that does not appear is
- * cosmetic, but a backdrop that cannot appear and reports nothing is a bug that
- * survives a deploy.
+ * **Both samplers have to be loaded images, and neither may be skipped.**
+ *
+ *   - `u_noiseTexture` is the pre-computed randomiser the fibre and speckle
+ *     layers read instead of generating noise per pixel. `ShaderMount` throws
+ *     outright if it has not decoded — "image for uniform u_noiseTexture must
+ *     be fully loaded" — and `getShaderNoiseTexture()` hands back an element
+ *     that usually has not.
+ *   - `u_image` is the optional source image, and "optional" is a property of
+ *     the shader rather than of the mount. Leaving it `undefined` does not bind
+ *     an empty texture, it leaves the sampler pointing at whichever unit was
+ *     bound last — which is the randomiser, so the page renders as raw RGB
+ *     noise. The library exports `emptyPixel` for exactly this, and only
+ *     `HTMLImageElement` values are turned into textures, so the data URI has
+ *     to be loaded rather than passed as a string.
+ *
+ * Both failures were silent before: one threw into a catch that said nothing,
+ * the other rendered something plausible-but-wrong. Hence the warnings.
  *
  * Not gated on `prefers-reduced-motion`, unlike the masthead's gradient: there
  * is no motion here to reduce, and a person who asked for less animation still
  * wants the page to have its surface.
  */
-function mountPaper() {
+function loadImage(src) {
+  return new Promise(function (resolve, reject) {
+    var img = new Image();
+    img.onload = function () { resolve(img); };
+    img.onerror = function () { reject(new Error('could not load ' + String(src).slice(0, 40))); };
+    img.src = src;
+  });
+}
+
+function ready(img) {
+  if (!img) return Promise.resolve(null);
+  if (img.complete && img.naturalWidth > 0) return Promise.resolve(img);
+  return new Promise(function (resolve) {
+    img.addEventListener('load', function () { resolve(img); }, { once: true });
+    img.addEventListener('error', function () { resolve(null); }, { once: true });
+  });
+}
+
+async function mountPaper() {
   if (typeof PaperShaders === 'undefined' || !PaperShaders.ShaderMount) return;
   if (!PaperShaders.paperTextureFragmentShader) return;
   var host = el('paper');
   if (!host) return;
 
-  function mount(noise) {
-    try {
-      var uniforms = Object.assign({}, PaperShaders.defaultPatternSizing || {}, {
-        u_image: undefined,
-        u_imageAspectRatio: 1,
-        u_colorBack: [0, 0, 0, 1],
-        u_colorFront: [0.047, 0.051, 0.055, 1],
-        u_contrast: 0.17,
-        u_roughness: 0.68,
-        u_fiber: 0.3,
-        u_fiberSize: 0.13,
-        u_crumples: 0,
-        u_crumpleSize: 0.01,
-        u_folds: 0,
-        u_foldCount: 1,
-        u_drops: 0.07,
-        u_fade: 0,
-        u_seed: 5.8,
-        u_scale: 0.6,
-        u_fit: 2
-      });
-      if (noise) uniforms.u_noiseTexture = noise;
-      new PaperShaders.ShaderMount(host, PaperShaders.paperTextureFragmentShader, uniforms, undefined, 0);
-    } catch (err) {
-      console.warn('[tulip] paper texture did not mount:', err && err.message ? err.message : err);
-    }
-  }
+  try {
+    var noise = await ready(PaperShaders.getShaderNoiseTexture ? PaperShaders.getShaderNoiseTexture() : null);
+    if (!noise) { console.warn('[tulip] paper texture: no noise source, skipping'); return; }
+    var blank = await loadImage(PaperShaders.emptyPixel);
 
-  var noise = PaperShaders.getShaderNoiseTexture ? PaperShaders.getShaderNoiseTexture() : null;
-  if (!noise) { mount(null); return; }
-  if (noise.complete && noise.naturalWidth > 0) { mount(noise); return; }
-  noise.addEventListener('load', function () { mount(noise); }, { once: true });
-  noise.addEventListener('error', function () {
-    console.warn('[tulip] paper texture: the noise source failed to load');
-  }, { once: true });
+    new PaperShaders.ShaderMount(host, PaperShaders.paperTextureFragmentShader, {
+      u_image: blank,
+      u_noiseTexture: noise,
+      u_colorBack: [0, 0, 0, 1],
+      u_colorFront: [0.047, 0.051, 0.055, 1],
+      u_contrast: 0.17,
+      u_roughness: 0.68,
+      u_fiber: 0.3,
+      u_fiberSize: 0.13,
+      u_crumples: 0,
+      u_crumpleSize: 0.01,
+      u_folds: 0,
+      u_foldCount: 1,
+      u_drops: 0.07,
+      u_fade: 0,
+      u_seed: 5.8,
+      u_fit: 2,
+      u_scale: 0.6,
+      u_rotation: 0,
+      u_originX: 0.5,
+      u_originY: 0.5,
+      u_offsetX: 0,
+      u_offsetY: 0,
+      u_worldWidth: 0,
+      u_worldHeight: 0
+    }, undefined, 0);
+  } catch (err) {
+    console.warn('[tulip] paper texture did not mount:', err && err.message ? err.message : err);
+  }
 }
 
 function mountShader() {
@@ -1135,7 +1160,7 @@ function mountTopbarMark() {
 buildNav();
 mountTopbarMark();
 wireNavToggle();
-mountPaper();
+void mountPaper();
 mountShader();
 go((location.hash || '#/overview').replace('#/', '') || 'overview');
 window.addEventListener('hashchange', function () { go((location.hash || '#/overview').replace('#/', '')); });
