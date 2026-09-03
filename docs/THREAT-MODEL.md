@@ -126,6 +126,17 @@ Three independent layers, in order of how hard they are to bypass:
    only `api.anthropic.com` produced a refusal naming `platform.claude.com`
    exactly, rather than a silent failure somewhere else.
 
+   **Pointing the agent at a non-Anthropic provider widens this.** Claude Code
+   speaks the Messages API to any endpoint, so an operator may set
+   `ANTHROPIC_BASE_URL` — which means adding that host to the allowlist, and
+   therefore a second destination reachable from inside the jail. Two
+   consequences worth stating rather than discovering: the residual channel in
+   the paragraph above now has two ends instead of one, and the model answering
+   the public is not the one this threat model was written about. The isolation
+   properties are unaffected — they are properties of the container, not of the
+   model — but T1 and T6 assume a model that behaves broadly like Claude, and
+   that assumption is the operator's to re-check.
+
 **Residual, stated plainly:** the allowlisted destination is itself a channel. An
 attacker who controls the content of a prompt can encode data into text that
 Tulip sends to `api.anthropic.com`, and can in principle encode data into a reply

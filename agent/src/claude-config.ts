@@ -62,7 +62,7 @@ export function seedClaudeConfig(projectDir: string): void {
   // wrong here: the key was put there deliberately by the compose file, and
   // there is nobody to answer. Approvals are recorded by the key's last twenty
   // characters, so only that suffix is ever written down.
-  const apiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
+  const apiKey = process.env['ANTHROPIC_API_KEY'] ?? process.env['ANTHROPIC_AUTH_TOKEN'] ?? '';
   const responses =
     (config['customApiKeyResponses'] as { approved?: string[]; rejected?: string[] } | undefined) ?? {};
   const approved = new Set(responses.approved ?? []);

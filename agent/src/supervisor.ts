@@ -34,7 +34,7 @@ const pool = new SessionPool({
   // run. See docs/THREAT-MODEL.md §T1: the permission prompt is not what is
   // keeping anyone safe here, the container is.
   claudeArgs: ['--dangerously-skip-permissions'],
-  model: process.env['TULIP_MODEL'] ?? null,
+  model: process.env['TULIP_MODEL'] || null,
 });
 
 let busyTurn: string | null = null;
@@ -175,10 +175,36 @@ async function waitForTurnEnd(session: Session): Promise<void> {
   }
 }
 
+/**
+ * Variables that must be *absent* rather than empty.
+ *
+ * Compose sets every variable it declares, so an unused provider override
+ * arrives in the container as an empty string — and an empty
+ * `ANTHROPIC_BASE_URL` is not the same as no base URL, any more than
+ * `--model ""` is the same as no `--model`. Cleared here, before the tmux
+ * server is started, because the server inherits this process's environment
+ * once and every session afterwards inherits the server's.
+ */
+function stripEmptyEnv(): void {
+  for (const name of [
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_MODEL',
+    'MAX_THINKING_TOKENS',
+    'TULIP_MODEL',
+  ]) {
+    if (process.env[name] === '') delete process.env[name];
+  }
+}
+
 async function main(): Promise<void> {
+  stripEmptyEnv();
   log('supervisor.start', {
     maxLive: Number(process.env['TULIP_MAX_LIVE_SESSIONS'] ?? 3),
     model: process.env['TULIP_MODEL'] ?? 'default',
+    provider: process.env['ANTHROPIC_BASE_URL'] ?? 'anthropic',
+    thinking: process.env['MAX_THINKING_TOKENS'] === '0' ? 'disabled' : 'default',
   });
   publishStatus();
 

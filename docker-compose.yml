@@ -115,9 +115,20 @@ services:
 
     environment:
       # The only credential in this container, and the only one that has to be.
-      # Use a dedicated, budget-capped key: it is reachable by anyone who
-      # achieves code execution here, which the threat model assumes they do.
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
+      # Whichever is used, it is reachable by anyone who achieves code execution
+      # here — the threat model assumes they do — so it should be dedicated and
+      # capped rather than a credential that unlocks anything else.
+      #
+      # Set EITHER ANTHROPIC_API_KEY (Anthropic direct) OR ANTHROPIC_AUTH_TOKEN
+      # with ANTHROPIC_BASE_URL (an Anthropic-compatible provider). The unused
+      # ones arrive as empty strings, which the supervisor strips before the
+      # tmux server inherits them — an empty base URL is not the same as none.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      # Some Anthropic-compatible models think by default and spend the whole
+      # token budget on reasoning, returning an empty reply. Set to 0 for those.
+      MAX_THINKING_TOKENS: ${MAX_THINKING_TOKENS:-}
       HTTPS_PROXY: http://egress:3128
       HTTP_PROXY: http://egress:3128
       # Belt and braces: even if something ignored the proxy variables, there is
