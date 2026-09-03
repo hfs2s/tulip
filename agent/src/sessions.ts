@@ -79,9 +79,23 @@ const DIALOGS: ReadonlyArray<readonly [RegExp, readonly string[]]> = [
  */
 const FATAL: ReadonlyArray<readonly [RegExp, string]> = [
   [/Login expired|Please run \/login|Invalid API key|authentication_error/i, 'Claude Code credentials are not valid'],
-  [/Credit balance is too low|insufficient_quota/i, 'the Anthropic account is out of credit'],
+  // "Credit balance too low", not "is too low" — the wording matters, and this
+  // pattern was wrong until a real deployment produced the real string.
+  [/Credit balance (?:is )?too low|insufficient_quota|Add funds/i, 'the Anthropic account is out of credit'],
   [/usage limit reached|rate.?limit/i, 'the Anthropic usage limit has been reached'],
 ];
+
+/**
+ * Markers Claude Code puts at the start of a turn's result line.
+ *
+ * `●` prefixes an assistant result; `⎿` prefixes a tool or error result, and is
+ * what a failed turn actually produces. Matching only `●` — which is what this
+ * did first — means the two states most worth alerting on, no credit and an
+ * expired login, are invisible: the turn fails instantly, the session looks
+ * perfectly healthy, and nobody is answered. That is precisely the fortnight-
+ * long outage this detector exists to prevent.
+ */
+const RESULT_MARKER = /^\s*[●⎿]/;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -202,21 +216,7 @@ export class SessionPool {
 
   /** Something only a human can clear, or null. */
   async fatalState(window: string): Promise<string | null> {
-    const screen = await capture(window, 60);
-    // Only the most recent turn's result counts: the TUI keeps finished turns
-    // on screen, so a failure from hours ago would otherwise be reported as a
-    // permanent, self-healing-proof outage.
-    const lines = screen.split('\n');
-    let latest: string | null = null;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = (lines[i] ?? '').trim();
-      if (line.startsWith('●')) {
-        latest = line;
-        break;
-      }
-    }
-    if (latest === null) return null;
-    return FATAL.find(([pattern]) => pattern.test(latest))?.[1] ?? null;
+    return lastResultFatal(await capture(window, 60));
   }
 
   /**
@@ -264,4 +264,27 @@ function transcriptExists(uuid: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Read the most recent turn's result out of a pane, and classify it.
+ *
+ * Only the *last* result counts. The TUI keeps finished turns on screen, so a
+ * failure from hours ago would otherwise be reported forever as a permanent,
+ * self-healing-proof outage — and an operator who is paged about an outage that
+ * has already fixed itself stops reading the pages.
+ *
+ * Exported and pure so it can be tested against panes captured from a real
+ * deployment, which is how the `⎿` marker and the exact credit wording were
+ * found in the first place.
+ */
+export function lastResultFatal(screen: string): string | null {
+  const lines = screen.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i] ?? '';
+    if (!RESULT_MARKER.test(line)) continue;
+    const text = line.replace(/^\s*[●⎿]\s*/, '').trim();
+    return FATAL.find(([pattern]) => pattern.test(text))?.[1] ?? null;
+  }
+  return null;
 }
