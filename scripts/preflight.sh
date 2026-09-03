@@ -94,8 +94,12 @@ except Exception as e:
     print(f"  \033[31m✗\033[0m config.json is not valid JSON: {e}")
     sys.exit(0)
 
+warnings = 0
 def ok(m):   print(f"  \033[32m✓\033[0m {m}")
-def warn(m): print(f"  \033[33m!\033[0m {m}")
+def warn(m):
+    global warnings
+    warnings += 1
+    print(f"  \033[33m!\033[0m {m}")
 
 ops = c.get("operators", {}).get("numbers", [])
 if ops:
@@ -123,7 +127,12 @@ if c.get("audience", {}).get("everyone"):
     ok("audience: everyone (this is the public configuration)")
 else:
     ok("audience: restricted to the numbers list")
+
+# The shell owns the summary, so hand the count back rather than printing a
+# second one that disagrees with it.
+sys.exit(min(warnings, 100))
 PY
+    warn=$((warn + $?))
   fi
 else
   bad "config.json is missing — copy config.example.json"
