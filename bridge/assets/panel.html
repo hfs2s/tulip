@@ -79,7 +79,32 @@
   h1.stopped{color:var(--bad)}
   .lede{font-size:15.5px;color:var(--dim);margin:0;max-width:62ch}
 
-  .page-wrap{padding:28px 40px 64px}
+  /* Paper, in the place you actually read.
+     `body::before` is fixed to the viewport, so its tooth sits still while the
+     page moves under it — which reads as a screen effect rather than a sheet.
+     This one is absolute inside `.page-wrap`, so it scrolls with the content it
+     belongs to and the whole column behaves like paper.
+
+     Two layers rather than one, composited with `background-blend-mode`. A
+     single turbulence at one frequency is uniform enough to look like sensor
+     noise; real stock has fine tooth *and* slow unevenness across the sheet, so
+     a 200px grain is blended with a 640px mottle. Blending the two backgrounds
+     against each other keeps the effect self-contained — unlike
+     `mix-blend-mode`, it does not depend on what happens to be behind the
+     element, which inside `main`'s stacking context is nothing.
+
+     `z-index:-1` puts it behind the sections without needing `isolation`, which
+     would cut it off from the ground colour it is meant to sit on. */
+  .page-wrap{padding:28px 40px 64px;position:relative}
+  .page-wrap::before{
+    content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+    background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27200%27%20height%3D%27200%27%3E%3Cfilter%20id%3D%27f%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.92%27%20numOctaves%3D%274%27%20stitchTiles%3D%27stitch%27%2F%3E%3CfeColorMatrix%20type%3D%27saturate%27%20values%3D%270%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23f%29%27%2F%3E%3C%2Fsvg%3E"),
+                     url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27640%27%20height%3D%27640%27%3E%3Cfilter%20id%3D%27m%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.016%27%20numOctaves%3D%275%27%20stitchTiles%3D%27stitch%27%2F%3E%3CfeColorMatrix%20type%3D%27saturate%27%20values%3D%270%27%2F%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type%3D%27gamma%27%20exponent%3D%271.7%27%2F%3E%3C%2FfeComponentTransfer%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23m%29%27%2F%3E%3C%2Fsvg%3E");
+    background-size:200px 200px,640px 640px;
+    background-blend-mode:overlay;
+    opacity:.085;
+  }
+
   h2{font:400 21px/1.2 var(--display);letter-spacing:-.02em;margin:0 0 4px}
   .sub{font-size:13.5px;color:var(--faint);margin:0 0 20px;max-width:64ch}
 
