@@ -1,0 +1,13 @@
+{
+  "name": "@tulip/egress",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deny-by-default CONNECT proxy: the agent's only permitted path to the internet.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node dist/index.js"
+  }
+}

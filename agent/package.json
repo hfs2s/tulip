@@ -1,0 +1,20 @@
+{
+  "name": "@tulip/agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The untrusted half: per-chat Claude Code session pool, tmux driver, and the tulip-wa CLI.",
+  "license": "MIT",
+  "main": "./dist/supervisor.js",
+  "bin": {
+    "tulip-wa": "./dist/bin/tulip-wa.js"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node dist/supervisor.js"
+  },
+  "dependencies": {
+    "@tulip/shared": "*",
+    "zod": "^3.24.1"
+  }
+}
