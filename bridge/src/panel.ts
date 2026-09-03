@@ -35,7 +35,7 @@
  * else — see `panel-api.ts`.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,6 +140,36 @@ function asset(name: string): Buffer | null {
   }
 }
 
+/**
+ * Serve a build artefact so a deploy actually reaches the browser.
+ *
+ * These used to be `max-age=86400`. The page itself is `no-store`, so an
+ * operator always got fresh HTML — and, for up to a day afterwards, the
+ * *previous* `panel.js` to go with it. A shipped fix that the browser refuses
+ * to fetch is indistinguishable from a fix that does not work, and it cost real
+ * debugging time before it was noticed.
+ *
+ * `no-cache` does not mean "do not cache": it means "revalidate before use". So
+ * the body is still cached and an unchanged asset costs a 304 with no payload,
+ * while a changed one is picked up on the next load. The ETag is the content
+ * hash, so it changes exactly when the file does.
+ */
+function serveAsset(
+  res: ServerResponse,
+  req: IncomingMessage,
+  headers: Record<string, string>,
+  contentType: string,
+  body: Buffer | string,
+): void {
+  const etag = `"${createHash('sha256').update(body).digest('base64url').slice(0, 22)}"`;
+  const common = { ...headers, 'content-type': contentType, etag, 'cache-control': 'private, no-cache' };
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, common).end();
+    return;
+  }
+  res.writeHead(200, common).end(body);
+}
+
 export function startPanel(deps: ApiDeps): Server | null {
   if (!deps.config.panel.enabled) return null;
 
@@ -238,7 +268,7 @@ export function startPanel(deps: ApiDeps): Server | null {
             res.writeHead(500, { ...headers, 'content-type': 'text/javascript' }).end('/* not built */');
             return;
           }
-          res.writeHead(200, { ...headers, 'content-type': 'text/javascript; charset=utf-8' }).end(script);
+          serveAsset(res, req, headers, 'text/javascript; charset=utf-8', script);
           return;
         }
         if (url.pathname === '/favicon.svg') {
@@ -246,9 +276,7 @@ export function startPanel(deps: ApiDeps): Server | null {
             res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
             return;
           }
-          res
-            .writeHead(200, { ...headers, 'content-type': 'image/svg+xml', 'cache-control': 'private, max-age=86400' })
-            .end(favicon);
+          serveAsset(res, req, headers, 'image/svg+xml', favicon);
           return;
         }
         if (url.pathname === '/shaders.js') {
@@ -258,9 +286,7 @@ export function startPanel(deps: ApiDeps): Server | null {
             res.writeHead(404, { ...headers, 'content-type': 'text/javascript' }).end('/* not bundled */');
             return;
           }
-          res
-            .writeHead(200, { ...headers, 'content-type': 'text/javascript', 'cache-control': 'private, max-age=86400' })
-            .end(bundle);
+          serveAsset(res, req, headers, 'text/javascript', bundle);
           return;
         }
         if (/^\/fonts\/[A-Za-z0-9._-]+\.woff2$/.test(url.pathname)) {
@@ -270,7 +296,7 @@ export function startPanel(deps: ApiDeps): Server | null {
             return;
           }
           res
-            .writeHead(200, { ...headers, 'content-type': 'font/woff2', 'cache-control': 'private, max-age=604800' })
+            .writeHead(200, { ...headers, 'content-type': 'font/woff2', 'cache-control': 'private, max-age=604800, immutable' })
             .end(file);
           return;
         }
