@@ -29,6 +29,18 @@ export const inPaths = {
   /** Received attachments, one directory per chat key. */
   media: `${IN_DIR}/media`,
   mediaFor: (chatKey: string) => `${IN_DIR}/media/${chatKey}`,
+
+  /**
+   * Answers to the agent's tool requests — a web search, a page fetch.
+   *
+   * On the *inbound* volume deliberately, which is the read-only side for the
+   * agent. The agent asks by writing an action and reads the answer here; it
+   * cannot forge a result, edit one, or replay an old one, because the mount
+   * refuses the write. The bridge is the only writer of anything the agent
+   * treats as having come from outside.
+   */
+  results: `${IN_DIR}/results`,
+  result: (actionId: string) => `${IN_DIR}/results/${actionId}.json`,
 } as const;
 
 /** Outbound: written by the agent, consumed and deleted by the bridge. */

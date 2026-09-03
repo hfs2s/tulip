@@ -16,11 +16,13 @@
  */
 import { createReadStream, lstatSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { basename, join, resolve, sep } from 'node:path';
+import { mkdirSync, statSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { OutboxAction, outPaths } from '@tulip/shared';
+import { OutboxAction, ToolResult, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
 import type { OutboxAction as OutboxActionType } from '@tulip/shared';
 import { feed } from './feed.js';
 import { findGif, type Rating } from './giphy.js';
+import { fetchPage, search, type ExaOutcome } from './exa.js';
 import { log } from './log.js';
 import type { Limiter } from './ratelimit.js';
 import type { TurnRegistry } from './turns.js';
@@ -181,6 +183,7 @@ export class Outbox extends EventEmitter {
   private readonly attempts = new Map<string, number>();
   private draining = false;
   private timer: NodeJS.Timeout | null = null;
+  private sweeper: NodeJS.Timeout | null = null;
 
   constructor(private readonly deps: OutboxDeps) {
     super();
@@ -188,13 +191,17 @@ export class Outbox extends EventEmitter {
 
   start(): this {
     this.timer = setInterval(() => void this.drain(), 1000);
+    this.sweeper = setInterval(() => this.sweepResults(), 60_000);
+    this.sweeper.unref();
     void this.drain();
     return this;
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
+    if (this.sweeper) clearInterval(this.sweeper);
     this.timer = null;
+    this.sweeper = null;
   }
 
   async drain(): Promise<void> {
@@ -276,6 +283,60 @@ export class Outbox extends EventEmitter {
     return result.data;
   }
 
+  /**
+   * Write a tool answer where the agent can read it.
+   *
+   * Onto the *inbound* volume, which the agent mounts read-only: it can read
+   * the answer and cannot forge, edit or replay one. The bridge stays the only
+   * writer of anything the agent treats as having come from outside.
+   */
+  private async answer(actionId: string, kind: 'search' | 'fetch', outcome: ExaOutcome): Promise<void> {
+    const result = ToolResult.safeParse({
+      actionId,
+      kind,
+      at: new Date().toISOString(),
+      ok: outcome.ok,
+      error: outcome.ok ? null : outcome.error.slice(0, 300),
+      items: outcome.ok ? outcome.items : [],
+    });
+    if (!result.success) {
+      log('outbox.resultInvalid', { actionId, issues: result.error.issues.length });
+      return;
+    }
+    try {
+      mkdirSync(inPaths.results, { recursive: true });
+      writeJsonAtomic(inPaths.result(actionId), result.data, 0o644);
+      log('outbox.answered', { actionId, kind, ok: result.data.ok, items: result.data.items.length });
+    } catch (err) {
+      log('outbox.answerFailed', { actionId, err: String((err as Error).message) });
+    }
+    await Promise.resolve();
+  }
+
+  /**
+   * Delete answers the agent has had long enough to read.
+   *
+   * The agent cannot clean these up — its mount is read-only — so the bridge
+   * must, or the volume grows for as long as the deployment runs.
+   */
+  private sweepResults(): void {
+    let names: string[];
+    try {
+      names = readdirSync(inPaths.results);
+    } catch {
+      return;
+    }
+    const cutoff = Date.now() - 10 * 60 * 1000;
+    for (const name of names) {
+      const file = join(inPaths.results, name);
+      try {
+        if (statSync(file).mtimeMs < cutoff) rmSync(file, { force: true });
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+
   private stale(file: string): boolean {
     try {
       return Date.now() - lstatSync(file).mtimeMs > 5000;
@@ -343,6 +404,17 @@ export class Outbox extends EventEmitter {
         }
         await this.deps.wa.sendGif(turn.chatJid, gif.video, action.caption);
         feed.outbound(turn.chatKey, 'gif', `[gif] ${gif.title}`);
+        break;
+      }
+      // Tool requests. These do not send anybody a message, so they are not
+      // charged against the outbound allowance above — but they do leave the
+      // deployment, which is why they are rate-limited by turn instead.
+      case 'search': {
+        await this.answer(action.id, 'search', await search(action.query, action.results));
+        break;
+      }
+      case 'fetch': {
+        await this.answer(action.id, 'fetch', await fetchPage(action.url));
         break;
       }
       case 'react': {

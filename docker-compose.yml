@@ -80,6 +80,12 @@ services:
       GIPHY_API_KEY: ${GIPHY_API_KEY:-}
       # g | pg | pg-13 | r — enforced where the agent cannot reach it.
       GIPHY_RATING: ${GIPHY_RATING:-pg}
+      # Web search and page reading, for the same reason and on the same terms:
+      # the agent asks, the bridge performs. Rotated on rate limits. See
+      # bridge/src/exa.ts for why `fetch` is not an HTTP request from here.
+      EXA_API_KEY: ${EXA_API_KEY:-}
+      EXA_BACKUP_API_KEY: ${EXA_BACKUP_API_KEY:-}
+      EXA_BACKUP_API_KEY2: ${EXA_BACKUP_API_KEY2:-}
     volumes:
       - state:/state
       - handoff-in:/handoff/in

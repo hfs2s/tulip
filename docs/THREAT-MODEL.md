@@ -139,10 +139,41 @@ Three independent layers, in order of how hard they are to bypass:
 
 **Residual, stated plainly:** the allowlisted destination is itself a channel. An
 attacker who controls the content of a prompt can encode data into text that
-Tulip sends to `api.anthropic.com`, and can in principle encode data into a reply
+Tulip sends to the model endpoint, and can in principle encode data into a reply
 that Tulip sends back over WhatsApp to *the attacker's own chat*. This is
 irreducible — a bot that talks to you can tell you things — and it is why T4 and
 T6 matter: what it can tell you is limited to what it can see.
+
+**The tools widen this, and it is worth being exact about how.** The agent can
+ask the bridge to run a web search or read a page (`bridge/src/exa.ts`), and a
+search phrase is agent-controlled text that leaves the deployment. So the
+channel is no longer only "a reply to one chat" — it is also "up to 400
+characters, to a third party, on demand".
+
+What that does *not* change is the value of the channel. The agent holds no
+credential worth encoding, cannot read another conversation (T4), and cannot see
+a phone number. It is a wider pipe out of a room that is still empty.
+
+What it does change is the direction of risk: the serious consequence of these
+tools is not exfiltration but T6, because they are an intake for hostile text
+written by people who are not in the conversation at all.
+
+**Why the tools live in the bridge.** The obvious implementation gives the agent
+an API key and opens the provider in the egress allowlist. That is a bad trade
+twice over: a live credential lands in the container this document assumes an
+attacker owns, and the provider's page-reading endpoint fetches arbitrary URLs —
+so a hole punched for "search" is in practice a hole for reading the whole
+internet from inside the jail, with a convenient API. Asking the bridge instead
+keeps the key on the trusted side and adds no reachable host to `tulip-lan`.
+
+**And why `fetch` does not mean what it sounds like.** The bridge must never
+perform an HTTP request against a URL the agent chose. The bridge sits on both
+networks; a URL-fetching endpoint driven by an untrusted process is textbook
+server-side request forgery, and would hand the agent the reach that
+`internal: true` exists to deny — cloud metadata, the Docker gateway, anything
+else on the host's networks. Instead the bridge asks the *search provider* to
+retrieve the page. The only host that module ever connects to is the provider's
+API; the agent's URL travels as data in a JSON body, never as a destination.
 
 ### T3 — WhatsApp account takeover
 
@@ -203,9 +234,29 @@ restrict the number independently of anything Tulip does.
 
 *A3 controls a document or page the agent reads while working on A1's request.*
 
-The agent cannot fetch a web page: the egress allowlist does not include the
-internet at large (T2). The realistic vector is therefore a document a user sends
-over WhatsApp, which is stored in `tulip-in` and read from disk.
+**This is now the most live threat in the document, and the one to watch.**
+
+It used to be nearly theoretical: the agent had no way to reach a web page, so
+the only vector was a document somebody sent over WhatsApp. Giving it search and
+page-reading changes that. A page can be prepared in advance, by somebody who is
+not in the conversation, and made to rank for a phrase the agent is likely to
+search — which is a genuinely harder problem than a hostile message, because
+there is no sender to rate-limit or block.
+
+Three things bound it, and none of them is a prompt:
+
+- **The blast radius is unchanged.** A successful injection still lands in a
+  container with no credentials, no route out except the model endpoint and the
+  search provider, and no access to another conversation (T4). Everything under
+  T1 applies exactly as before.
+- **Results are labelled where they are read**, not only in the persona. The
+  text the agent receives is prefixed with a statement that it is data from the
+  open internet and that pages sometimes contain text designed to look like
+  instructions. A label at the point of use is worth more than a paragraph in a
+  system prompt read an hour earlier — though it is defence in depth, not a
+  control, and is not counted on.
+- **The bridge never acts on page content.** It copies text into a file. Nothing
+  in the trusted half parses, follows or branches on what a page says.
 
 Controls are the same as T1 — the payload achieves execution in a container worth
 nothing — plus session isolation (T4), which bounds what a successful injection
@@ -264,6 +315,7 @@ been read carefully.
 | R4 | **Baileys is an unofficial WhatsApp client.** Its protocol handling is reverse-engineered and it may be broken or banned at any time. | Accepted; there is no official self-hosted alternative. Blast radius is one phone number. |
 | R5 | **DNS through the Docker daemon.** The `127.0.0.1` resolver closes the container's own path out, but the daemon's embedded DNS remains an implementation detail we do not control. | Verified closed in `scripts/verify-containment.sh`, which asserts resolution and egress both fail from inside the agent. Re-run after any Docker upgrade. |
 | R6 | **A compromised agent can exhaust host resources.** | Bounded by `pids_limit`, `cpus` and `mem_limit` — *provided the host kernel exposes those cgroup controllers*. It may not: Raspberry Pi OS ships with the memory controller **disabled**, and Docker discards a limit it cannot enforce with a single warning line during startup. `scripts/preflight.sh` checks for this explicitly, because a resource cap that is written down but not in force is worse than one that was never claimed. Enable it with `cgroup_enable=memory cgroup_memory=1` in `/boot/firmware/cmdline.txt` and reboot. |
+| R8 | **A prepared web page is an un-blockable injection vector.** Search results cannot be rate-limited by sender, because there is no sender. | Accepted as the cost of the agent being able to check facts instead of guessing at them. Bounded by T1 — the container is worth nothing — and by results being labelled as data at the point of use. Remove the tools if the trade stops being worth it: they are two action kinds in `shared/src/handoff.ts` and one module in the bridge. |
 | R7 | **The operator's control panel token is a bearer credential.** Anyone holding it can restart sessions and read message history. | Loopback-bound by default; exposing it is an explicit operator decision documented in `OPERATIONS.md`. |
 
 ---

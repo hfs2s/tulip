@@ -193,6 +193,33 @@ export const OutboxAction = z.discriminatedUnion('kind', [
     .object({
       id: z.string().uuid(),
       turnId: TurnId,
+      kind: z.literal('search'),
+      /** A search phrase. Performed by the bridge; see bridge/src/exa.ts. */
+      query: z.string().min(1).max(400),
+      results: z.number().int().min(1).max(10).default(5),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      kind: z.literal('fetch'),
+      /**
+       * A page to read.
+       *
+       * Constrained to http(s) here, and the bridge never dials it: it asks the
+       * search provider to fetch it and return the text. That distinction is
+       * the whole safety argument — a bridge that fetched agent-chosen URLs
+       * itself would be a server-side request forgery gadget sitting on both
+       * networks. See bridge/src/exa.ts.
+       */
+      url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'must be http or https'),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
       kind: z.literal('react'),
       /** A short grapheme cluster. Length-capped rather than emoji-validated. */
       emoji: z.string().min(1).max(16),
@@ -237,6 +264,40 @@ export const AgentStatus = z
   })
   .strict();
 
+/**
+ * The answer to a `search` or `fetch`, written by the bridge into the inbound
+ * volume for the agent to read.
+ *
+ * `content` is text from the open internet. It is the one thing in this system
+ * that is hostile *and* not written by the person the agent is talking to, so
+ * it is labelled rather than merely delivered: the agent is told what it is
+ * holding. See THREAT-MODEL.md §T6 — this channel is what makes indirect
+ * prompt injection a live concern rather than a theoretical one.
+ */
+export const ToolResult = z
+  .object({
+    actionId: z.string().uuid(),
+    kind: z.enum(['search', 'fetch']),
+    at: z.string().datetime(),
+    ok: z.boolean(),
+    /** Present when ok is false. Short, and safe to show a person. */
+    error: z.string().max(300).nullable(),
+    items: z
+      .array(
+        z
+          .object({
+            title: z.string().max(300),
+            url: z.string().max(2000),
+            published: z.string().max(40).nullable(),
+            /** Untrusted text from the page. Capped so one page cannot fill a context. */
+            text: z.string(),
+          })
+          .strict(),
+      )
+      .max(10),
+  })
+  .strict();
+
 // ─── Inferred types ──────────────────────────────────────────────────────────
 
 export type ChatKey = z.infer<typeof ChatKey>;
@@ -248,3 +309,4 @@ export type InboxBatch = z.infer<typeof InboxBatch>;
 export type CurrentTurn = z.infer<typeof CurrentTurn>;
 export type OutboxAction = z.infer<typeof OutboxAction>;
 export type AgentStatus = z.infer<typeof AgentStatus>;
+export type ToolResult = z.infer<typeof ToolResult>;
