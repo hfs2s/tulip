@@ -75,9 +75,33 @@ const Groups = z
      * Off by default. A public assistant added to a group answers people who
      * never chose to talk to it, in a room whose other members it cannot see
      * the history of. That is a product decision as much as a security one.
+     *
+     * **Groups do not consult `audience`.** Being in the room is the consent
+     * signal — somebody added the bot deliberately — so every member reaches
+     * the agent even while `audience.everyone` is false and the allowlist holds
+     * one number. That is the intended reading of a group, but it means
+     * enabling groups widens who can reach the agent, independently of every
+     * other audience setting. Worth knowing before switching it on.
      */
     enabled: z.boolean().default(false),
-    replyTo: z.enum(['mention', 'trigger']).default('mention'),
+    /**
+     * What reaches the agent from a group.
+     *
+     *   mention  — only a real @mention or a reply to us
+     *   trigger  — that, plus a message containing a trigger word
+     *   observe  — everything
+     *
+     * `observe` exists so the agent can be a *participant*: react to what people
+     * say, and answer when addressed. It is the expensive one, because every
+     * group message becomes a turn and therefore a model call — a busy group
+     * will spend a great deal of them. It also means the agent sees everything
+     * said in that room, which is a privacy decision the group should know
+     * about, not a setting to switch on quietly.
+     *
+     * It relies on the agent choosing silence most of the time; the persona
+     * carries that, and `tulip-wa quiet` is how it says nothing deliberately.
+     */
+    replyTo: z.enum(['mention', 'trigger', 'observe']).default('mention'),
     triggers: z.array(z.string().min(1).max(32)).max(8).default([]),
   })
   .strict()

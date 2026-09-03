@@ -20,6 +20,7 @@ import { EventEmitter } from 'node:events';
 import { OutboxAction, outPaths } from '@tulip/shared';
 import type { OutboxAction as OutboxActionType } from '@tulip/shared';
 import { feed } from './feed.js';
+import { findGif, type Rating } from './giphy.js';
 import { log } from './log.js';
 import type { Limiter } from './ratelimit.js';
 import type { TurnRegistry } from './turns.js';
@@ -326,6 +327,22 @@ export class Outbox extends EventEmitter {
         // Sent files are removed: the volume is not storage, and leaving them
         // lets a compromised agent fill the disk one send at a time.
         rmSync(file.path, { force: true });
+        break;
+      }
+      case 'gif': {
+        const gif = await findGif(action.query, {
+          apiKey: process.env['GIPHY_API_KEY'] ?? '',
+          rating: (process.env['GIPHY_RATING'] as Rating | undefined) ?? 'pg',
+        });
+        if (!gif.ok) {
+          // Cosmetic. A missing GIF must never cost somebody their reply, so
+          // this is recorded and dropped rather than retried or escalated.
+          log('outbox.gifFailed', { query: action.query, reason: gif.reason });
+          feed.event('gif.failed', `${action.query}: ${gif.reason}`);
+          return;
+        }
+        await this.deps.wa.sendGif(turn.chatJid, gif.video, action.caption);
+        feed.outbound(turn.chatKey, 'gif', `[gif] ${gif.title}`);
         break;
       }
       case 'react': {

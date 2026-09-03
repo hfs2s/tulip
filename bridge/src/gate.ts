@@ -61,8 +61,12 @@ export function gate(input: GateInput, config: Config): GateVerdict {
   if (input.isGroup) {
     if (!config.groups.enabled) return deny('groups are disabled');
 
+    // Everything reaches the agent, which then decides whether to speak. See
+    // the note on `replyTo` in config.ts for what this costs.
+    if (config.groups.replyTo === 'observe') return ACCEPT;
+
     // A real @mention or a reply to us is unambiguous consent to be addressed,
-    // and satisfies either mode.
+    // and satisfies either remaining mode.
     if (input.mentionsMe) return ACCEPT;
     if (config.groups.replyTo === 'mention') return deny('not mentioned in group');
 

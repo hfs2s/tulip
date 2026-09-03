@@ -23,8 +23,11 @@ import { readTurn, workspaceFor, WORKSPACE_ROOT } from './workspace.js';
 const USAGE = `usage:
   tulip-wa send <text>|-      reply to the person you are answering ("-" reads stdin)
   tulip-wa file <path> [text] send a file, with an optional caption
+  tulip-wa gif <search> [--caption "…"]
+                              find and send an animated GIF
   tulip-wa react <emoji>      react to their most recent message
   tulip-wa typing on|off      show or clear the typing indicator
+  tulip-wa quiet              deliberately say nothing this turn
   tulip-wa whoami             which conversation you are answering
 
 There is no way to address a different conversation. Replies go to the person
@@ -139,6 +142,17 @@ switch (command) {
     break;
   }
 
+  case 'gif': {
+    // A search phrase, not a URL — you have no internet. The bridge does the
+    // searching and the fetching; you only say what you are looking for.
+    const idx = rest.indexOf('--caption');
+    const caption = idx === -1 ? null : rest.slice(idx + 1).join(' ') || null;
+    const query = (idx === -1 ? rest : rest.slice(0, idx)).join(' ').trim();
+    if (query.length === 0) die('tulip-wa gif: need something to search for');
+    queue({ kind: 'gif', query: query.slice(0, 100), caption });
+    break;
+  }
+
   case 'react': {
     const emoji = rest.join(' ').trim();
     if (emoji.length === 0) die('tulip-wa react: need an emoji');
@@ -148,6 +162,22 @@ switch (command) {
 
   case 'typing': {
     queue({ kind: 'typing', on: rest[0] !== 'off' });
+    break;
+  }
+
+  case 'quiet': {
+    // Deliberate silence. The Stop hook relays a turn's final message when
+    // nothing was sent, so that a conversation can never go quiet by accident —
+    // but in a group the agent is *supposed* to say nothing most of the time,
+    // and without this every observed message would produce a reply. Marking
+    // the turn as spoken is how it opts out.
+    const { dir } = currentWorkspace();
+    try {
+      mkdirSync(join(dir, '.markers'), { recursive: true });
+      writeFileSync(join(dir, '.markers', 'spoke'), String(Date.now()));
+    } catch {
+      die('tulip-wa quiet: could not mark the turn as handled');
+    }
     break;
   }
 

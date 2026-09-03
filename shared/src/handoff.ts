@@ -145,8 +145,8 @@ export const CurrentTurn = z
  *
  * Note what is absent and cannot be added by an attacker: a recipient, a file
  * path, a shell command, a URL. The bridge derives the destination from
- * `turnId`, opens files only from its own directory, and performs only the four
- * actions below.
+ * `turnId`, opens files only from its own directory, and performs only the
+ * actions below. A GIF is a *search phrase*, not a URL, for the same reason.
  */
 export const OutboxAction = z.discriminatedUnion('kind', [
   z
@@ -168,6 +168,24 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       turnId: TurnId,
       kind: z.literal('file'),
       file: OutFileName,
+      caption: z.string().max(1024).nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      kind: z.literal('gif'),
+      /**
+       * A search phrase, never a URL.
+       *
+       * The agent has no internet, so it cannot fetch a GIF itself — it names
+       * what it wants and the bridge resolves it. That keeps the API key out of
+       * the agent container and leaves the egress allowlist untouched. It also
+       * means the content rating is enforced somewhere the agent cannot reach:
+       * choosing a phrase is expressible here, turning off the filter is not.
+       */
+      query: z.string().min(1).max(100),
       caption: z.string().max(1024).nullable(),
     })
     .strict(),
