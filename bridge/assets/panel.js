@@ -1,286 +1,4 @@
-/**
- * The panel's icon, page and script, as strings.
- *
- * ── The design ───────────────────────────────────────────────────────────────
- *
- * Dark and cinematic, after the Verity template: a near-black `#0d0d0f` ground,
- * one cyan accent, Onest for headings and Inter for body. The heading treatment
- * is the character of it and is the easy thing to get wrong — large, **weight
- * 400**, with tight negative tracking. Reaching for bold would turn restraint
- * into a dashboard.
- *
- * Eight pages behind a rail, matching Iris: overview, messages, chats, media,
- * tools, terminal, settings, log. Each gets the layout its content wants — a
- * verdict, a stream, a table, a grid, action rows, a slab, a definition list, a
- * monospace tail — rather than the same card repeated eight times.
- *
- * Motion is deliberately quieter than the reference. Verity is a marketing page
- * and reveals things as you scroll; this is a console somebody opens *because
- * something is wrong*. One orchestrated entrance, a fast route fade, and a
- * shader behind the masthead. All of it stops under `prefers-reduced-motion`.
- *
- * ── Two rules that make it safe to display strangers' messages ───────────────
- *
- *   - **Nothing is ever assigned to `innerHTML`.** Every value from the API
- *     reaches the DOM through `textContent`, so a message containing
- *     `<img onerror=…>` is displayed as those characters and never parsed as
- *     markup. This is the actual defence; the CSP is the backstop for a slip.
- *   - **Everything is same-origin.** The script, the fonts, the shader bundle
- *     and the icon are all served by the bridge, which is what lets the CSP say
- *     `script-src 'self'` rather than `'unsafe-inline'`.
- */
-
-/** A tulip, in the accent. Served same-origin so `img-src 'self'` covers it. */
-export const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-<rect width="32" height="32" rx="7" fill="#0d0d0f"/>
-<path d="M16 7c2.2 2.4 3.4 4.5 3.4 6.6 0 2.4-1.5 4-3.4 4s-3.4-1.6-3.4-4C12.6 11.5 13.8 9.4 16 7z" fill="#21d2ed"/>
-<path d="M11.2 10.6c.5 3 .3 5.2-.7 6.6-1.1 1.6-3 1.9-4.3.9s-1.4-2.9-.3-4.5c1-1.4 2.8-2.4 5.3-3z" fill="#21d2ed" opacity=".72"/>
-<path d="M20.8 10.6c2.5.6 4.3 1.6 5.3 3 1.1 1.6 1 3.5-.3 4.5s-3.2.7-4.3-.9c-1-1.4-1.2-3.6-.7-6.6z" fill="#21d2ed" opacity=".72"/>
-<path d="M16 18v7" stroke="#21d2ed" stroke-width="1.8" stroke-linecap="round" opacity=".55"/>
-</svg>`;
-
-export const PANEL_HTML = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
-<title>Tulip</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<style>
-  /* Vendored at image build time. The fallback stacks carry the page on their
-     own when the files are absent, which they are in a development tree. */
-  @font-face{font-family:'Onest';src:url('/fonts/onest.woff2') format('woff2');
-             font-weight:100 900;font-display:swap}
-  @font-face{font-family:'InterVar';src:url('/fonts/inter.woff2') format('woff2');
-             font-weight:100 900;font-display:swap}
-
-  :root{
-    --ground:#0d0d0f; --panel:#111113; --raise:#141416;
-    --line:rgba(255,255,255,.09); --line-soft:rgba(255,255,255,.055);
-    --ink:#fafafa; --dim:rgba(250,250,250,.64); --faint:rgba(250,250,250,.42);
-    --accent:#21d2ed; --accent-dim:rgba(33,210,237,.14);
-    --warn:#f0b429; --bad:#ff6b6b;
-    --display:'Onest',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-    --body:'InterVar',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    --rail:236px; --r-card:14px; --r-pill:999px;
-  }
-
-  *{box-sizing:border-box}
-  html,body{height:100%}
-  body{margin:0;background:var(--ground);color:var(--ink);
-       font:400 14.5px/1.6 var(--body);font-variant-numeric:tabular-nums;
-       -webkit-font-smoothing:antialiased;display:flex}
-
-  .rail{width:var(--rail);flex:0 0 var(--rail);height:100vh;position:sticky;top:0;
-        background:var(--panel);border-right:1px solid var(--line-soft);
-        padding:22px 14px;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
-  .brand{display:flex;align-items:center;gap:10px;padding:0 10px 18px}
-  .brand svg{width:26px;height:26px;flex:0 0 26px}
-  .brand b{font:400 19px/1 var(--display);letter-spacing:-.03em;display:block}
-  .brand small{display:block;font-size:11.5px;color:var(--faint);margin-top:3px}
-  .rail-label{font-size:11px;color:var(--faint);padding:12px 10px 6px;margin:0}
-  .nav{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:10px;
-       color:var(--dim);cursor:pointer;border:0;background:transparent;width:100%;
-       font:inherit;text-align:left;transition:background .16s ease,color .16s ease}
-  .nav svg{width:17px;height:17px;flex:0 0 17px;opacity:.8}
-  .nav:hover{background:var(--raise);color:var(--ink)}
-  .nav[aria-current=page]{background:var(--accent-dim);color:var(--accent)}
-  .nav[aria-current=page] svg{opacity:1}
-  .nav .count{margin-left:auto;font-size:11.5px;color:var(--faint);
-              background:var(--raise);border-radius:var(--r-pill);padding:1px 8px}
-  .rail-foot{margin-top:auto;padding:14px 10px 0;border-top:1px solid var(--line-soft);
-             font-size:11.5px;color:var(--faint);line-height:1.5}
-
-  main{flex:1;min-width:0;display:flex;flex-direction:column}
-  .masthead{position:relative;overflow:hidden;border-bottom:1px solid var(--line-soft);
-            padding:38px 40px 32px}
-  #shader{position:absolute;inset:0;opacity:.32;pointer-events:none}
-  .masthead::after{content:"";position:absolute;inset:0;pointer-events:none;
-    background:linear-gradient(180deg,rgba(13,13,15,.1),var(--ground))}
-  .masthead-in{position:relative;z-index:1;max-width:900px}
-  h1{font:400 clamp(30px,4.4vw,54px)/1.05 var(--display);letter-spacing:-.04em;margin:0 0 10px}
-  h1.stopped{color:var(--bad)}
-  .lede{font-size:15.5px;color:var(--dim);margin:0;max-width:62ch}
-
-  .page-wrap{padding:28px 40px 64px;flex:1}
-  h2{font:400 21px/1.2 var(--display);letter-spacing:-.02em;margin:0 0 4px}
-  .sub{font-size:13.5px;color:var(--faint);margin:0 0 20px;max-width:64ch}
-
-  .reveal{opacity:0;transform:translateY(10px);animation:rise .45s cubic-bezier(.2,.7,.3,1) forwards}
-  @keyframes rise{to{opacity:1;transform:none}}
-  .page{display:none}
-  .page.on{display:block}
-
-  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(126px,1fr));gap:1px;
-         background:var(--line-soft);border:1px solid var(--line-soft);
-         border-radius:var(--r-card);overflow:hidden;margin-bottom:26px}
-  .stat{background:var(--panel);padding:16px 18px}
-  .stat b{display:block;font:400 27px/1.1 var(--display);letter-spacing:-.03em}
-  .stat small{display:block;margin-top:4px;font-size:12px;color:var(--faint)}
-  .stat.accent b{color:var(--accent)}
-  .stat.bad b{color:var(--bad)}
-
-  .card{background:var(--panel);border:1px solid var(--line-soft);
-        border-radius:var(--r-card);padding:20px 22px;margin-bottom:18px}
-  table{width:100%;border-collapse:collapse}
-  th{text-align:left;font-size:11.5px;color:var(--faint);font-weight:400;
-     padding:0 12px 10px 0;border-bottom:1px solid var(--line-soft)}
-  td{padding:12px 12px 12px 0;border-bottom:1px solid var(--line-soft);vertical-align:middle}
-  tr:last-child td{border-bottom:0}
-  .key{font-family:var(--mono);font-size:12px;color:var(--faint)}
-  .muted{color:var(--faint)}
-
-  .line{display:grid;grid-template-columns:56px 92px 1fr;gap:14px;padding:11px 0;
-        border-bottom:1px solid var(--line-soft)}
-  .line:last-child{border-bottom:0}
-  .when{font-size:12.5px;color:var(--faint)}
-  .tag{font-size:11.5px;color:var(--faint)}
-  .tag.out{color:var(--accent)} .tag.refused{color:var(--warn)} .tag.in{color:var(--ink)}
-  .said{white-space:pre-wrap;overflow-wrap:anywhere}
-  .why{font-size:12.5px;color:var(--warn);margin-top:3px}
-
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:12px}
-  .tile{background:var(--panel);border:1px solid var(--line-soft);border-radius:12px;overflow:hidden}
-  .tile img,.tile video{width:100%;height:120px;object-fit:cover;display:block;background:var(--raise)}
-  .tile .none{height:120px;display:grid;place-items:center;color:var(--faint);font-size:12px}
-  .tile .meta{padding:8px 10px;font-size:11.5px;color:var(--faint)}
-
-  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
-  button{font:inherit;cursor:pointer;border-radius:var(--r-pill);padding:9px 18px;
-         border:1px solid var(--line);background:var(--raise);color:var(--ink);
-         transition:background .16s ease,border-color .16s ease,color .16s ease}
-  button:hover{border-color:rgba(255,255,255,.2)}
-  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#04252b;font-weight:500}
-  button.primary:hover{filter:brightness(1.08)}
-  button.danger:hover{border-color:var(--bad);color:var(--bad)}
-  button.sm{padding:5px 12px;font-size:12.5px}
-  button[disabled]{opacity:.42;cursor:not-allowed}
-
-  input[type=text],input[type=search],select{font:inherit;color:var(--ink);
-    background:var(--raise);border:1px solid var(--line);border-radius:10px;
-    padding:9px 13px;min-width:0}
-  input::placeholder{color:var(--faint)}
-  input:focus,select:focus{outline:none;border-color:var(--accent)}
-  .search{flex:1;min-width:180px}
-
-  .seg{display:inline-flex;background:var(--raise);border:1px solid var(--line);
-       border-radius:var(--r-pill);padding:3px}
-  .seg button{border:0;background:transparent;padding:6px 14px;font-size:13px;color:var(--dim)}
-  .seg button[aria-pressed=true]{background:var(--accent-dim);color:var(--accent)}
-
-  .switch{display:inline-flex;align-items:center;gap:11px;cursor:pointer}
-  .switch input{position:absolute;opacity:0;width:0;height:0}
-  .track{width:42px;height:24px;border-radius:var(--r-pill);background:var(--raise);
-         border:1px solid var(--line);position:relative;
-         transition:background .18s ease,border-color .18s ease}
-  .track::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;
-                border-radius:50%;background:var(--dim);
-                transition:transform .18s ease,background .18s ease}
-  .switch input:checked + .track{background:var(--accent-dim);border-color:var(--accent)}
-  .switch input:checked + .track::after{transform:translateX(18px);background:var(--accent)}
-  .switch input:disabled + .track{opacity:.5}
-  .switch input:focus-visible + .track{outline:2px solid var(--accent);outline-offset:2px}
-
-  .range{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;
-         background:var(--line);width:170px}
-  .range::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;
-         border-radius:50%;background:var(--accent);cursor:pointer}
-  .range:disabled::-webkit-slider-thumb{background:var(--faint)}
-
-  .field{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;
-         padding:13px 0;border-bottom:1px solid var(--line-soft)}
-  .field:last-child{border-bottom:0}
-  .field .hint{font-size:12.5px;color:var(--faint);margin-top:2px;max-width:58ch}
-  .value{font-family:var(--mono);font-size:12.5px;color:var(--dim)}
-
-  .badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;
-         border:1px solid var(--line);border-radius:var(--r-pill);padding:3px 10px;color:var(--dim)}
-  .badge.on{border-color:var(--accent);color:var(--accent)}
-  .badge.off{border-color:var(--warn);color:var(--warn)}
-
-  .slab{background:#08080a;border:1px solid var(--line-soft);border-radius:12px;
-        padding:16px 18px;font-family:var(--mono);font-size:12.5px;line-height:1.5;
-        white-space:pre;overflow:auto;max-height:58vh;color:#d6d6de}
-  .warnbar{border:1px solid var(--warn);color:var(--warn);border-radius:10px;
-           padding:11px 14px;font-size:13px;margin-bottom:16px}
-  .logline{font-family:var(--mono);font-size:12px;padding:5px 0;
-           border-bottom:1px solid var(--line-soft);white-space:pre-wrap;overflow-wrap:anywhere}
-  .logline b{color:var(--faint);font-weight:400}
-  .toolrow{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;
-           padding:16px 0;border-bottom:1px solid var(--line-soft)}
-  .toolrow:last-child{border-bottom:0}
-  .empty{color:var(--faint);padding:20px 0}
-  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
-         background:var(--raise);border:1px solid var(--line);border-radius:var(--r-pill);
-         padding:10px 20px;font-size:13.5px;opacity:0;transition:opacity .2s ease;
-         pointer-events:none;z-index:9}
-  .toast.on{opacity:1}
-
-  @media (max-width:900px){
-    body{flex-direction:column}
-    .rail{width:100%;flex:none;height:auto;position:static;flex-direction:row;
-          overflow-x:auto;padding:12px;gap:6px;align-items:center}
-    .brand,.rail-label,.rail-foot{display:none}
-    .nav{width:auto;white-space:nowrap;padding:8px 12px}
-    .nav .count{display:none}
-    .masthead{padding:26px 20px 22px}
-    .page-wrap{padding:20px 20px 48px}
-    .line{grid-template-columns:52px 1fr;gap:10px}
-    .line .tag{display:none}
-  }
-  @media (prefers-reduced-motion:reduce){
-    *{animation:none!important;transition:none!important}
-    #shader{display:none}
-  }
-</style>
-</head>
-<body>
-  <aside class="rail">
-    <div class="brand">
-      <svg viewBox="0 0 32 32" aria-hidden="true">
-        <path d="M16 7c2.2 2.4 3.4 4.5 3.4 6.6 0 2.4-1.5 4-3.4 4s-3.4-1.6-3.4-4C12.6 11.5 13.8 9.4 16 7z" fill="#21d2ed"/>
-        <path d="M11.2 10.6c.5 3 .3 5.2-.7 6.6-1.1 1.6-3 1.9-4.3.9s-1.4-2.9-.3-4.5c1-1.4 2.8-2.4 5.3-3z" fill="#21d2ed" opacity=".72"/>
-        <path d="M20.8 10.6c2.5.6 4.3 1.6 5.3 3 1.1 1.6 1 3.5-.3 4.5s-3.2.7-4.3-.9c-1-1.4-1.2-3.6-.7-6.6z" fill="#21d2ed" opacity=".72"/>
-        <path d="M16 18v7" stroke="#21d2ed" stroke-width="1.8" stroke-linecap="round" opacity=".55"/>
-      </svg>
-      <span><b>Tulip</b><small id="whoami">connecting</small></span>
-    </div>
-    <p class="rail-label">Pages</p>
-    <nav id="nav"></nav>
-    <div class="rail-foot" id="railfoot">—</div>
-  </aside>
-
-  <main>
-    <header class="masthead">
-      <div id="shader"></div>
-      <div class="masthead-in">
-        <h1 id="headline">Connecting…</h1>
-        <p class="lede" id="lede">Reading the bridge's state.</p>
-      </div>
-    </header>
-    <div class="page-wrap">
-      <section class="page" id="p-overview"></section>
-      <section class="page" id="p-messages"></section>
-      <section class="page" id="p-chats"></section>
-      <section class="page" id="p-media"></section>
-      <section class="page" id="p-tools"></section>
-      <section class="page" id="p-terminal"></section>
-      <section class="page" id="p-settings"></section>
-      <section class="page" id="p-log"></section>
-    </div>
-  </main>
-
-  <div class="toast" id="toast"></div>
-  <script src="/shaders.js"></script>
-  <script src="/panel.js"></script>
-</body>
-</html>
-`;
-
-export const PANEL_JS = `'use strict';
+'use strict';
 // Every value from the API reaches the DOM through textContent. Message text is
 // written by strangers; assigning it to innerHTML anywhere here would make this
 // page the softest target in the deployment. The one exception is the inline SVG
@@ -309,6 +27,7 @@ function ago(ms) {
   var h = Math.round(m / 60); if (h < 24) return h + 'h ago';
   return Math.round(h / 24) + 'd ago';
 }
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
 function bytes(n) {
   if (n < 1024) return n + ' B';
   if (n < 1048576) return Math.round(n / 1024) + ' KB';
@@ -390,6 +109,7 @@ function go(next) {
     else b.removeAttribute('aria-current');
   });
   if (route === 'terminal') startTerminal(); else stopTerminal();
+  window.scrollTo(0, 0);
   render();
 }
 
@@ -407,13 +127,13 @@ function verdict(s) {
     lede = 'Its container may be down or restarting. Nothing is lost; messages queue until it returns.';
   } else if (s.hold.active) {
     h.textContent = 'Holding.';
-    lede = s.queue.queued ? s.queue.queued + ' message(s) waiting. Resume to hand them over.'
+    lede = s.queue.queued ? plural(s.queue.queued, 'message') + ' waiting. Resume to hand them over.'
                           : 'Nothing waiting. New messages queue rather than reach the agent.';
   } else {
     stopped = false;
     h.textContent = 'Answering people.';
     lede = s.agent.sessions === 0 ? 'Idle and listening. Nobody is mid-conversation.'
-         : s.agent.sessions + ' conversation(s) open right now.';
+         : plural(s.agent.sessions, 'conversation') + ' open right now.';
   }
   h.className = stopped ? 'stopped' : '';
   el('lede').textContent = lede;
@@ -470,7 +190,7 @@ function lineFor(e) {
   row.appendChild(node('div', 'tag ' + kind, kind === 'out' ? 'Tulip' : kind === 'in' ? 'received' : kind));
   var body = node('div', 'said');
   if (e.kind === 'event') body.textContent = (e.event || 'event') + (e.detail ? ' — ' + e.detail : '');
-  else if (e.kind === 'delivered') body.textContent = 'Handed over ' + e.count + ' message(s).';
+  else if (e.kind === 'delivered') body.textContent = 'Handed over ' + plural(e.count, 'message') + '.';
   else body.textContent = (e.chatName || e.from || 'Someone') + ': ' + (e.text || '');
   var wrap = node('div');
   wrap.appendChild(body);
@@ -704,8 +424,8 @@ async function renderSettings() {
   audience.appendChild(node('h2', null, 'Audience'));
   audience.appendChild(node('p', 'sub', 'Edit config.json on the host and restart the bridge to change any of this.'));
   field(audience, 'Open to anyone', 'When on, every inbound message is untrusted input to an agent holding a shell.', readOnlySwitch(s.audience.everyone));
-  field(audience, 'Allow list', 'Numbers and linked ids permitted when not open to everyone.', node('span', 'value', s.audience.numbers + ' numbers, ' + s.audience.jids + ' linked ids'));
-  field(audience, 'Operators', 'Who may run ! commands and receives alerts. Never widened by the switch above.', node('span', 'value', s.operators.numbers + ' numbers, ' + s.operators.jids + ' linked ids'));
+  field(audience, 'Allow list', 'Numbers and linked ids permitted when not open to everyone.', node('span', 'value', plural(s.audience.numbers, 'number') + ', ' + plural(s.audience.jids, 'linked id')));
+  field(audience, 'Operators', 'Who may run ! commands and receives alerts. Never widened by the switch above.', node('span', 'value', plural(s.operators.numbers, 'number') + ', ' + plural(s.operators.jids, 'linked id')));
   field(audience, 'Groups', 'Groups do not consult the allow list — being in the room is the consent signal.', readOnlySwitch(s.groups.enabled));
   field(audience, 'Group mode', 'observe delivers every message; mention only when addressed.', node('span', 'value', s.groups.replyTo));
   p.appendChild(audience);
@@ -808,4 +528,3 @@ stream.onmessage = function () { if (route === 'messages') renderMessages(); };
 
 refresh();
 setInterval(refresh, 5000);
-`;

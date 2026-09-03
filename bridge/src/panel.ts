@@ -39,7 +39,6 @@ import { writeFileAtomic } from '@tulip/shared';
 import { feed } from './feed.js';
 import { log } from './log.js';
 import { paths } from './paths.js';
-import { FAVICON, PANEL_HTML, PANEL_JS } from './panel-html.js';
 import {
   chatHistory,
   logTail,
@@ -136,6 +135,18 @@ function asset(name: string): Buffer | null {
 export function startPanel(deps: ApiDeps): Server | null {
   if (!deps.config.panel.enabled) return null;
 
+  // The page, its script and the icon are build artefacts like the fonts. Read
+  // once at start rather than per request: they do not change under a running
+  // process, and a missing one is a broken deployment worth saying out loud.
+  const page = asset('panel.html');
+  const script = asset('panel.js');
+  const favicon = asset('favicon.svg');
+  if (!page || !script) {
+    log('panel.assetsMissing', {
+      note: 'panel.html or panel.js is absent — run `npm run build` in the bridge workspace',
+    });
+  }
+
   const token = loadToken();
   const failures = new Map<string, { count: number; since: number }>();
   const streams = new Set<ServerResponse>();
@@ -207,17 +218,29 @@ export function startPanel(deps: ApiDeps): Server | null {
 
       try {
         if (url.pathname === '/') {
-          res.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8' }).end(PANEL_HTML);
+          if (!page) {
+            res.writeHead(500, { ...headers, 'content-type': 'text/plain' }).end('the panel was not built\n');
+            return;
+          }
+          res.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8' }).end(page);
           return;
         }
         if (url.pathname === '/panel.js') {
-          res.writeHead(200, { ...headers, 'content-type': 'text/javascript; charset=utf-8' }).end(PANEL_JS);
+          if (!script) {
+            res.writeHead(500, { ...headers, 'content-type': 'text/javascript' }).end('/* not built */');
+            return;
+          }
+          res.writeHead(200, { ...headers, 'content-type': 'text/javascript; charset=utf-8' }).end(script);
           return;
         }
         if (url.pathname === '/favicon.svg') {
+          if (!favicon) {
+            res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
+            return;
+          }
           res
             .writeHead(200, { ...headers, 'content-type': 'image/svg+xml', 'cache-control': 'private, max-age=86400' })
-            .end(FAVICON);
+            .end(favicon);
           return;
         }
         if (url.pathname === '/shaders.js') {

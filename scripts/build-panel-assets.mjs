@@ -26,6 +26,21 @@ const fonts = join(out, 'fonts');
 
 mkdirSync(fonts, { recursive: true });
 
+// ── The panel itself ─────────────────────────────────────────────────────────
+// Kept as real files rather than strings inside a TypeScript module. They used
+// to be template literals, which meant hand-escaping every backtick in a
+// thousand lines of CSS and JavaScript — a step that is easy to get wrong and
+// impossible to lint. As files they can be edited, syntax-checked and diffed.
+for (const name of ['panel.html', 'panel.js', 'favicon.svg']) {
+  const source = join(root, 'bridge', 'assets', name);
+  if (!existsSync(source)) {
+    console.warn(`  ! ${name}: missing from bridge/assets`);
+    continue;
+  }
+  cpSync(source, join(out, name));
+  console.log(`  ✓ ${name} (${statSync(join(out, name)).size} bytes)`);
+}
+
 /** Resolve a file inside an installed package, or null if it is not there. */
 function fromPackage(specifier) {
   try {
