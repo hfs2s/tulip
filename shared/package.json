@@ -1,0 +1,21 @@
+{
+  "name": "@tulip/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The handoff contract between the trusted bridge and the untrusted agent.",
+  "license": "MIT",
+  "exports": {
+    ".": "./dist/index.js",
+    "./handoff": "./dist/handoff.js",
+    "./ids": "./dist/ids.js",
+    "./paths": "./dist/paths.js"
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  }
+}

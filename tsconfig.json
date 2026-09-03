@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./shared" },
+    { "path": "./bridge" },
+    { "path": "./agent" },
+    { "path": "./egress" }
+  ]
+}

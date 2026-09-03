@@ -1,0 +1,36 @@
+{
+  "name": "tulip",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A public-facing WhatsApp assistant backed by a real Claude Code session, contained so that compromising the agent buys nothing.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/echemles/tulip.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "shared",
+    "bridge",
+    "agent",
+    "egress"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc --build --force",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "verify": "npm run check:secrets && npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^2.1.8",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

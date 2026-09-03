@@ -1,0 +1,31 @@
+# ─── Secrets. Nothing here may ever be committed. ─────────────────────────────
+# This is a public repository. The rule is not "do not commit secrets by
+# accident", it is "there is no path by which a secret can reach a commit":
+# every file that holds one is named here, and `npm run check:secrets` fails the
+# build if any of them appears in the index.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+config.json
+config.local.json
+!config.example.json
+
+# Operator-specific data. These carry real phone numbers and message contents,
+# which is exactly what a public repo must not hold.
+allow.json
+blocklist.json
+data/
+state/
+
+# ─── Build output and dependencies ────────────────────────────────────────────
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+
+# ─── Runtime noise ────────────────────────────────────────────────────────────
+*.log
+logs/
+.DS_Store
