@@ -162,9 +162,33 @@
   .badge.on{border-color:var(--accent);color:var(--accent)}
   .badge.off{border-color:var(--warn);color:var(--warn)}
 
-  .slab{background:#08080a;border:1px solid var(--line-soft);border-radius:12px;
-        padding:16px 18px;font-family:var(--mono);font-size:12.5px;line-height:1.5;
-        white-space:pre;overflow:auto;max-height:58vh;color:#d6d6de}
+  /* Readable by default; `.rawview` restores the literal capture. */
+  .slab{background:#08080a;border:1px solid var(--line-soft);
+        border-radius:12px 12px 0 0;border-bottom:0;
+        padding:16px 18px;font-family:var(--mono);font-size:12.5px;line-height:1.55;
+        overflow:auto;max-height:52vh;color:#d6d6de;cursor:text}
+  .slab.rawview{white-space:pre}
+
+  .tline{display:grid;grid-template-columns:18px 1fr;gap:10px;padding:3px 0;align-items:baseline}
+  .tmark{color:var(--faint);text-align:center}
+  .ttext{white-space:pre-wrap;overflow-wrap:anywhere}
+  .tline.prompt .tmark,.tline.prompt .ttext{color:var(--accent)}
+  .tline.typed .ttext{color:#e8d9a0}
+  .tline.result .ttext{color:#e6e6ee}
+  .tline.error .tmark,.tline.error .ttext{color:var(--bad)}
+  .tline.tool .ttext{color:var(--dim)}
+  .tline.status .ttext,.tline.activity .ttext{color:var(--faint)}
+  .tline.working .ttext{color:var(--warn)}
+
+  /* The prompt is part of the terminal, not a form beneath it. */
+  .termprompt{display:flex;align-items:center;gap:10px;background:#08080a;
+              border:1px solid var(--line-soft);border-top:1px solid var(--line);
+              border-radius:0 0 12px 12px;padding:11px 18px}
+  .termprompt .caret{color:var(--accent);font-family:var(--mono);font-size:13px}
+  .termprompt input{flex:1;background:transparent;border:0;padding:0;color:var(--ink);
+                    font-family:var(--mono);font-size:12.5px}
+  .termprompt input:focus{outline:none}
+  .termprompt:focus-within{border-color:var(--accent)}
   .warnbar{border:1px solid var(--warn);color:var(--warn);border-radius:10px;
            padding:11px 14px;font-size:13px;margin-bottom:16px}
   .logline{font-family:var(--mono);font-size:12px;padding:5px 0;

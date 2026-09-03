@@ -321,43 +321,159 @@ function renderTools() {
 }
 
 // ── Terminal ────────────────────────────────────────────────────────────────
-function renderTerminal() {
-  var p = head('terminal', 'Terminal', 'The agent’s live session. This is a pane view with key injection, not a shell on the host.');
+// Two views of one pane. Raw is the literal capture. Readable parses the TUI
+// into what actually happened, and masks the scaffolding — the injected prompt
+// is a pointer to a batch file with a UUID in it, which tells an operator
+// nothing and pushes the part they wanted off the line. Same instinct as the
+// hfs2s waiting screen: show the notes, not the pane.
 
-  var warn = node('div', 'warnbar', 'Anything you type goes into a live conversation with a member of the public.');
-  p.appendChild(warn);
+var termView = 'readable';
+
+/** One entry per meaningful line in the pane. */
+function digestPane(text) {
+  var out = [];
+  var lines = String(text || '').split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    var raw = lines[i];
+    var line = raw.replace(/\s+$/, '');
+    var t = line.trim();
+    if (!t) continue;
+
+    // The prompt the supervisor typed. Everything useful in it is the fact that
+    // a message arrived; the batch path is scaffolding.
+    if (t.indexOf('❯') === 0) {
+      var body = t.slice(1).trim();
+      if (!body) continue;
+      var m = body.match(/^New WhatsApp message(s \((\d+)\))?\./);
+      if (m) {
+        out.push({ kind: 'prompt', text: m[2] ? m[2] + ' new messages handed over' : 'New message handed over' });
+      } else {
+        out.push({ kind: 'typed', text: body });
+      }
+      continue;
+    }
+
+    // The agent's own summary of the turn.
+    if (t.indexOf('●') === 0) { out.push({ kind: 'result', text: t.slice(1).trim() }); continue; }
+
+    // A tool result or an error.
+    if (t.indexOf('⎿') === 0) {
+      var d = t.replace(/^⎿\s*/, '');
+      out.push({ kind: /error|too low|invalid|expired|limit/i.test(d) ? 'error' : 'tool', text: d });
+      continue;
+    }
+
+    // Timing footer: "✻ Cooked for 21s · done 9:21 PM"
+    if (t.indexOf('✻') === 0) {
+      var f = t.slice(1).trim().match(/for\s+(\S+).*?done\s+(.+)$/i);
+      out.push({ kind: 'status', text: f ? 'took ' + f[1] + ' · ' + f[2] : t.slice(1).trim() });
+      continue;
+    }
+
+    if (/^Thought for /.test(t)) { out.push({ kind: 'activity', text: t }); continue; }
+    if (/esc to interrupt/i.test(t)) { out.push({ kind: 'working', text: 'working…' }); continue; }
+
+    // Box drawing, the footer hint bar, and the banner are chrome.
+    if (/^[─━╌╭╰│┌└▐▝▛▜█▀]/.test(t)) continue;
+    if (/bypass permissions on|for shortcuts|Claude Code v/.test(t)) continue;
+  }
+  return out;
+}
+
+function renderTerminal() {
+  var p = head('terminal', 'Terminal', 'The agent’s live session. A pane view with key injection — not a shell on the host, and not a PTY.');
+
+  p.appendChild(node('div', 'warnbar', 'Anything you type goes into a live conversation with a member of the public.'));
 
   var controls = node('div', 'controls');
+
+  var seg = node('div', 'seg');
+  [['readable', 'Readable'], ['raw', 'Raw']].forEach(function (v) {
+    var b = node('button', null, v[1]);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', termView === v[0] ? 'true' : 'false');
+    b.addEventListener('click', function () { termView = v[0]; renderTerminal(); pollTerminal(); });
+    seg.appendChild(b);
+  });
+  controls.appendChild(seg);
+
   var select = document.createElement('select');
   select.id = 'termWindows';
   select.addEventListener('change', function () { termWindow = select.value || null; pollTerminal(); });
   controls.appendChild(select);
 
-  var input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'search';
-  input.id = 'termInput';
-  input.placeholder = 'Type a line and press Enter to send it into the session';
-  input.addEventListener('keydown', function (ev) {
-    if (ev.key !== 'Enter') return;
-    var text = input.value;
-    if (!text) return;
-    sendKeys([{ text: text, literal: true }]);
-    input.value = '';
-  });
-  controls.appendChild(input);
-
   ['Enter', 'Escape', 'C-c'].forEach(function (k) {
     var b = node('button', 'sm', k);
     b.type = 'button';
-    b.addEventListener('click', function () { sendKeys([{ text: k === 'Escape' ? 'Escape' : k, literal: false }]); });
+    b.addEventListener('click', function () { sendKeys([{ text: k, literal: false }]); });
     controls.appendChild(b);
   });
   p.appendChild(controls);
 
-  var slab = node('div', 'slab', 'Waiting for the agent to publish a frame…');
+  // The transcript, and an inline prompt that is part of it rather than a
+  // separate form. Clicking anywhere in the slab focuses the prompt, so it
+  // behaves like a terminal you type into.
+  var slab = node('div', 'slab');
   slab.id = 'termSlab';
+  slab.appendChild(node('div', 'muted', 'Waiting for the agent to publish a frame…'));
   p.appendChild(slab);
+
+  var promptRow = node('div', 'termprompt');
+  promptRow.appendChild(node('span', 'caret', '❯'));
+  var input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'termInput';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.placeholder = 'type here and press Enter — this goes straight into the session';
+  input.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') {
+      var text = input.value;
+      if (!text) return;
+      sendKeys([{ text: text, literal: true }]);
+      input.value = '';
+    } else if (ev.key === 'Escape') {
+      sendKeys([{ text: 'Escape', literal: false }]);
+    }
+  });
+  promptRow.appendChild(input);
+  p.appendChild(promptRow);
+
+  slab.addEventListener('click', function (ev) {
+    if (String(window.getSelection())) return; // let people copy text
+    input.focus();
+  });
+}
+
+function paintTerminal(screen) {
+  var slab = el('termSlab');
+  if (!slab) return;
+  var atBottom = slab.scrollTop + slab.clientHeight >= slab.scrollHeight - 40;
+  clear(slab);
+
+  if (termView === 'raw') {
+    slab.classList.add('rawview');
+    slab.appendChild(document.createTextNode(screen.content || '(no session is running)'));
+  } else {
+    slab.classList.remove('rawview');
+    var entries = digestPane(screen.content);
+    if (!entries.length) {
+      slab.appendChild(node('div', 'muted', '(nothing on screen yet)'));
+    } else {
+      entries.forEach(function (e) {
+        var row = node('div', 'tline ' + e.kind);
+        row.appendChild(node('span', 'tmark', e.kind === 'prompt' ? '→'
+          : e.kind === 'typed' ? '⌨'
+          : e.kind === 'result' ? '●'
+          : e.kind === 'error' ? '!'
+          : e.kind === 'tool' ? '⎿'
+          : e.kind === 'working' ? '…' : '·'));
+        row.appendChild(node('span', 'ttext', e.text));
+        slab.appendChild(row);
+      });
+    }
+  }
+  if (atBottom) slab.scrollTop = slab.scrollHeight;
 }
 
 async function sendKeys(keys) {
@@ -369,7 +485,7 @@ async function sendKeys(keys) {
     });
     toast('Sent.');
   } catch (err) { toast(err.message); }
-  setTimeout(pollTerminal, 600);
+  setTimeout(pollTerminal, 700);
 }
 
 async function pollTerminal() {
@@ -381,8 +497,8 @@ async function pollTerminal() {
       body: JSON.stringify({ window: termWindow })
     });
     var screen = await api('/api/terminal');
-    var slab = el('termSlab');
-    if (slab) slab.textContent = screen.content || '(no session is running)';
+    paintTerminal(screen);
+
     var select = el('termWindows');
     if (select && screen.windows) {
       var want = screen.windows.join('|');
@@ -391,7 +507,10 @@ async function pollTerminal() {
         clear(select);
         screen.windows.forEach(function (w) {
           var o = document.createElement('option');
-          o.value = w; o.textContent = w;
+          o.value = w;
+          // A chat key is not a name. Show who it is where we know.
+          var chat = state && state.chats ? state.chats.filter(function (c) { return 'c-' + c.chatKey === w; })[0] : null;
+          o.textContent = chat ? (chat.name || 'someone') + ' · ' + chat.chatKey.slice(0, 6) : w;
           select.appendChild(o);
         });
         if (screen.window) select.value = screen.window;
