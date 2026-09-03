@@ -19,7 +19,7 @@
  *     caller writes to the feed either way; this function only decides.
  */
 import type { Config } from './config.js';
-import { matchesNumbers } from './jid.js';
+import { matchesList } from './jid.js';
 
 /** The part of an envelope the gate looks at. */
 export interface GateInput {
@@ -38,7 +38,7 @@ const deny = (reason: string): GateVerdict => ({ accept: false, reason });
 
 /** Is this sender an operator? Never widened by `audience.everyone`. */
 export function isOperator(config: Config, senderIds: readonly string[]): boolean {
-  return matchesNumbers(config.operators.numbers, senderIds);
+  return matchesList(config.operators, senderIds);
 }
 
 /**
@@ -73,6 +73,6 @@ export function gate(input: GateInput, config: Config): GateVerdict {
 
   // A direct message. This is the branch that is open to the world.
   if (config.audience.everyone) return ACCEPT;
-  if (matchesNumbers(config.audience.numbers, input.senderIds)) return ACCEPT;
+  if (matchesList(config.audience, input.senderIds)) return ACCEPT;
   return deny('sender is not on the allow list');
 }

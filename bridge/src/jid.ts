@@ -59,16 +59,29 @@ export function identities(...jids: Array<string | null | undefined>): string[] 
 }
 
 /**
- * Does any identifier of this sender appear in `numbers`?
+ * Does any identifier of this sender appear in the allowlist?
  *
- * Comparison is against the bare user part only. An entry in a config file is a
- * phone number, and matching it against a full jid would depend on which domain
- * WhatsApp happened to use for that message.
+ * Both sides are reduced to their bare user part before comparison. A config
+ * entry may be written as `15551234567` or `111111111111111@lid`, and a sender
+ * arrives under whichever identifier WhatsApp chose for that message — so
+ * comparing the raw strings would make a correct-looking entry silently fail to
+ * match, which is the worst possible outcome for an allowlist.
  */
-export function matchesNumbers(numbers: readonly string[], ids: readonly string[]): boolean {
-  if (numbers.length === 0) return false;
-  const wanted = new Set(numbers.map(String));
-  return ids.some((id) => wanted.has(id));
+export function matchesList(
+  list: { readonly numbers?: readonly string[]; readonly jids?: readonly string[] },
+  ids: readonly string[],
+): boolean {
+  const wanted = new Set<string>();
+  for (const entry of [...(list.numbers ?? []), ...(list.jids ?? [])]) {
+    const user = userPart(entry);
+    if (user !== null) wanted.add(user);
+  }
+  if (wanted.size === 0) return false;
+
+  return ids.some((id) => {
+    const user = userPart(id);
+    return user !== null && wanted.has(user);
+  });
 }
 
 /**

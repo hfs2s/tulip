@@ -63,6 +63,28 @@ describe('gate — a closed deployment', () => {
     expect(verdict).toEqual({ accept: false, reason: 'sender is not on the allow list' });
   });
 
+  // The other half of that: a linked id can be allowed explicitly, because it
+  // is the only identifier some senders ever arrive under. Found the hard way —
+  // the first real operator message was refused for exactly this reason.
+  it('answers a linked id that is listed in jids', () => {
+    const byLid = parseConfig({
+      audience: { everyone: false, jids: ['111111111111111@lid'] },
+    });
+    expect(gate(message({ senderIds: ['111111111111111@lid', '111111111111111'] }), byLid).accept).toBe(true);
+  });
+
+  it('accepts a linked id written with or without the @lid suffix', () => {
+    for (const entry of ['111111111111111@lid', '111111111111111']) {
+      const cfg = parseConfig({ audience: { everyone: false, jids: [entry] } });
+      expect(gate(message({ senderIds: ['111111111111111@lid'] }), cfg).accept).toBe(true);
+    }
+  });
+
+  it('does not let a listed linked id match a different one', () => {
+    const byLid = parseConfig({ audience: { everyone: false, jids: ['111111111111111@lid'] } });
+    expect(gate(message({ senderIds: ['222222222222222@lid'] }), byLid).accept).toBe(false);
+  });
+
   it('matches on any of the sender identities', () => {
     expect(gate(message({ senderIds: ['111111111111111@lid', '15551234567'] }), config).accept).toBe(true);
   });
@@ -113,6 +135,14 @@ describe('isOperator', () => {
   const config = parseConfig({
     audience: { everyone: true },
     operators: { numbers: ['15551234567'] },
+  });
+
+  // An operator whose commands are silently ignored has no way in at all, and
+  // modern clients deliver them as a @lid rather than a number.
+  it('recognises an operator listed by linked id', () => {
+    const byLid = parseConfig({ operators: { jids: ['111111111111111@lid'] } });
+    expect(isOperator(byLid, ['111111111111111@lid'])).toBe(true);
+    expect(isOperator(byLid, ['222222222222222@lid'])).toBe(false);
   });
 
   it('recognises a listed operator', () => {

@@ -285,7 +285,11 @@ export async function toEnvelope(
     mentionsMe,
     quoted,
     media,
-    isReaction: content?.['reactionMessage'] !== undefined,
+    // Truthiness, not `!== undefined`. Baileys decodes protobuf messages with
+    // every field present and unset ones set to `null`, so `!== undefined` is
+    // true for an ordinary text message — which classified everything as a
+    // reaction and silently answered nobody. The first real message caught it.
+    isReaction: asRecord(content?.['reactionMessage']) !== null,
     isPollVote: false,
   };
 }

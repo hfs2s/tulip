@@ -21,6 +21,20 @@ const PhoneNumber = z
   .string()
   .regex(/^[1-9][0-9]{6,15}$/, 'must be bare international digits, without + or spaces');
 
+/**
+ * A WhatsApp "linked id" — the identifier WhatsApp increasingly delivers a
+ * sender under instead of their phone number.
+ *
+ * It has to be listable separately because it cannot be derived from anything
+ * you know about a person. You find it by looking at what the gate actually
+ * saw: `gate.deny` records every identifier the message arrived with, and the
+ * panel shows it, precisely so that allowing someone is a copy rather than a
+ * guess.
+ */
+const LinkedId = z
+  .string()
+  .regex(/^[0-9]{5,25}(@lid)?$/, 'must be a linked id, digits with an optional @lid suffix');
+
 const Audience = z
   .object({
     /**
@@ -31,6 +45,8 @@ const Audience = z
     everyone: z.boolean().default(false),
     /** Consulted only when `everyone` is false. */
     numbers: z.array(PhoneNumber).default([]),
+    /** Also consulted when `everyone` is false. See LinkedId. */
+    jids: z.array(LinkedId).default([]),
   })
   .strict()
   .default({});
@@ -43,6 +59,12 @@ const Operators = z
      * ability to restart sessions and read state.
      */
     numbers: z.array(PhoneNumber).default([]),
+    /**
+     * The same people, by linked id. Needed more often than the numbers list:
+     * an operator messaging from a modern client arrives as a `@lid`, and an
+     * operator whose commands are silently ignored has no way in at all.
+     */
+    jids: z.array(LinkedId).default([]),
   })
   .strict()
   .default({});
