@@ -136,7 +136,11 @@ describe('config validation', () => {
     const config = parseConfig({});
     expect(config.audience.everyone).toBe(false);
     expect(config.groups.enabled).toBe(false);
-    expect(config.panel.host).toBe('127.0.0.1');
+    // Inside a container, binding to loopback makes the panel unreachable
+    // rather than safe: Docker forwards a published port to the container's
+    // ethernet address. Exposure is limited by the publish address in
+    // docker-compose.yml, which preflight.sh checks.
+    expect(config.panel.host).toBe('0.0.0.0');
     expect(config.operators.numbers).toEqual([]);
   });
 

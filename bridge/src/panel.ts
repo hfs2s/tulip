@@ -5,9 +5,13 @@
  * token, so the hardening is concentrated on not leaking it and not letting it
  * be guessed:
  *
- *   - **Loopback by default.** Reaching it from elsewhere is an explicit
- *     decision, made by editing config and — preferably — putting an
- *     authenticating proxy in front.
+ *   - **Published on the host's loopback only.** Note the layer: the process
+ *     binds 0.0.0.0 *inside its container*, and `docker-compose.yml` publishes
+ *     it as `127.0.0.1:8791:8791`. Binding loopback inside the container would
+ *     not be safer, it would make the panel unreachable — Docker forwards a
+ *     published port to the container's ethernet address, never its loopback.
+ *     Reaching the panel from another machine means an SSH tunnel, or an
+ *     explicit decision to publish it with something authenticating in front.
  *   - **Constant-time comparison, against a properly parsed cookie.** Iris
  *     compares with `cookie.includes('iris_token=' + t)`, which is both timing-
  *     variable and substring-matched: a cookie named `xiris_token` satisfies it.
@@ -264,7 +268,7 @@ export function startPanel(deps: PanelDeps): Server | null {
     log('panel.up', {
       host: deps.config.panel.host,
       port: deps.config.panel.port,
-      note: deps.config.panel.host === '127.0.0.1' ? 'loopback only' : 'REACHABLE OFF-HOST — put auth in front of it',
+      note: 'exposure is set by the publish address in docker-compose.yml, not by this bind address',
     });
   });
 

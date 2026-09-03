@@ -91,12 +91,22 @@ const Panel = z
   .object({
     enabled: z.boolean().default(true),
     /**
-     * Loopback by default. The panel is a bearer-token surface that can read
-     * every message and restart sessions; publishing it is an explicit decision,
-     * and `scripts/preflight.sh` refuses a deployment that binds it wider by
-     * accident.
+     * Bind address *inside the container*, which is a different thing from the
+     * address it is reachable on — and confusing the two is how this was wrong
+     * to begin with.
+     *
+     * Binding to 127.0.0.1 here does not harden anything; it makes the panel
+     * unreachable altogether. Docker forwards a published port to the
+     * container's ethernet address, never to its loopback, so a process
+     * listening only on 127.0.0.1 inside a container can be reached by nothing
+     * but itself.
+     *
+     * The control that actually limits exposure is the *publish* address in
+     * docker-compose.yml — `127.0.0.1:8791:8791`, which puts it on the host's
+     * loopback and nowhere else. `scripts/preflight.sh` checks that line,
+     * because that is the one that matters.
      */
-    host: z.string().default('127.0.0.1'),
+    host: z.string().default('0.0.0.0'),
     port: z.number().int().min(1).max(65535).default(8791),
   })
   .strict()

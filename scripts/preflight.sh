@@ -87,7 +87,7 @@ if [ -f config.json ]; then
 
   if command -v python3 >/dev/null 2>&1; then
     python3 - <<'PY'
-import json, sys
+import json, re, sys
 try:
     c = json.load(open("config.json"))
 except Exception as e:
@@ -103,13 +103,21 @@ if ops:
 else:
     warn("no operator numbers: no control commands, and no watchdog alerts when something breaks")
 
-panel = c.get("panel", {})
-host = panel.get("host", "127.0.0.1")
-if host in ("127.0.0.1", "localhost"):
-    ok("panel is bound to loopback")
+# The app's bind address is not the control here — see the note in
+# config.example.json. What matters is where docker-compose.yml publishes it.
+try:
+    compose = open("docker-compose.yml").read()
+except Exception:
+    compose = ""
+published = re.findall(r'"([0-9.]*):?(\d+):8791"', compose)
+if not published:
+    warn("could not find the panel's publish line in docker-compose.yml")
+elif all(addr in ("127.0.0.1", "localhost") for addr, _ in published):
+    ok("panel is published on the host's loopback only")
 else:
-    warn(f"panel is bound to {host} — it is a bearer-token surface that can read every message. "
-         "Tunnel over SSH instead, or put something that authenticates in front of it.")
+    warn("the panel is published beyond the host's loopback. It is a bearer-token "
+         "surface that can read every message and hold delivery. Tunnel over SSH "
+         "instead, or put something that authenticates in front of it.")
 
 if c.get("audience", {}).get("everyone"):
     ok("audience: everyone (this is the public configuration)")
