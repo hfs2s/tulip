@@ -5,10 +5,10 @@
  * only one of them fails in the most dangerous direction available to it —
  * silently, and in whichever direction the caller was not thinking about:
  *
- *   34600111222@s.whatsapp.net       phone-number jid
- *   34600111222:12@s.whatsapp.net    ...with a device suffix
- *   130606214176782@lid              "linked id", used in groups and newer clients
- *   34600111222@g.us                 a group, not a person at all
+ *   15551234567@s.whatsapp.net       phone-number jid
+ *   15551234567:12@s.whatsapp.net    ...with a device suffix
+ *   111111111111111@lid              "linked id", used in groups and newer clients
+ *   15551234567@g.us                 a group, not a person at all
  *
  * WhatsApp increasingly delivers senders as a bare `@lid` carrying no phone
  * number, which cannot be guessed from outside. That is why denials are
@@ -16,7 +16,7 @@
  * number to an allowlist otherwise looks correct and does nothing.
  */
 
-/** Strip a device suffix: `34600111222:12@s.whatsapp.net` → `34600111222@s.whatsapp.net`. */
+/** Strip a device suffix: `15551234567:12@s.whatsapp.net` → `15551234567@s.whatsapp.net`. */
 export function bare(jid: string | null | undefined): string | null {
   if (!jid) return null;
   const [user, domain] = String(jid).split('@');
@@ -24,7 +24,7 @@ export function bare(jid: string | null | undefined): string | null {
   return `${user.split(':')[0]}@${domain ?? 's.whatsapp.net'}`;
 }
 
-/** The user part only: `34600111222:12@s.whatsapp.net` → `34600111222`. */
+/** The user part only: `15551234567:12@s.whatsapp.net` → `15551234567`. */
 export function userPart(jid: string | null | undefined): string | null {
   if (!jid) return null;
   const [user] = String(jid).split('@');

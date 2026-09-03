@@ -56,7 +56,7 @@ const PHONE_PATTERN = /\b(?:\+?)([1-9]\d{9,14})\b/g;
 const PHONE_SCANNED = /\.(json|md|ts|js|mjs|yml|yaml|env\.example)$/;
 /** Reserved ranges and obvious dummies: fine to publish. */
 const PHONE_ALLOWED = [
-  /^1555\d{7}$/, //  +1 555 …  — North American fiction range
+  /^1555\d{6,9}$/, //  +1 555 …  — North American fiction range, and near-miss variants of it
   /^44700900\d{3,}$/, // UK Ofcom drama range
   /^(\d)\1+$/, //  1111111111 — repeated digit placeholder
   /^1234567890\d*$/,

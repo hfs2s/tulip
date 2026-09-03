@@ -59,16 +59,18 @@ describe('gate — a closed deployment', () => {
   // WhatsApp increasingly delivers senders as a bare @lid with no phone number
   // attached. Listing the number then looks correct and silently does nothing.
   it('refuses a sender known only by linked id, and says why', () => {
-    const verdict = gate(message({ senderIds: ['130606214176782@lid'] }), config);
+    const verdict = gate(message({ senderIds: ['111111111111111@lid'] }), config);
     expect(verdict).toEqual({ accept: false, reason: 'sender is not on the allow list' });
   });
 
   it('matches on any of the sender identities', () => {
-    expect(gate(message({ senderIds: ['130606214176782@lid', '15551234567'] }), config).accept).toBe(true);
+    expect(gate(message({ senderIds: ['111111111111111@lid', '15551234567'] }), config).accept).toBe(true);
   });
 
-  it('does not match a number that merely contains an allowed one', () => {
-    expect(gate(message({ senderIds: ['115551234567'] }), config).accept).toBe(false);
+  // Matching is exact, not substring: neither a prefix of an allowed number nor
+  // a number that has one as its prefix may be admitted.
+  it('does not match a number that merely overlaps an allowed one', () => {
+    expect(gate(message({ senderIds: ['1555123456'] }), config).accept).toBe(false);
     expect(gate(message({ senderIds: ['155512345678'] }), config).accept).toBe(false);
   });
 });
