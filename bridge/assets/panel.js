@@ -97,9 +97,56 @@ function buildNav() {
   });
 }
 
+/**
+ * The mobile disclosure.
+ *
+ * One piece of state, expressed in three places that must agree: the panel's
+ * class, the scrim's, and `aria-expanded` on the control. Driving all three
+ * from one function is what stops them drifting — a menu whose button says
+ * "collapsed" while the panel is open is worse for a screen reader than no
+ * menu, because it is confidently wrong.
+ */
+function setNav(open) {
+  var rail = el('rail'), scrim = el('navScrim'), toggle = el('navToggle');
+  if (!rail || !toggle) return;
+  rail.classList.toggle('open', open);
+  if (scrim) { scrim.classList.toggle('open', open); scrim.hidden = !open; }
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  toggle.setAttribute('aria-label', open ? 'Hide pages' : 'Show pages');
+}
+
+function navIsOpen() {
+  var toggle = el('navToggle');
+  return !!toggle && toggle.getAttribute('aria-expanded') === 'true';
+}
+
+function wireNavToggle() {
+  var toggle = el('navToggle'), scrim = el('navScrim');
+  if (!toggle) return;
+  toggle.addEventListener('click', function () { setNav(!navIsOpen()); });
+  if (scrim) scrim.addEventListener('click', function () { setNav(false); });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape' && navIsOpen()) { setNav(false); toggle.focus(); }
+  });
+  // Leaving mobile with the panel open would otherwise strand the state: the
+  // rail becomes a column again and `.open` means nothing, but `aria-expanded`
+  // would still claim a menu is showing.
+  window.addEventListener('resize', function () {
+    if (window.innerWidth > 900 && navIsOpen()) setNav(false);
+  });
+}
+
 function go(next) {
   route = next;
   if (location.hash !== '#/' + next) location.hash = '#/' + next;
+  // Choosing a page is the end of the menu's job.
+  setNav(false);
+  var crumb = el('topbarPage');
+  if (crumb) {
+    for (var i = 0; i < PAGES.length; i++) {
+      if (PAGES[i][0] === next) { crumb.textContent = PAGES[i][1]; break; }
+    }
+  }
   PAGES.forEach(function (p) {
     var page = el('p-' + p[0]);
     if (p[0] === route) { page.classList.add('on'); page.classList.remove('reveal'); void page.offsetWidth; page.classList.add('reveal'); }
@@ -1005,8 +1052,24 @@ function mountShader() {
   } catch (err) { /* a backdrop is never worth a broken page */ }
 }
 
+/**
+ * Put the mark in the mobile bar.
+ *
+ * Cloned from the rail's brand rather than written twice. The logo is a literal
+ * in the HTML; a second copy would be a second thing to remember when it
+ * changes, and this one is guaranteed to be the same drawing.
+ */
+function mountTopbarMark() {
+  var source = document.querySelector('.brand svg');
+  var slot = el('topbarMark');
+  if (!source || !slot) return;
+  slot.appendChild(source.cloneNode(true));
+}
+
 // ── Boot ────────────────────────────────────────────────────────────────────
 buildNav();
+mountTopbarMark();
+wireNavToggle();
 mountShader();
 go((location.hash || '#/overview').replace('#/', '') || 'overview');
 window.addEventListener('hashchange', function () { go((location.hash || '#/overview').replace('#/', '')); });

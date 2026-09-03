@@ -36,9 +36,9 @@
      `data:` is already permitted by the CSP's img-src. */
   body::before{
     content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
-    background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27200%27%20height%3D%27200%27%3E%3Cfilter%20id%3D%27n%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.9%27%20numOctaves%3D%274%27%20stitchTiles%3D%27stitch%27%2F%3E%3CfeColorMatrix%20type%3D%27saturate%27%20values%3D%270%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23n%29%27%2F%3E%3C%2Fsvg%3E");
-    background-size:200px 200px;
-    opacity:.055;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27120%27%20height%3D%27120%27%3E%3Cfilter%20id%3D%27f%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%272.2%27%20numOctaves%3D%272%27%20stitchTiles%3D%27stitch%27%2F%3E%3CfeColorMatrix%20type%3D%27saturate%27%20values%3D%270%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23f%29%27%2F%3E%3C%2Fsvg%3E");
+    background-size:120px 120px;
+    opacity:.028;mix-blend-mode:overlay;
   }
   /* Content sits above the grain. */
   .rail,main{position:relative;z-index:1}
@@ -54,6 +54,27 @@
   .brand b{font:400 19px/1 var(--display);letter-spacing:-.03em;display:block}
   .brand small{display:block;font-size:11.5px;color:var(--faint);margin-top:3px}
   .rail-label{font-size:11px;color:var(--faint);padding:12px 10px 6px;margin:0}
+
+  /* The mobile bar and its scrim exist at every width and are shown only below
+     900px. Kept out of the media query so the rules that make them *work* live
+     next to each other rather than being split across the file. */
+  .topbar,.nav-scrim{display:none}
+  .topbar-brand{display:flex;align-items:center;gap:9px;min-width:0}
+  .topbar-mark{display:flex;width:24px;height:24px;flex:0 0 24px}
+  .topbar-mark svg{width:100%;height:100%}
+  .topbar-brand b{font:400 17px/1 var(--display);letter-spacing:-.03em}
+  .topbar-page{margin-left:auto;font-size:13px;color:var(--faint);
+               white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topbar-toggle{flex:0 0 auto;width:40px;height:40px;display:grid;place-items:center;
+                 border:1px solid var(--line-soft);border-radius:11px;background:transparent;
+                 color:var(--dim);cursor:pointer;padding:0;
+                 transition:color .16s ease,border-color .16s ease,background .16s ease}
+  .topbar-toggle:hover{color:var(--ink);border-color:var(--line)}
+  .topbar-toggle svg{width:20px;height:20px}
+  .topbar-toggle .ico-close{display:none}
+  .topbar-toggle[aria-expanded="true"]{color:var(--ink);background:var(--panel);border-color:var(--line)}
+  .topbar-toggle[aria-expanded="true"] .ico-menu{display:none}
+  .topbar-toggle[aria-expanded="true"] .ico-close{display:block}
   .nav{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:10px;
        color:var(--dim);cursor:pointer;border:0;background:transparent;width:100%;
        font:inherit;text-align:left;transition:background .16s ease,color .16s ease}
@@ -85,26 +106,18 @@
      This one is absolute inside `.page-wrap`, so it scrolls with the content it
      belongs to and the whole column behaves like paper.
 
-     Two layers rather than one, composited with `background-blend-mode`. A
-     single turbulence at one frequency is uniform enough to look like sensor
-     noise; real stock has fine tooth *and* slow unevenness across the sheet, so
-     a 200px grain is blended with a 640px mottle. Blending the two backgrounds
-     against each other keeps the effect self-contained — unlike
-     `mix-blend-mode`, it does not depend on what happens to be behind the
-     element, which inside `main`'s stacking context is nothing.
-
-     `z-index:-1` puts it behind the sections without needing `isolation`, which
-     would cut it off from the ground colour it is meant to sit on. */
+     Grain size is the whole difference between paper and noise. `baseFrequency`
+     is features per user unit, so 2.2 puts a speck under a pixel; at the 0.9
+     this started from they were ~1.1px and legible as dots. Two octaves, not
+     four — each octave layers a coarser pass on top, and that clumping is what
+     made it look like a photograph taken in the dark. */
   .page-wrap{padding:28px 40px 64px;position:relative}
   .page-wrap::before{
     content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
-    background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27200%27%20height%3D%27200%27%3E%3Cfilter%20id%3D%27f%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.92%27%20numOctaves%3D%274%27%20stitchTiles%3D%27stitch%27%2F%3E%3CfeColorMatrix%20type%3D%27saturate%27%20values%3D%270%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23f%29%27%2F%3E%3C%2Fsvg%3E"),
-                     url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27640%27%20height%3D%27640%27%3E%3Cfilter%20id%3D%27m%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.016%27%20numOctaves%3D%275%27%20stitchTiles%3D%27stitch%27%2F%3E%3CfeColorMatrix%20type%3D%27saturate%27%20values%3D%270%27%2F%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type%3D%27gamma%27%20exponent%3D%271.7%27%2F%3E%3C%2FfeComponentTransfer%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23m%29%27%2F%3E%3C%2Fsvg%3E");
-    background-size:200px 200px,640px 640px;
-    background-blend-mode:overlay;
-    opacity:.085;
+    background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27120%27%20height%3D%27120%27%3E%3Cfilter%20id%3D%27f%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%272.2%27%20numOctaves%3D%272%27%20stitchTiles%3D%27stitch%27%2F%3E%3CfeColorMatrix%20type%3D%27saturate%27%20values%3D%270%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23f%29%27%2F%3E%3C%2Fsvg%3E");
+    background-size:120px 120px;
+    opacity:.035;
   }
-
   h2{font:400 21px/1.2 var(--display);letter-spacing:-.02em;margin:0 0 4px}
   .sub{font-size:13.5px;color:var(--faint);margin:0 0 20px;max-width:64ch}
 
@@ -127,8 +140,8 @@
         position:relative;isolation:isolate}
   .card::before{content:"";position:absolute;inset:0;border-radius:inherit;
     pointer-events:none;z-index:-1;
-    background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27200%27%20height%3D%27200%27%3E%3Cfilter%20id%3D%27n%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.9%27%20numOctaves%3D%274%27%20stitchTiles%3D%27stitch%27%2F%3E%3CfeColorMatrix%20type%3D%27saturate%27%20values%3D%270%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23n%29%27%2F%3E%3C%2Fsvg%3E");background-size:200px 200px;
-    opacity:.04;mix-blend-mode:overlay}
+    background-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27120%27%20height%3D%27120%27%3E%3Cfilter%20id%3D%27f%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%272.2%27%20numOctaves%3D%272%27%20stitchTiles%3D%27stitch%27%2F%3E%3CfeColorMatrix%20type%3D%27saturate%27%20values%3D%270%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23f%29%27%2F%3E%3C%2Fsvg%3E");background-size:120px 120px;
+    opacity:.03;mix-blend-mode:overlay}
   table{width:100%;border-collapse:collapse}
   th{text-align:left;font-size:11.5px;color:var(--faint);font-weight:400;
      padding:0 12px 10px 0;border-bottom:1px solid var(--line-soft)}
@@ -275,19 +288,55 @@
          pointer-events:none;z-index:9}
   .toast.on{opacity:1}
 
+  /* ── Mobile ────────────────────────────────────────────────────────────────
+     The rail stops being a column and becomes a disclosure. What is always on
+     screen is the bar: the mark, the page you are on, and the control. The
+     eight pages are one tap away and all visible at once when they are — a
+     horizontal scroller showed four and gave no sign the rest existed.
+
+     `--bar` is shared by the bar's height and the panel's offset, so the two
+     cannot drift apart. */
   @media (max-width:900px){
+    :root{--bar:58px}
     body{flex-direction:column;overflow:auto}
     main{overflow:visible}
-    .rail{width:100%;flex:none;height:auto;position:sticky;top:0;z-index:5;
-          flex-direction:row;overflow-x:auto;padding:12px;gap:6px;align-items:center;
-          border-right:0;border-bottom:1px solid var(--line-soft)}
-    .brand,.rail-label,.rail-foot{display:none}
-    .nav{width:auto;white-space:nowrap;padding:8px 12px}
-    .nav .count{display:none}
+
+    .topbar{display:flex;align-items:center;gap:10px;
+            position:sticky;top:0;z-index:30;height:var(--bar);
+            padding:0 16px;background:var(--panel);
+            border-bottom:1px solid var(--line-soft)}
+
+    /* Fixed, not in flow: the bar is sticky, so a panel that opened in normal
+       flow would appear at the top of the document and be off screen the moment
+       anyone had scrolled. */
+    .rail{position:fixed;left:0;right:0;top:var(--bar);z-index:29;
+          width:auto;flex:none;height:auto;max-height:calc(100dvh - var(--bar));
+          overflow-y:auto;padding:10px 12px 16px;gap:2px;
+          border-right:0;border-bottom:1px solid var(--line-soft);
+          transform:translateY(-8px);opacity:0;visibility:hidden;
+          transition:opacity .18s ease,transform .18s ease,visibility 0s linear .18s}
+    .rail.open{transform:none;opacity:1;visibility:visible;transition-delay:0s}
+
+    .nav-scrim{display:block;position:fixed;inset:var(--bar) 0 0;z-index:28;
+               background:rgba(8,8,10,.55);opacity:0;transition:opacity .18s ease}
+    .nav-scrim.open{opacity:1}
+
+    .brand{display:none}
+    .rail-label{padding:6px 10px 4px}
+    /* Restored on mobile. It carries whether this bot answers anyone, which is
+       the one thing worth seeing on the device you check it from. */
+    .rail-foot{display:block;margin-top:10px}
+    .nav{width:100%;min-height:46px;padding:11px 12px;white-space:nowrap}
+    .nav .count{display:inline-block}
+
     .masthead{padding:26px 20px 22px}
     .page-wrap{padding:20px 20px 48px}
     .line{grid-template-columns:52px 1fr;gap:10px}
     .line .tag{display:none}
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    .rail,.nav-scrim{transition:none}
   }
   @media (prefers-reduced-motion:reduce){
     *{animation:none!important;transition:none!important}
@@ -296,7 +345,32 @@
 </style>
 </head>
 <body>
-  <aside class="rail">
+  <!-- Mobile only. The rail is a 236px column on a desktop and cannot be one on
+       a phone; the previous answer turned it into a horizontal scroller of eight
+       items, which hid both the brand and the fact that pages existed past the
+       right edge. This bar is what stays on screen: who you are looking at,
+       where you are, and one control to reach everywhere else. -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <span class="topbar-mark" id="topbarMark"></span>
+      <b>Tulip</b>
+    </div>
+    <span class="topbar-page" id="topbarPage">Overview</span>
+    <button class="topbar-toggle" id="navToggle" type="button"
+            aria-expanded="false" aria-controls="rail" aria-label="Show pages">
+      <svg class="ico-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+        <path d="M4 7h16M4 12h16M4 17h16"/>
+      </svg>
+      <svg class="ico-close" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+  </header>
+  <div class="nav-scrim" id="navScrim" hidden></div>
+
+  <aside class="rail" id="rail">
     <div class="brand">
       <svg viewBox="0 0 32 32" aria-hidden="true">
         <path d="M16 7c2.2 2.4 3.4 4.5 3.4 6.6 0 2.4-1.5 4-3.4 4s-3.4-1.6-3.4-4C12.6 11.5 13.8 9.4 16 7z" fill="#21d2ed"/>
