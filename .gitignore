@@ -10,6 +10,7 @@
 *.pem
 config.json
 config.local.json
+config/
 !config.example.json
 
 # Operator-specific data. These carry real phone numbers and message contents,

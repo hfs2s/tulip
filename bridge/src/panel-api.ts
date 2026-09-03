@@ -382,9 +382,13 @@ export function updateSettings(deps: ApiDeps, body: unknown): { ok: boolean; mes
     groups: deps.config.groups.enabled,
   };
 
-  Object.assign(deps.config, next);
-
-  // Preserve the documentation in the file it is documenting.
+  // Write first, then apply. The other order leaves the running config and the
+  // file disagreeing whenever the write fails — a setting that looks saved,
+  // works until the next restart, and then silently reverts. A failed save must
+  // change nothing at all.
+  //
+  // The raw file is edited rather than the parsed object so the `_comment` keys
+  // that document it survive the round trip.
   let raw: Record<string, unknown> = {};
   try {
     raw = JSON.parse(readFileSync(CONFIG_FILE, 'utf8')) as Record<string, unknown>;
@@ -397,8 +401,14 @@ export function updateSettings(deps: ApiDeps, body: unknown): { ok: boolean; mes
   try {
     writeJsonAtomic(CONFIG_FILE, raw, 0o600);
   } catch (err) {
-    return { ok: false, message: 'changed in memory, but the file could not be written: ' + String((err as Error).message) };
+    log('settings.writeFailed', { err: String((err as Error).message) });
+    return {
+      ok: false,
+      message: 'Could not write the configuration file, so nothing changed: ' + String((err as Error).message),
+    };
   }
+
+  Object.assign(deps.config, next);
 
   const after = {
     everyone: next.audience.everyone,

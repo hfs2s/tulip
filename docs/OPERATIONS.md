@@ -10,7 +10,7 @@ this at all.
 
 ```bash
 cp .env.example .env                 # ANTHROPIC_API_KEY — use a dedicated, capped key
-cp config.example.json config.json   # your operator number, at minimum
+mkdir -p config && cp config.example.json config/config.json   # your operator number
 docker compose build
 docker compose up -d
 ```
@@ -131,7 +131,7 @@ it.
 | You change | To apply |
 |---|---|
 | Settings, in the panel | nothing — applied immediately and written to `config.json` |
-| `config.json` by hand | `docker compose restart bridge` |
+| `config/config.json` by hand | `docker compose restart bridge` |
 | `.env` | `docker compose up -d` (recreates the containers) |
 | `persona/` | `docker compose build agent && docker compose up -d agent` — each chat's `CLAUDE.md` is regenerated when its session next starts |
 | any TypeScript | `docker compose build && docker compose up -d` |

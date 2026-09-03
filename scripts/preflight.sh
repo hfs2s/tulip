@@ -82,14 +82,17 @@ else
   bad ".env is missing — copy .env.example"
 fi
 
-if [ -f config.json ]; then
-  ok "config.json exists"
+CONFIG=config/config.json
+[ -f "$CONFIG" ] || CONFIG=config.json
+if [ -f "$CONFIG" ]; then
+  ok "$CONFIG exists"
 
   if command -v python3 >/dev/null 2>&1; then
     python3 - <<'PY'
 import json, re, sys
 try:
-    c = json.load(open("config.json"))
+    import os
+    c = json.load(open(os.environ.get("CONFIG","config/config.json")))
 except Exception as e:
     print(f"  \033[31m✗\033[0m config.json is not valid JSON: {e}")
     sys.exit(0)
@@ -149,7 +152,7 @@ PY
     warn=$((warn + $?))
   fi
 else
-  bad "config.json is missing — copy config.example.json"
+  bad "config/config.json is missing — mkdir -p config && cp config.example.json config/config.json"
 fi
 
 # ── Repository hygiene ────────────────────────────────────────────────────────

@@ -170,7 +170,7 @@ git clone https://github.com/echemles/tulip.git
 cd tulip
 
 cp .env.example .env                 # add ANTHROPIC_API_KEY
-cp config.example.json config.json   # add your operator number
+mkdir -p config && cp config.example.json config/config.json   # add your operator number
 
 scripts/preflight.sh                 # host prerequisites and configuration
 docker compose build

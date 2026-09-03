@@ -95,9 +95,12 @@ services:
       - state:/state
       - handoff-in:/handoff/in
       - handoff-out:/handoff/out
-      # Read-write: the panel can change settings, which means the bridge
-      # rewrites this file. It is the trusted container; the agent has no mount.
-      - ./config.json:/config/config.json
+      # A directory, not the file. The root filesystem is read-only, so binding
+      # just `config.json` leaves `/config` itself unwritable — and an atomic
+      # write creates a temporary sibling before renaming it into place, which
+      # then fails with EROFS. Mounting the directory gives the rename somewhere
+      # to happen. The agent has no mount of either.
+      - ./config:/config
     tmpfs:
       - /tmp:mode=1777,size=64m,noexec,nosuid,nodev
     ports:
