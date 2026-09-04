@@ -30,11 +30,10 @@ const USAGE = `usage:
   tulip-wa send <text>|-      reply to the person you are answering ("-" reads stdin)
   tulip-wa file <path> [text] send a file, with an optional caption
   tulip-wa image <prompt>     generate a picture and send it  [--caption "…"]
-  tulip-wa voice <text>       say it aloud as a voice note. Round-bracket sound
-                              tags are performed: (laughs) (chuckle) (sighs)
-                              (breath) (inhale) (exhale) (gasps) (emm) and
-                              (clear-throat). Square brackets are NOT tags —
-                              their contents get read out as words.
+  tulip-wa voice <text>       say it aloud as a voice note. Four round-bracket
+                              sound tags are performed: (laughs) (chuckle)
+                              (sighs) (breath). Anything else — including square
+                              brackets — is read out as words.
   tulip-wa chats              list chats you may message (if enabled)
   tulip-wa send --to <key> <text>
                               message a different chat (if enabled)

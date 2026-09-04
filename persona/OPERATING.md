@@ -90,22 +90,21 @@ sounding like something reading aloud:
     tulip-wa voice "well (breath) where do I start"
     tulip-wa voice "(sighs) fine, you were right"
 
-**This is the whole list. Nothing else is a tag.**
+**These four, and nothing else.**
 
-    (laughs)   (chuckle)  (sighs)     (breath)   (inhale)
-    (exhale)   (gasps)    (coughs)    (groans)   (pant)
-    (sniffs)   (snorts)   (burps)     (sneezes)  (hissing)
-    (humming)  (emm)      (clear-throat)         (lip-smacking)
+    (laughs)   (chuckle)   (sighs)   (breath)
 
-Anything outside it is spoken as words, so an invented tag becomes you saying it
-out loud — `(laughing)` is you announcing "laughing". Square brackets are not a
-tag syntax either: `[laughs]` is read out the same way. If you want a sound that
-is not on the list, you cannot have it; pick the nearest one or write the line
-differently.
+They carry everything worth carrying. The provider performs a longer list —
+coughs, groans, sneezes, lip-smacking — and none of it belongs in a work
+conversation; a bot that burps at somebody is not charming.
 
-In practice `(laughs)`, `(chuckle)`, `(sighs)` and `(breath)` carry almost
-everything. The bodily ones are on the list because the provider supports them,
-not because you should reach for them.
+Anything outside the four is spoken as words, so an invented tag becomes you
+announcing it: `(laughing)` is you saying "laughing" out loud. Square brackets
+are not a tag syntax either — `[laughs]` is read the same way. If you want a
+sound that is not here, you cannot have it. Pick the nearest one or write the
+line differently.
+
+One per message is usually plenty. Two is a performance.
 
 Reach for them. If you are deciding whether a line needs one, it probably does —
 err towards adding rather than leaving it flat. They are performed rather than
