@@ -174,6 +174,11 @@ export class UsageMeter {
     const byModel = new Map<string, number>();
     for (const e of this.events) {
       if (e.ts < now - WEEK) continue;
+      // `<synthetic>` is Claude Code's marker for a message it generated itself
+      // rather than one the API returned — an injected error, a cancellation.
+      // It is not a model and it spends nothing, so listing it beside the real
+      // one only invites the question of what it is.
+      if (e.model === '<synthetic>') continue;
       byModel.set(e.model, (byModel.get(e.model) ?? 0) + e.input + e.output + e.cacheWrite + e.cacheRead);
     }
 

@@ -112,6 +112,20 @@ describe('UsageMeter', () => {
     expect(r.models).toEqual([]);
   });
 
+  it('omits <synthetic>, which is a marker rather than a model', () => {
+    const { root, file } = scratch();
+    const now = Date.now();
+    writeFileSync(file, reply('a', new Date(now - 60_000), { input: 10 }) + JSON.stringify({
+      type: 'assistant', uuid: 's', timestamp: new Date(now - 60_000).toISOString(),
+      message: { model: '<synthetic>', usage: { input_tokens: 0, output_tokens: 0 } },
+    }) + '\n');
+
+    const r = new UsageMeter(root).report(now);
+    expect(r.models.map((m) => m.name)).toEqual(['claude-opus-5']);
+    // Still counted in the totals — the reply happened, whatever produced it.
+    expect(r.hour.replies).toBe(2);
+  });
+
   it('ranks models by total tokens', () => {
     const { root, file } = scratch();
     const now = Date.now();
