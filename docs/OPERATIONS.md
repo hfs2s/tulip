@@ -147,6 +147,12 @@ does it for all of them without losing any context.
 Two separate lists, for two separate surfaces, and it is easy to change the
 wrong one.
 
+A third list, `agent.contacts` (Settings → Reach), is neither of these: it is
+who the agent may message *first*. It grants nothing inbound, so somebody added
+there cannot reply until their number is also in `audience.numbers` — the panel
+now marks a contact that cannot reply, and the separation is the point rather
+than an oversight. See THREAT-MODEL §T4.
+
 **To let somebody message the bot** — Settings → Audience, or `config.json`:
 
 - Add their number to `audience.numbers` (bare international digits).
@@ -216,6 +222,18 @@ docker compose exec bridge tail -5 /state/feed.jsonl
 - **In the feed, accepted, no `delivered`** → delivery is held (`!release`), or
   a turn is in flight ahead of it.
 - **Delivered but no reply** → the agent's problem. Read its pane.
+
+### Nobody is being answered
+
+`delivery.stuckAfterMs` — Settings → Delivery → **Warn when unanswered for** —
+is the one alert that does not depend on the agent noticing its own failure. If
+anybody has been waiting longer than that, every operator number is messaged
+once, and the alert re-arms only when the backlog actually drains.
+
+That is deliberately independent of the two checks below, because the failure it
+exists for looks healthy from every other angle: the process is up, the socket is
+connected, the queue is empty, no fatal state is reported, and every turn is
+failing instantly. Setting it to 0 turns the warning off.
 
 ### The agent is not reporting
 

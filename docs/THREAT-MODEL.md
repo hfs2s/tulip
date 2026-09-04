@@ -334,8 +334,17 @@ the control panel.*
   a size cap, and a MIME allowlist.
 - The control panel binds to **loopback by default**, compares its token with
   `crypto.timingSafeEqual` against a properly parsed cookie, sets a restrictive
-  CSP, and rate-limits authentication failures. It exposes no endpoint that
-  writes configuration.
+  CSP, and rate-limits authentication failures.
+- It exposes **exactly one** endpoint that writes configuration — `POST
+  /api/settings` — and that is the sharpest edge on this surface: holding the
+  token is equivalent to holding the deployment, up to and including opening the
+  audience to the whole internet. This reverses an earlier design in which the
+  panel wrote nothing at all, which removed the class entirely; it was traded
+  for a console whose controls work. What backs it instead is that every change
+  is loud — old and new values into the structured log, and a distinct feed
+  entry when the audience is opened — and that `panel.*` itself stays
+  unwritable, so the surface cannot widen its own exposure. See `updateSettings`
+  in `bridge/src/panel-api.ts`.
 - The bridge runs non-root with `cap_drop: [ALL]`, `no-new-privileges` and a
   read-only root filesystem, exactly like the agent. Being trusted relative to
   the agent does not mean being unhardened.
@@ -373,7 +382,7 @@ been read carefully.
 | R5 | **DNS through the Docker daemon.** The `127.0.0.1` resolver closes the container's own path out, but the daemon's embedded DNS remains an implementation detail we do not control. | Verified closed in `scripts/verify-containment.sh`, which asserts resolution and egress both fail from inside the agent. Re-run after any Docker upgrade. |
 | R6 | **A compromised agent can exhaust host resources.** | Bounded by `pids_limit`, `cpus` and `mem_limit` — *provided the host kernel exposes those cgroup controllers*. It may not: Raspberry Pi OS ships with the memory controller **disabled**, and Docker discards a limit it cannot enforce with a single warning line during startup. `scripts/preflight.sh` checks for this explicitly, because a resource cap that is written down but not in force is worse than one that was never claimed. Enable it with `cgroup_enable=memory cgroup_memory=1` in `/boot/firmware/cmdline.txt` and reboot. |
 | R8 | **A prepared web page is an un-blockable injection vector.** Search results cannot be rate-limited by sender, because there is no sender. | Accepted as the cost of the agent being able to check facts instead of guessing at them. Bounded by T1 — the container is worth nothing — and by results being labelled as data at the point of use. Remove the tools if the trade stops being worth it: they are two action kinds in `shared/src/handoff.ts` and one module in the bridge. |
-| R7 | **The operator's control panel token is a bearer credential.** Anyone holding it can restart sessions and read message history. | Loopback-bound by default; exposing it is an explicit operator decision documented in `OPERATIONS.md`. |
+| R7 | **The operator's control panel token is a bearer credential.** Anyone holding it can restart sessions, read message history, and change who the bot answers — including opening it to anyone. | Loopback-bound by default; exposing it is an explicit operator decision documented in `OPERATIONS.md`. |
 
 ---
 

@@ -57,6 +57,17 @@ export class Dispatcher extends EventEmitter {
   private pumping = false;
   private inFlight: { turnId: string; chatKey: string; startedAt: number } | null = null;
   /**
+   * When the current unanswered stretch began, or null if nobody is waiting.
+   *
+   * This is the watchdog's actual signal — see the header of `index.ts`. Not
+   * queue depth, which is zero in precisely the failure that matters: messages
+   * delivered perfectly into a session that fails every turn instantly. It is
+   * set when work arrives to an idle dispatcher and cleared only when nothing
+   * is outstanding at all, so a hold, a wedged turn and a silent agent all keep
+   * the clock running.
+   */
+  private waitingSince: number | null = null;
+  /**
    * The newest inbound message per chat, so a `react` action has something to
    * point at. Deliberately in memory only: a reaction to a message from before
    * the last restart is not worth persisting state for.
@@ -156,14 +167,25 @@ export class Dispatcher extends EventEmitter {
     }
 
     feed.inbound({ ...summary, accepted: true, reason: null });
+    // The display name is supplied by the other end, so it never overwrites a
+    // label an operator set by hand. That label is not decoration: it is the
+    // only thing the agent is shown for a contact, and the contact list is what
+    // authorises the agent to open a conversation at all. Letting a sender
+    // rename themselves in the agent's view would let them dress as somebody
+    // the operator vouched for.
+    const existing = chats.get(chatKey);
     chats.touch(
       chatKey,
       {
-        name: envelope.isGroup ? envelope.groupName : envelope.pushName,
-        messages: (chats.get(chatKey)?.messages ?? 0) + 1,
+        ...(existing?.contact === true
+          ? {}
+          : { name: envelope.isGroup ? envelope.groupName : envelope.pushName }),
+        messages: (existing?.messages ?? 0) + 1,
       },
       now,
     );
+
+    if (this.waitingSince === null) this.waitingSince = now;
 
     const queued: QueuedMessage = { chatKey, envelope };
     const list = this.pending.get(chatKey) ?? [];
@@ -266,6 +288,14 @@ export class Dispatcher extends EventEmitter {
       }
     } finally {
       this.pumping = false;
+      if (
+        this.pending.size === 0 &&
+        this.ready.length === 0 &&
+        this.queue.size === 0 &&
+        this.inFlight === null
+      ) {
+        this.waitingSince = null;
+      }
     }
   }
 
@@ -365,14 +395,23 @@ export class Dispatcher extends EventEmitter {
   }
 
   /** For the panel and the watchdog. */
-  snapshot(): { pending: number; ready: number; queued: number; inFlight: string | null } {
+  snapshot(): {
+    pending: number;
+    ready: number;
+    queued: number;
+    inFlight: string | null;
+    waitingSince: number | null;
+  } {
     let pending = 0;
     for (const list of this.pending.values()) pending += list.length;
+    const outstanding =
+      pending > 0 || this.ready.length > 0 || this.queue.size > 0 || this.inFlight !== null;
     return {
       pending,
       ready: this.ready.length,
       queued: this.queue.size,
       inFlight: this.inFlight?.chatKey ?? null,
+      waitingSince: outstanding ? this.waitingSince : null,
     };
   }
 }

@@ -36,24 +36,48 @@ function bytes(n) {
 }
 
 var toastTimer = null;
-function toast(message) {
+/**
+ * The only success and failure surface on this page.
+ *
+ * `urgent` switches it from polite to assertive, because a failed write is not
+ * something to mention when the reader next pauses — and it holds for longer,
+ * since a failure usually carries a sentence rather than a word.
+ */
+function toast(message, urgent) {
   var t = el('toast');
   t.textContent = message;
+  t.setAttribute('role', urgent ? 'alert' : 'status');
+  t.setAttribute('aria-live', urgent ? 'assertive' : 'polite');
   t.classList.add('on');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(function () { t.classList.remove('on'); }, 2600);
+  toastTimer = setTimeout(function () { t.classList.remove('on'); }, urgent ? 6000 : 2600);
 }
 
+/**
+ * A call to the bridge.
+ *
+ * The body is read whatever the status, because the interesting failures carry
+ * one. Every refusal on this surface answers `{ ok: false, message }` with a
+ * 400, so throwing on `!res.ok` before parsing reduced "config.json is not
+ * valid JSON, so nothing was changed" — the one sentence that tells an operator
+ * the truth about a failed write — to "the bridge answered 400".
+ */
 async function api(path, options) {
   var res = await fetch(path, options);
-  if (!res.ok) throw new Error('the bridge answered ' + res.status);
-  return res.json();
+  var body = null;
+  try { body = await res.json(); } catch (err) { /* not JSON: keep the status */ }
+  if (!res.ok) {
+    var failure = new Error((body && body.message) || 'the bridge answered ' + res.status);
+    failure.body = body;
+    throw failure;
+  }
+  return body;
 }
 async function act(action, key) {
   try {
     var body = await api('/api/action/' + encodeURIComponent(action) + (key ? '?key=' + encodeURIComponent(key) : ''), { method: 'POST' });
     toast(body.message || 'Done.');
-  } catch (err) { toast(err.message); return; }
+  } catch (err) { toast(err.message, true); return; }
   refresh();
 }
 
@@ -372,7 +396,7 @@ function renderChats(s) {
   table.appendChild(thead);
   list.forEach(function (c) {
     var tr = document.createElement('tr');
-    tr.appendChild(node('td', null, (c.name || 'Someone') + (c.isGroup ? ' (group)' : '') + (c.blocked ? ' — blocked' : '')));
+    tr.appendChild(node('td', null, (c.name || 'Someone') + (c.isGroup ? ' (group)' : '') + (c.contact ? ' — contact' : '') + (c.blocked ? ' — blocked' : '')));
     tr.appendChild(node('td', 'key', c.chatKey));
     tr.appendChild(node('td', null, c.messages));
     tr.appendChild(node('td', null, c.turnsToday));
@@ -635,12 +659,68 @@ function startTerminal() { stopTerminal(); pollTerminal(); termTimer = setInterv
 function stopTerminal() { if (termTimer) clearInterval(termTimer); termTimer = null; }
 
 // ── Settings ────────────────────────────────────────────────────────────────
+
+/**
+ * One labelled row: a name, an optional hint, and the control they describe.
+ *
+ * The name lives in a sibling element, so nothing connects it to the control
+ * unless this function does it. Without that wiring the eight switches on this
+ * page all announce as "checkbox, not checked" — including the one that opens a
+ * machine holding a shell to the whole internet — and there is no way to tell
+ * them apart by ear or by keyboard. A checkbox additionally gets a real
+ * `<label for>`, which makes the visible words a hit target rather than
+ * decoration next to a 42x24 pixel track.
+ */
+var fieldSeq = 0;
 function field(parent, name, hint, control) {
   var row = node('div', 'field');
   var left = node('div');
-  left.appendChild(node('div', null, name));
-  if (hint) left.appendChild(node('div', 'hint', hint));
+  var id = 'fld' + (++fieldSeq);
+
+  var targets = [];
+  if (control.matches && control.matches('input,select,button,[role=group]')) targets = [control];
+  else if (control.querySelectorAll) {
+    targets = Array.prototype.slice.call(control.querySelectorAll('input,select,button,[role=group]'));
+  }
+
+  var box = null;
+  for (var i = 0; i < targets.length; i++) {
+    if (targets[i].type === 'checkbox') { box = targets[i]; break; }
+  }
+  var title;
+  if (box) {
+    if (!box.id) box.id = id + 'i';
+    title = document.createElement('label');
+    title.className = 'field-name';
+    title.htmlFor = box.id;
+    title.textContent = name;
+  } else {
+    title = node('div', 'field-name', name);
+  }
+  title.id = id;
+  left.appendChild(title);
+
+  var hintId = null;
+  if (hint) {
+    var h = node('div', 'hint', hint);
+    h.id = hintId = id + 'h';
+    left.appendChild(h);
+  }
   row.appendChild(left);
+
+  targets.forEach(function (t) {
+    if (!t.hasAttribute('aria-label') && !t.hasAttribute('aria-labelledby')) {
+      if (t.tagName === 'BUTTON' && t.textContent) {
+        // Keep the button's own word: "Allowed numbers, Edit", not either half.
+        if (!t.id) t.id = id + 'b' + (++fieldSeq);
+        t.setAttribute('aria-labelledby', id + ' ' + t.id);
+      } else {
+        t.setAttribute('aria-labelledby', id);
+      }
+    }
+    if (hintId && !t.hasAttribute('aria-describedby')) t.setAttribute('aria-describedby', hintId);
+  });
+
   row.appendChild(control);
   parent.appendChild(row);
   return row;
@@ -663,12 +743,12 @@ async function saveSettings(patch, revert) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(patch)
     });
-    if (!body.ok) { toast(body.message); if (revert) revert(); return false; }
+    if (!body.ok) { toast(body.message, true); if (revert) revert(); return false; }
     toast(body.message || 'Saved.');
     refresh();
     return true;
   } catch (err) {
-    toast(err.message);
+    toast(err.message, true);
     if (revert) revert();
     return false;
   }
@@ -677,17 +757,24 @@ async function saveSettings(patch, revert) {
 /**
  * A modal.
  *
- * Escape and a backdrop click both close it, and focus moves to the first
- * control on open — a dialog you cannot dismiss from the keyboard is a trap.
+ * Escape and a backdrop click both close it, focus moves to the first control
+ * in the body on open, Tab is confined to the dialog, and focus returns to
+ * whatever opened it — a dialog you cannot dismiss from the keyboard is a trap,
+ * and one that drops focus on the floor sends a keyboard operator back to the
+ * top of the page after every single list edit.
  */
 function openModal(title, description, build) {
   var scrim = el('scrim');
+  var opener = document.activeElement;
   clear(scrim);
 
   var modal = node('div', 'modal');
   var head = node('div', 'modal-head');
   var titles = node('div');
-  titles.appendChild(node('h3', null, title));
+  var heading = node('h3', null, title);
+  heading.id = 'modalTitle';
+  scrim.setAttribute('aria-labelledby', 'modalTitle');
+  titles.appendChild(heading);
   if (description) titles.appendChild(node('p', null, description));
   head.appendChild(titles);
   var close = node('button', 'sm', 'Close');
@@ -700,19 +787,42 @@ function openModal(title, description, build) {
   scrim.appendChild(modal);
   scrim.classList.add('on');
 
+  // `aria-modal` claims the rest of the page is hidden. `inert` is what makes
+  // that true — without it the claim and the tab order disagree.
+  var behind = [el('rail'), document.querySelector('main')];
+  behind.forEach(function (n) { if (n) n.setAttribute('inert', ''); });
+
   function dismiss() {
     scrim.classList.remove('on');
     clear(scrim);
     document.removeEventListener('keydown', onKey);
+    scrim.removeEventListener('click', onScrim);
+    behind.forEach(function (n) { if (n) n.removeAttribute('inert'); });
+    if (opener && opener.focus) opener.focus();
   }
-  function onKey(ev) { if (ev.key === 'Escape') dismiss(); }
+  function focusable() {
+    return modal.querySelectorAll('input:not([disabled]), button:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])');
+  }
+  function onKey(ev) {
+    if (ev.key === 'Escape') { dismiss(); return; }
+    if (ev.key !== 'Tab') return;
+    var f = focusable();
+    if (f.length === 0) return;
+    var first = f[0];
+    var last = f[f.length - 1];
+    if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+  }
+  function onScrim(ev) { if (ev.target === scrim) dismiss(); }
   close.addEventListener('click', dismiss);
-  scrim.addEventListener('click', function (ev) { if (ev.target === scrim) dismiss(); });
+  scrim.addEventListener('click', onScrim);
   document.addEventListener('keydown', onKey);
 
   build(body, modal, dismiss);
-  var first = modal.querySelector('input, button');
-  if (first) first.focus();
+  // The body, not the head: `modal.querySelector` matches in document order and
+  // Close is appended first, so the old version always focused Close.
+  var first = body.querySelector('input, button') || close;
+  first.focus();
   return dismiss;
 }
 
@@ -723,7 +833,8 @@ function openModal(title, description, build) {
  * boxes you had to scroll past to reach anything else. The summary is what an
  * operator reads; the list is what they occasionally change.
  */
-function listField(parent, name, hint, values, placeholder, help, onSave, sanitize) {
+function listField(parent, name, hint, values, placeholder, help, onSave, sanitize, opts) {
+  opts = opts || {};
   // Per-field, because this editor backs both phone numbers and group trigger
   // words. One shared numeric sanitizer quietly rewrote "call me" to "callme"
   // with no error — the operator saw their trigger accepted and it never fired.
@@ -745,6 +856,17 @@ function listField(parent, name, hint, values, placeholder, help, onSave, saniti
     openModal(name, help, function (body) {
       var list = node('div');
 
+      // The page paints once and is never reconciled, so a tab left open here
+      // holds an arbitrarily old list. Saving replaces the array wholesale, so
+      // editing from a stale copy would quietly revert every entry added since.
+      if (opts.reload) {
+        opts.reload().then(function (fresh) {
+          if (!fresh || !list.isConnected) return;
+          current = fresh.slice();
+          paint(); label();
+        }, function () { /* keep what we have; the save will still be validated */ });
+      }
+
       function paint() {
         clear(list);
         if (!current.length) list.appendChild(node('p', 'hint', 'Nothing here yet.'));
@@ -754,6 +876,11 @@ function listField(parent, name, hint, values, placeholder, help, onSave, saniti
           var rm = node('button', 'sm danger', 'Remove');
           rm.type = 'button';
           rm.addEventListener('click', function () {
+            // Identical buttons, wildly different consequences: removing the
+            // last operator entry takes away !hold, !block and every watchdog
+            // alert, which is the path you need precisely when something is
+            // going wrong. Confirmed only where the loss is categorical.
+            if (opts.confirmLast && current.length === 1 && !window.confirm(opts.confirmLast)) return;
             var before = current.slice();
             current = current.slice(0, i).concat(current.slice(i + 1));
             paint(); label();
@@ -803,8 +930,18 @@ function listField(parent, name, hint, values, placeholder, help, onSave, saniti
  * a WhatsApp message asking it to contact somebody is not evidence of anything,
  * so the operator's list is where the permission actually lives.
  */
-function contactsField(parent, values, onSave) {
+function contactsField(parent, values, onSave, ctx) {
+  ctx = ctx || {};
   var current = values.slice();
+  // Whether a given contact could actually answer. The two lists are separate
+  // on purpose — adding a destination must never widen who can reach the agent
+  // — but the consequence only ever got stated in one direction, so the
+  // operator who correctly concluded "no side effects" was the one who then
+  // spent an hour on a one-way conversation.
+  function reachable(number) {
+    if (!ctx.audience) return true;
+    return ctx.audience.everyone || ctx.audience.numbers.indexOf(number) >= 0;
+  }
   var summary = node('div', 'summary');
   var count = node('span', 'value');
   var edit = node('button', 'sm', 'Edit');
@@ -819,9 +956,17 @@ function contactsField(parent, values, onSave) {
 
   edit.addEventListener('click', function () {
     openModal('Contacts',
-      'Somebody here can be messaged first — an introduction, or passing something on. Adding a contact does not let them message Tulip; that is the audience list, deliberately separate.',
+      'Somebody here can be messaged first — an introduction, or passing something on. This does not let them message Tulip: that is the Audience list, deliberately separate, so adding a destination can never widen who reaches the agent. If you want them to be able to reply, add their number under Audience as well.',
       function (body) {
         var list = node('div');
+
+        if (ctx.reload) {
+          ctx.reload().then(function (fresh) {
+            if (!fresh || !list.isConnected) return;
+            current = fresh.slice();
+            paint(); label();
+          }, function () { /* keep what we have */ });
+        }
 
         function save(before) {
           onSave(current.slice(), function () { current = before; paint(); label(); });
@@ -833,6 +978,9 @@ function contactsField(parent, values, onSave) {
           current.forEach(function (c, i) {
             var row = node('div', 'entry');
             row.appendChild(node('span', 'value', c.label + ' · +' + c.number));
+            if (!reachable(c.number)) {
+              row.appendChild(node('span', 'badge off', 'cannot reply — not in Audience'));
+            }
             var rm = node('button', 'sm danger', 'Remove');
             rm.type = 'button';
             rm.addEventListener('click', function () {
@@ -856,9 +1004,13 @@ function contactsField(parent, values, onSave) {
           add.type = 'button';
 
           function commit() {
-            var l = name.value.trim().slice(0, 64);
+            var l = name.value.trim();
             var n = number.value.replace(/[^0-9]/g, '');
             if (!l || !n) { toast('A contact needs a name and a number.'); return; }
+            // Refused rather than trimmed: the label is the only thing the
+            // agent sees for this person, so a silently shortened one is a
+            // person the operator no longer recognises in the transcript.
+            if (l.length > 64) { toast('A contact name is limited to 64 characters.'); return; }
             if (n.length < 6) { toast('That number looks too short.'); return; }
             for (var i = 0; i < current.length; i++) {
               if (current[i].number === n) { toast('Already a contact.'); return; }
@@ -885,24 +1037,102 @@ function contactsField(parent, values, onSave) {
       });
   });
 
-  field(parent, 'Contacts', 'People the agent may message first. It sees the name, never the number.', summary);
+  var hint = 'People the agent may message first. It sees the name, never the number.';
+  if (ctx.crossChat === false) {
+    // The dependency was stated on the switch and not here, so a list built
+    // with the switch off changed nothing and said nothing.
+    hint = 'People the agent may message first — inert right now, because "Message other chats" is off. It sees the name, never the number.';
+    summary.insertBefore(node('span', 'badge off', 'not in effect'), summary.firstChild);
+  }
+  field(parent, 'Contacts', hint, summary);
 }
 
-function numberControl(value, min, max, onSave) {
-  var wrap = node('div');
-  wrap.style.display = 'flex';
-  wrap.style.alignItems = 'center';
-  wrap.style.gap = '12px';
+/** 600000 reads as a number. `10m` reads as a length of time. */
+function duration(ms) {
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return String(Math.round(ms / 100) / 10).replace(/\.0$/, '') + 's';
+  return String(Math.round(ms / 6000) / 10).replace(/\.0$/, '') + 'm';
+}
+
+/**
+ * A number, as a slider and a box.
+ *
+ * The slider alone could not express most of these. `turnTimeoutMs` spans 30
+ * seconds to an hour across 170 pixels — roughly 20 seconds per pixel — and an
+ * unstepped range input moves one millisecond per arrow key, so "set the turn
+ * timeout to ten minutes" was not a thing this page could do at all. The box is
+ * what makes an exact value reachable; the slider is what makes the range
+ * legible; and `format` is what stops the readout being a wall of milliseconds.
+ *
+ * A value already outside the offered range is shown and refused rather than
+ * clamped. Assigning it to the input would silently pin the handle to the
+ * boundary while the readout still showed the real number, and the operator's
+ * next nudge would write a large reduction they never asked for.
+ */
+function numberControl(value, min, max, onSave, opts) {
+  opts = opts || {};
+  var step = opts.step || 1;
+  var format = opts.format || null;
+  var outOfRange = value < min || value > max;
+  var wrap = node('div', 'numeric');
+
   var range = document.createElement('input');
   range.type = 'range';
   range.className = 'range';
-  range.min = String(min); range.max = String(max); range.value = String(value);
-  var out = node('span', 'value', value);
-  range.addEventListener('input', function () { out.textContent = range.value; });
-  range.addEventListener('change', function () { onSave(Number(range.value)); });
+  range.min = String(min); range.max = String(max); range.step = String(step);
+  range.disabled = outOfRange;
+
+  var box = document.createElement('input');
+  box.type = 'number';
+  box.className = 'numbox';
+  box.min = String(min); box.max = String(max);
+  // The slider steps coarsely so dragging is usable across an hour of range;
+  // the box is the one that has to accept whatever the operator actually means,
+  // so it does not inherit that granularity.
+  box.step = 'any';
+  box.setAttribute('aria-label', 'exact value');
+
+  var out = format ? node('span', 'value', '') : null;
+
+  function paint(v) {
+    range.value = String(Math.min(max, Math.max(min, v)));
+    box.value = String(v);
+    if (out) out.textContent = format(v);
+    // Announced instead of the bare number, so "10m" reaches a screen reader
+    // the same way it reaches the eye.
+    range.setAttribute('aria-valuetext', format ? format(v) : String(v));
+  }
+  paint(value);
+
+  function commit(v) {
+    if (!isFinite(v)) { paint(value); return; }
+    v = Math.min(max, Math.max(min, Math.round(v)));
+    if (v === value) { paint(v); return; }
+    var was = value;
+    value = v;
+    paint(v);
+    onSave(v, function () { value = was; paint(was); });
+  }
+
+  range.addEventListener('input', function () {
+    box.value = range.value;
+    if (out) out.textContent = format(Number(range.value));
+  });
+  range.addEventListener('change', function () { commit(Number(range.value)); });
+  box.addEventListener('change', function () { commit(Number(box.value)); });
+
   wrap.appendChild(range);
-  wrap.appendChild(out);
+  wrap.appendChild(box);
+  if (out) wrap.appendChild(out);
+  if (outOfRange) {
+    wrap.appendChild(node('span', 'badge off', 'set to ' + value + ' in config.json, outside this range'));
+  }
   return wrap;
+}
+
+/** Re-read the server's view, for editors that must not save from a stale copy. */
+function freshSettings(pick) {
+  return api('/api/settings').then(function (fresh) { return pick(fresh); });
 }
 
 async function renderSettings() {
@@ -916,6 +1146,16 @@ async function renderSettings() {
   audience.appendChild(node('h2', null, 'Audience'));
   audience.appendChild(node('p', 'sub', 'Who reaches the agent. Opening this to everyone makes every inbound message untrusted input to a process holding a shell — which is what the containment is for, but know that you are doing it.'));
 
+  // Off, with both lists empty, is a legal configuration that answers nobody —
+  // and every refusal is silent by design, so from outside it is identical to
+  // the bot being down. Said here rather than left to be discovered.
+  if (!s.audience.everyone && s.audience.numbers.length === 0 && s.audience.jids.length === 0) {
+    var shut = node('div', 'warnbar');
+    shut.appendChild(node('strong', null, 'Nobody can reach Tulip.'));
+    shut.appendChild(document.createTextNode(' "Open to anyone" is off and both allow lists are empty, so every direct message is refused — silently, as refusals always are.'));
+    audience.appendChild(shut);
+  }
+
   field(audience, 'Open to anyone', 'When on, anybody who messages this number is answered.',
     liveSwitch(s.audience.everyone, function (on, input) {
       saveSettings({ audience: { everyone: on } }, function () { input.checked = !on; });
@@ -924,23 +1164,51 @@ async function renderSettings() {
   listField(audience, 'Allowed numbers', 'Consulted when not open to everyone.',
     s.audience.numbers, 'e.g. 15551234567',
     'Bare international digits — no plus sign, no spaces. Changes save as you make them.',
-    function (next, revert) { saveSettings({ audience: { numbers: next } }, revert); });
+    function (next, revert) { saveSettings({ audience: { numbers: next } }, revert); },
+    null, { reload: function () { return freshSettings(function (f) { return f.audience.numbers; }); } });
 
   listField(audience, 'Allowed linked ids', 'For senders WhatsApp delivers without a number.',
     s.audience.jids, 'e.g. 111111111111111@lid',
     'WhatsApp increasingly delivers a sender as a @lid with no phone number attached, and a numbers-only list can never match them. Copy the value from a refusal on the Log page.',
-    function (next, revert) { saveSettings({ audience: { jids: next } }, revert); });
+    function (next, revert) { saveSettings({ audience: { jids: next } }, revert); },
+    null, { reload: function () { return freshSettings(function (f) { return f.audience.jids; }); } });
+  p.appendChild(audience);
 
-  listField(audience, 'Operator numbers', 'Who may run ! commands and receives alerts.',
+  // ── Operators ─────────────────────────────────────────────────────────────
+  // A different surface from the audience — who may command the bot, not who
+  // may talk to it — and filing them under "Audience" hid them from anyone
+  // looking for how to add another admin.
+  var ops = node('div', 'card');
+  ops.appendChild(node('h2', null, 'Operators'));
+  ops.appendChild(node('p', 'sub', 'Who may run ! commands from WhatsApp and who receives watchdog alerts. Never widened by "open to anyone" — that would hand a stranger the ability to hold delivery and read state.'));
+
+  if (s.operators.numbers.length === 0 && s.operators.jids.length === 0) {
+    var noOps = node('div', 'warnbar');
+    noOps.appendChild(node('strong', null, 'No operators.'));
+    noOps.appendChild(document.createTextNode(' Nobody can hold delivery, block a chat, or be told when something is wrong — including from the phone this account is paired to.'));
+    ops.appendChild(noOps);
+  }
+
+  var lastOperator = 'Remove the last operator?\n\nYou will have no way to hold delivery, block a chat, or receive watchdog alerts from your phone until you add one back.';
+
+  listField(ops, 'Operator numbers', 'Bare international digits.',
     s.operators.numbers, 'bare digits',
     'Never widened by "open to anyone" — that would hand a stranger the ability to hold delivery and read state.',
-    function (next, revert) { saveSettings({ operators: { numbers: next } }, revert); });
+    function (next, revert) { saveSettings({ operators: { numbers: next } }, revert); },
+    null, {
+      confirmLast: lastOperator,
+      reload: function () { return freshSettings(function (f) { return f.operators.numbers; }); },
+    });
 
-  listField(audience, 'Operator linked ids', 'The same people, as WhatsApp actually delivers them.',
+  listField(ops, 'Operator linked ids', 'The same people, as WhatsApp actually delivers them.',
     s.operators.jids, 'digits or @lid',
     'An operator whose commands are silently ignored has no way into their own system, so this matters more than the numbers list.',
-    function (next, revert) { saveSettings({ operators: { jids: next } }, revert); });
-  p.appendChild(audience);
+    function (next, revert) { saveSettings({ operators: { jids: next } }, revert); },
+    null, {
+      confirmLast: lastOperator,
+      reload: function () { return freshSettings(function (f) { return f.operators.jids; }); },
+    });
+  p.appendChild(ops);
 
   // ── Groups ────────────────────────────────────────────────────────────────
   var groups = node('div', 'card');
@@ -951,20 +1219,49 @@ async function renderSettings() {
       saveSettings({ groups: { enabled: on } }, function () { input.checked = !on; });
     }));
 
+  // The pressed state is the only feedback this control has, and it used to be
+  // painted once and never updated: choosing Observe — the consequential one,
+  // which turns every group message into a model call — left Mention
+  // highlighted and a `Saved.` toast, so the rational next move was to click
+  // again, and again, each one a real config write.
   var modeSeg = node('div', 'seg');
-  [['mention', 'Mention'], ['trigger', 'Trigger'], ['observe', 'Observe']].forEach(function (m) {
+  modeSeg.setAttribute('role', 'group');
+  var modes = [['mention', 'Mention'], ['trigger', 'Trigger'], ['observe', 'Observe']];
+  function paintModes(active) {
+    Array.prototype.forEach.call(modeSeg.children, function (btn, i) {
+      btn.setAttribute('aria-pressed', modes[i][0] === active ? 'true' : 'false');
+    });
+  }
+  modes.forEach(function (m) {
     var b = node('button', null, m[1]);
     b.type = 'button';
-    b.setAttribute('aria-pressed', s.groups.replyTo === m[0] ? 'true' : 'false');
-    b.addEventListener('click', function () { saveSettings({ groups: { replyTo: m[0] } }); });
+    b.addEventListener('click', function () {
+      var was = s.groups.replyTo;
+      if (was === m[0]) return;
+      s.groups.replyTo = m[0];
+      paintModes(m[0]);
+      saveSettings({ groups: { replyTo: m[0] } }, function () {
+        s.groups.replyTo = was;
+        paintModes(was);
+      });
+    });
     modeSeg.appendChild(b);
   });
+  paintModes(s.groups.replyTo);
   field(groups, 'Group mode', 'observe delivers every message so the agent can react; it is the expensive one — every message becomes a model call.', modeSeg);
   listField(groups, 'Trigger words', 'Used only in trigger mode. Phrases are allowed.',
     s.groups.triggers || [], 'e.g. juan',
     'A group message containing one of these is answered. Matching is case-insensitive, and a phrase with spaces is fine.',
     function (next, revert) { saveSettings({ groups: { triggers: next } }, revert); },
-    function (v) { return v.replace(/\s+/g, ' ').slice(0, 32); });
+    function (v) {
+      // Collapse whitespace, but refuse an over-long phrase rather than
+      // truncating it: a silently shortened trigger is one the operator watches
+      // get accepted and then never fires.
+      var t = v.replace(/\s+/g, ' ');
+      if (t.length > 32) { toast('Trigger words are limited to 32 characters.'); return ''; }
+      return t;
+    },
+    { reload: function () { return freshSettings(function (f) { return f.groups.triggers || []; }); } });
   p.appendChild(groups);
 
   // ── Reach ─────────────────────────────────────────────────────────────────
@@ -977,7 +1274,12 @@ async function renderSettings() {
     }));
 
   contactsField(reach, s.agent && s.agent.contacts ? s.agent.contacts : [],
-    function (next, revert) { saveSettings({ agent: { contacts: next } }, revert); });
+    function (next, revert) { saveSettings({ agent: { contacts: next } }, revert); },
+    {
+      audience: s.audience,
+      crossChat: !!(s.agent && s.agent.crossChat),
+      reload: function () { return freshSettings(function (f) { return (f.agent && f.agent.contacts) || []; }); },
+    });
 
   p.appendChild(reach);
 
@@ -985,21 +1287,26 @@ async function renderSettings() {
   var limits = node('div', 'card');
   limits.appendChild(node('h2', null, 'Limits'));
   limits.appendChild(node('p', 'sub', 'Turns are the expensive unit — each one is a model call somebody pays for.'));
-  [['messagesPerHour', 'Messages per hour', 1, 200],
-   ['burst', 'Burst', 1, 50],
-   ['turnsPerDay', 'Turns per day', 1, 500],
-   ['outboundPerTurn', 'Sends per turn', 1, 50],
-   ['outboundPerChatPerHour', 'Sends per chat per hour', 1, 300],
-   ['maxInboundChars', 'Longest message accepted', 200, 20000],
-   ['newSendersPerHour', 'New senders per hour', 1, 200],
-   ['maxMediaPerMessage', 'Attachments per message', 0, 10],
-   ['turnTimeoutMs', 'Abandon a turn after (ms)', 30000, 1800000]
+  // Bounds match the schema in panel-api.ts exactly. A narrower slider looks
+  // like guidance and behaves like a trap: the input clamps a larger configured
+  // value to its own maximum, and the first nudge writes the clamp.
+  [['messagesPerHour', 'Messages per hour', 1, 1000, null, 1],
+   ['burst', 'Burst', 1, 50, null, 1],
+   ['turnsPerDay', 'Turns per day', 1, 10000, null, 10],
+   ['outboundPerTurn', 'Sends per turn', 1, 100, null, 1],
+   ['outboundPerChatPerHour', 'Sends per chat per hour', 1, 1000, null, 1],
+   ['maxInboundChars', 'Longest message accepted', 200, 100000, null, 100],
+   ['newSendersPerHour', 'New senders per hour', 1, 1000, null, 1],
+   ['maxMediaPerMessage', 'Attachments per message', 0, 10, null, 1],
+   ['maxMediaBytes', 'Largest attachment fetched', 1024, 104857600, bytes, 262144],
+   ['turnTimeoutMs', 'Abandon a turn after', 30000, 3600000, duration, 30000]
   ].forEach(function (row) {
-    field(limits, row[1], null, numberControl(s.limits[row[0]], row[2], row[3], function (v) {
-      var patch = { limits: {} };
-      patch.limits[row[0]] = v;
-      saveSettings(patch);
-    }));
+    field(limits, row[1], row[0] === 'maxMediaBytes' ? 'Checked before download, so an oversized attachment is never fetched.' : null,
+      numberControl(s.limits[row[0]], row[2], row[3], function (v, revert) {
+        var patch = { limits: {} };
+        patch.limits[row[0]] = v;
+        saveSettings(patch, revert);
+      }, { format: row[4], step: row[5] }));
   });
   p.appendChild(limits);
 
@@ -1007,15 +1314,15 @@ async function renderSettings() {
   var delivery = node('div', 'card');
   delivery.appendChild(node('h2', null, 'Delivery'));
   delivery.appendChild(node('p', 'sub', 'How messages are gathered before the agent sees them.'));
-  [['debounceMs', 'Wait before handing over (ms)', 0, 15000, 'Collects a burst of quick messages into one prompt.'],
-   ['maxBatch', 'Messages per turn', 1, 50, 'The rest wait for this chat’s next turn in the rotation.'],
-   ['stuckAfterMs', 'Warn when unanswered for (ms)', 0, 1800000, 'How long a message may sit before operators are told.']
+  [['debounceMs', 'Wait before handing over', 0, 60000, 'Collects a burst of quick messages into one prompt.', duration, 250],
+   ['maxBatch', 'Messages per turn', 1, 50, 'The rest wait for this chat’s next turn in the rotation.', null, 1],
+   ['stuckAfterMs', 'Warn when unanswered for', 0, 3600000, 'How long anybody may go unanswered before your operator numbers are messaged. 0 turns the warning off.', duration, 30000]
   ].forEach(function (row) {
-    field(delivery, row[1], row[4], numberControl(s.delivery[row[0]], row[2], row[3], function (v) {
+    field(delivery, row[1], row[4], numberControl(s.delivery[row[0]], row[2], row[3], function (v, revert) {
       var patch = { delivery: {} };
       patch.delivery[row[0]] = v;
-      saveSettings(patch);
-    }));
+      saveSettings(patch, revert);
+    }, { format: row[5], step: row[6] }));
   });
   p.appendChild(delivery);
 

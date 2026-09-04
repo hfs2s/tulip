@@ -105,6 +105,11 @@ export function snapshot(deps: ApiDeps): Json {
         name: c.name,
         isGroup: c.isGroup,
         blocked: c.blocked,
+        // The `ChatRecord` docblock promises the panel says which rows an
+        // operator put there by hand. It never sent the flag, so a contact just
+        // added sat at the top of Chats with zero messages, indistinguishable
+        // from a stranger who had only just written in.
+        contact: c.contact,
         messages: c.messages,
         firstSeenAt: c.firstSeenAt,
         lastSeenAt: c.lastSeenAt,
@@ -305,7 +310,7 @@ export function settingsView(deps: ApiDeps): Json {
  *     reach this surface at all, and a surface that can widen its own exposure
  *     is a different kind of mistake.
  *
- * See docs/THREAT-MODEL.md §T8.
+ * See docs/THREAT-MODEL.md §T7.
  */
 const PhoneNumber = z.string().regex(/^[1-9][0-9]{6,15}$/, 'bare international digits, no + or spaces');
 const LinkedId = z.string().regex(/^[0-9]{5,25}(@lid)?$/, 'digits, optionally @lid');
@@ -404,11 +409,28 @@ export function updateSettings(deps: ApiDeps, body: unknown): { ok: boolean; mes
   //
   // The raw file is edited rather than the parsed object so the `_comment` keys
   // that document it survive the round trip.
+  //
+  // "Absent" and "unreadable" must not be the same case. A parse failure on a
+  // file that exists — a hand edit with a trailing comma, which OPERATIONS.md
+  // actively invites — would otherwise leave `raw` empty and the atomic write
+  // would replace the whole file with just the patched section. Every other
+  // section would come back as a schema default on the next restart, which
+  // silently sets `audience.everyone` to false and empties `operators`. That is
+  // a config wipe reported as `Saved.`, so it is refused instead.
   let raw: Record<string, unknown> = {};
   try {
     raw = JSON.parse(readFileSync(CONFIG_FILE, 'utf8')) as Record<string, unknown>;
-  } catch {
-    /* first write, or the file is gone */
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      log('settings.rawUnreadable', { err: String((err as Error).message) });
+      return {
+        ok: false,
+        message:
+          `${CONFIG_FILE} exists but is not valid JSON, so nothing was changed. ` +
+          'Fix the file by hand and restart the bridge, or the next save would overwrite every other section.',
+      };
+    }
+    /* genuinely absent: this is the first write */
   }
   for (const [section, values] of Object.entries(patch.data)) {
     raw[section] = { ...(raw[section] as object), ...values };

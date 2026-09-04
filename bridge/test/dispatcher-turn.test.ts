@@ -58,7 +58,7 @@ function build() {
   });
   const chats = new ChatRegistry(join(dir, 'salt'), join(dir, 'chats.json'));
   const dispatcher = new Dispatcher({
-    wa: { sendText: async () => {}, typing: async () => {} } as never,
+    wa: { sendText: async () => {}, typing: async () => {}, readReceipt: async () => {} } as never,
     chats,
     limiter: new Limiter(
       { messagesPerHour: 1000, burst: 100, turnsPerDay: 1000, newSendersPerHour: 1000, outboundPerChatPerHour: 1000 },
@@ -118,5 +118,101 @@ describe('a turn is closed even when nothing else is queued', () => {
     const snap = dispatcher.snapshot();
     expect(snap.inFlight).toBeNull();
     expect(snap.ready).toBe(0);
+  }, 20_000);
+});
+
+/**
+ * The operator's label for a contact, against the name the sender supplies.
+ *
+ * `syncContacts` promises the operator's label wins over the WhatsApp display
+ * name, "which is supplied by the other end and is not trustworthy", and the
+ * Settings page prints that promise. `touch` then did an unconditional
+ * `Object.assign`, so the first accepted inbound message from that contact
+ * overwrote it with their own push name. That label is not decoration: it is
+ * the only thing the agent is shown for a contact, and the contact list is what
+ * authorises the agent to open a conversation at all — so a sender could dress
+ * as somebody the operator had vouched for.
+ */
+describe('a contact that an operator named by hand', () => {
+  it('keeps that name when the contact messages in', async () => {
+    const { dispatcher, chats } = build();
+    chats.syncContacts([{ label: 'Mum', number: '15551234567' }], Date.now());
+    const chatKey = chats.keyFor('15551234567@s.whatsapp.net', false, Date.now());
+    expect(chats.get(chatKey)?.name).toBe('Mum');
+
+    await dispatcher.handle({
+      key: { remoteJid: '15551234567@s.whatsapp.net', fromMe: false, id: 'm1' },
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      pushName: 'Definitely Not Mum',
+      message: { conversation: 'hello' },
+    } as never);
+
+    expect(chats.get(chatKey)?.name).toBe('Mum');
+    // Still counted: only the name is protected.
+    expect(chats.get(chatKey)?.messages).toBe(1);
+  });
+
+  it('still takes the display name for an ordinary chat', async () => {
+    const { dispatcher, chats } = build();
+    const chatKey = chats.keyFor('15559998888@s.whatsapp.net', false, Date.now());
+
+    await dispatcher.handle({
+      key: { remoteJid: '15559998888@s.whatsapp.net', fromMe: false, id: 'm1' },
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      pushName: 'Someone New',
+      message: { conversation: 'hello' },
+    } as never);
+
+    expect(chats.get(chatKey)?.name).toBe('Someone New');
+  });
+});
+
+/**
+ * The watchdog's stated signal, which was not implemented.
+ *
+ * `index.ts` opens by naming it — "delivered but unanswered, which is what a
+ * person on the other end actually experiences, rather than queue depth" — and
+ * recounts the Iris failure it exists for: every turn failing instantly, an
+ * empty queue, a healthy process, nobody answered for two weeks. The watchdog
+ * only ever checked the agent's self-reported status, so an agent that wedged
+ * without declaring a fatal state told nobody. `delivery.stuckAfterMs` was the
+ * knob for it and was read by no code at all.
+ */
+describe('how long anybody has been waiting', () => {
+  it('starts the clock when a real message is accepted', async () => {
+    const { dispatcher } = build();
+    expect(dispatcher.snapshot().waitingSince).toBeNull();
+
+    const before = Date.now();
+    await dispatcher.handle({
+      key: { remoteJid: '15551234567@s.whatsapp.net', fromMe: false, id: 'm1' },
+      messageTimestamp: Math.floor(before / 1000),
+      pushName: 'Someone',
+      message: { conversation: 'hello' },
+    } as never);
+
+    const waiting = dispatcher.snapshot().waitingSince;
+    expect(waiting).not.toBeNull();
+    expect(waiting as number).toBeGreaterThanOrEqual(before);
+  });
+
+  it('stops the clock only once nothing is outstanding', async () => {
+    const { dispatcher, chats } = build();
+    const chatKey = chats.keyFor('15551234567@s.whatsapp.net', false, Date.now());
+    dispatcher.on('turnStart', (e: { turnId: string }) => {
+      busyTurn = e.turnId;
+      setTimeout(() => { busyTurn = null; }, 30);
+    });
+
+    (dispatcher as unknown as { pending: Map<string, unknown[]> }).pending.set(
+      chatKey, [{ chatKey, envelope: envelope('m1') }],
+    );
+    (dispatcher as unknown as { ready: string[] }).ready.push(chatKey);
+    (dispatcher as unknown as { waitingSince: number | null }).waitingSince = Date.now();
+
+    await dispatcher.pump();
+
+    // Answered and drained: the alert must re-arm, so this has to reach null.
+    expect(dispatcher.snapshot().waitingSince).toBeNull();
   }, 20_000);
 });

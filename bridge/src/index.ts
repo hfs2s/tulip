@@ -186,6 +186,29 @@ async function main(): Promise<void> {
     }
     if (status !== null) alerted.delete('silent');
 
+    // The signal this watchdog exists for: somebody has been waiting and has
+    // not been answered. Deliberately independent of the two checks above,
+    // because the expensive Iris failure had a healthy process, a connected
+    // socket, an empty queue and no fatal state — the only observable was that
+    // real people were being ignored. `stuckAfterMs` of 0 turns it off.
+    const stuckAfterMs = config.delivery.stuckAfterMs;
+    const waitingFor = snapshot.waitingSince === null ? 0 : Date.now() - snapshot.waitingSince;
+    if (stuckAfterMs > 0 && waitingFor > stuckAfterMs && !alerted.has('stuck')) {
+      alerted.add('stuck');
+      const minutes = Math.round(waitingFor / 60_000);
+      log('watchdog.stuck', { waitingForMs: waitingFor, queued: snapshot.queued });
+      feed.event('delivery.stuck', `nothing answered for ${String(minutes)} minutes`);
+      void alertOperators(
+        wa,
+        config,
+        `🟠 Tulip: nothing has been answered for ${String(minutes)} minutes. ` +
+          `${String(snapshot.queued)} waiting. Try !status.`,
+      );
+    }
+    // Cleared only when the backlog actually drains, so recovery is what
+    // re-arms the alert rather than the mere passage of time.
+    if (snapshot.waitingSince === null) alerted.delete('stuck');
+
     // Kick for a turn still in flight as well as for queued work. `pump` closes
     // a finished turn itself, but it can exit with one open — an operator hold,
     // or the delivery error path — and nothing else reconciles it. Without this
