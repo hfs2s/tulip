@@ -96,7 +96,9 @@ export async function spawnWindow(
   // and `default-size` is what it falls back to with nobody watching — which is
   // most of the time, and where the TUI still needs room to render.
   await tmux(['set-option', '-w', '-t', paneTarget(window), 'window-size', 'latest']);
-  await tmux(['set-option', '-t', `=${SESSION}`, 'default-size', '200x50']);
+  // Global: `default-size` is not addressable with an exact-match session
+  // target, and setting it per-session fails with "no such session".
+  await tmux(['set-option', '-g', 'default-size', '200x50']);
   await tmux(['resize-window', '-A', '-t', paneTarget(window)]);
   await tmux(['set-option', '-t', `=${SESSION}`, 'history-limit', '20000']);
   return true;
