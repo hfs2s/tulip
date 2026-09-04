@@ -197,7 +197,7 @@ export async function synthesise(text: string): Promise<Produced> {
          */
         audio_setting: { format: 'opus', sample_rate: 24_000, bitrate: 32_000, channel: 1 },
         voice_setting: {
-          voice_id: env('MINIMAX_VOICE_ID', 'English_Gentle-voiced_man'),
+          voice_id: env('MINIMAX_VOICE_ID', 'moss_audio_737a299c-734a-11f0-918f-4e0486034804'),
           speed: 1,
           vol: 1,
           ...emotion(),

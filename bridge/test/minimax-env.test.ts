@@ -148,6 +148,7 @@ describe('what is spoken', () => {
     await synthesise('hola');
     expect(sent[0]?.['model']).toBe('speech-2.8-turbo');
     expect(sent[0]?.['language_boost']).toBe('English');
-    expect((sent[0]?.['voice_setting'] as Record<string, unknown>)['voice_id']).toBe('English_Gentle-voiced_man');
+    expect((sent[0]?.['voice_setting'] as Record<string, unknown>)['voice_id'])
+      .toBe('moss_audio_737a299c-734a-11f0-918f-4e0486034804');
   });
 });
