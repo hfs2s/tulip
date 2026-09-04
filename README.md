@@ -146,6 +146,112 @@ that claims to close everything is a threat model nobody checked.
 
 ---
 
+## What it does
+
+Everything below runs through the same rule: the agent asks, and the **bridge**
+performs. The agent has no network at all, so every capability it appears to
+have is one the trusted half carries out on its behalf, with the credential
+never entering the container an attacker is assumed to own.
+
+### Conversation
+
+| | |
+|---|---|
+| **Direct messages** | Answered when the sender is on the allow list, or from anyone if the audience is open. |
+| **Groups** | Three modes. *Mentions* answers a real @-mention only; *Triggers* adds a phrase list; *Judgement* hands over every message and lets the agent decide, which is the only mode where it can choose silence. |
+| **Voice notes in** | Transcribed before the agent sees them — it is a Claude Code session and cannot hear. A failure is passed on as words, so it says so rather than answering as if nothing arrived. |
+| **Voice notes out** | Spoken with a configurable MiniMax voice. Four round-bracket sound tags — `(laughs) (chuckle) (sighs) (breath)` — are performed; anything else is read aloud, so the set is closed and one per message is enforced. |
+| **Pictures** | Generated on request and sent. |
+| **GIFs, web search** | Both bridge-side: the agent names what it wants, the bridge fetches it. |
+| **Cross-chat** | Off by default. When on, the agent may write to a named contact list and may still never read another conversation — sessions are separate per chat. |
+
+### Pages
+
+The agent can build a small static site — HTML, CSS, JS, and `localStorage` for
+state — by writing into `handoff-out/pages/<slug>/` and calling `tulip-wa page`.
+The bridge serves it and hands back a link the agent can send.
+
+**Pages are served on their own hostname, and that is a security control rather
+than a deployment preference.** From the panel's origin, agent-authored
+JavaScript would be same-origin with the operator's session: one
+`fetch('/api/settings')` from a page you opened would carry your cookie. A
+sandboxed opaque origin would be safe and would break `localStorage`, which is
+most of what the pages are for — so storage gets a real origin, which means a
+real hostname. Unset `TULIP_PAGES_HOST` and the feature is off, not degraded.
+
+Pages themselves are served under `connect-src 'none'`: one may keep state in
+the browser and may not send it anywhere. A page that could reach the network
+would be the agent reaching it through a visitor's browser.
+
+### The control panel
+
+Eight surfaces, behind a bearer token and whatever authenticates in front of it.
+
+| Page | What it is for |
+|---|---|
+| **Overview** | Counts for the last 24 hours, delivery hold and resume, token spend by hour, day and week. |
+| **Messages** | Every inbound message *including the refused ones*, with the reason. A silently dropped message is otherwise indistinguishable from one that never arrived. |
+| **Chats** | One row per conversation, with block, unblock and reset. |
+| **Media** | Every attachment both directions. Pictures and video first; voice notes below as a list that leads with the transcript and opens a player when clicked. |
+| **Chat** | One conversation rendered as a conversation, and a box to type into that session. |
+| **Terminal** | The agent's live tmux, full-bleed. A real pty over ttyd, not a rendering of one. |
+| **Pages** | What the agent has published, with sizes and a delete button. |
+| **Settings** | Everything below, live — no restart, and every change written to the log and the feed. |
+| **Log** | The bridge's structured events for the day, credentials masked. |
+
+---
+
+## Configuration
+
+Two places, and the split is deliberate.
+
+**`config/config.json`** holds what an operator changes and watches: the
+audience, operators, group mode, limits, delivery timing, capability switches and
+the voice. All of it is editable live from Settings, applied immediately and
+written back to the file.
+
+**`.env`** holds what a deployment *is*: credentials, hostnames, the model.
+Changing one needs a container restart, which is why nothing an operator tunes
+lives there. See [`.env.example`](.env.example) — every variable is documented
+where it is declared.
+
+> `docker-compose.yml` passes optional variables through as `${VAR:-}`, which
+> sets them to the **empty string** rather than leaving them unset. Code reading
+> them must treat empty as absent; `??` does not. That distinction silently
+> disabled pictures and voice notes for weeks — every request went to a relative
+> URL and `fetch` rejected it before a packet left the box.
+
+### Limits
+
+Per-sender limits bound what one person can do: messages an hour, a burst
+allowance, turns a day, attachment count and size, and the longest message read.
+
+Two limits are counted **across everybody**, because a per-sender cap cannot
+bound a total and the total is what arrives as an invoice: **pictures per day**
+and **voice notes transcribed per day**. Both are durable across restarts, both
+refuse rather than degrade, and both say so — past the cap the agent tells the
+person it has made as many as it can today, rather than going quiet.
+
+---
+
+## Operating it
+
+The runbook is [`docs/OPERATIONS.md`](docs/OPERATIONS.md). Three things worth
+knowing before you need them:
+
+- **A `panel.*` or `bridge/src` change needs `docker compose build bridge` only.**
+  Recreating the agent kills every live tmux session; they resume with full
+  context on the next message, but the terminal empties meanwhile.
+- **Verify a deploy from the compiled output inside the running container**, not
+  from the build log. A push that silently fails to reach the remote produces a
+  pull that fetches nothing, a rebuild that yields an identical image, and an
+  `up -d` that does not recreate — every step reporting success while the old
+  code keeps answering.
+- **`npm run verify`** is the gate: secrets, types, tests. It runs no database
+  and needs no network.
+
+---
+
 ## Repository layout
 
 | Path | What it is |
@@ -156,7 +262,19 @@ that claims to close everything is a threat model nobody checked.
 | `shared/` | Types and schemas describing the handoff contract, used by both halves. |
 | `persona/` | Tulip's identity, assembled into the agent's `CLAUDE.md`. No personal data. |
 | `docs/` | Threat model, architecture notes, operations runbook. |
-| `scripts/` | Docker installation, pairing, health checks. |
+| `scripts/` | Docker installation, health checks, and the host-side terminal. |
+
+Inside `bridge/src`, the files that carry an argument rather than a feature:
+
+| File | Why it exists |
+|---|---|
+| `gate.ts` | The one decision about whether to answer, in the order that costs least. |
+| `outbox.ts` | Everything the agent asks for, performed by the trusted side. Its file resolver is the model for every path this codebase opens. |
+| `pages.ts` | Why pages get their own origin, and what a page may not do. |
+| `pty.ts` | Why a real terminal does not need a network path between the halves. |
+| `access.ts` | Cloudflare Access as a second credential — signature, never the header beside it. |
+| `spend.ts` | The two ceilings counted across everybody rather than per sender. |
+| `transcribe.ts` | The one deliberate exception to "MiniMax only", and why there is no alternative. |
 
 ---
 
@@ -186,6 +304,12 @@ line, so a cap can be absent for months while the configuration still claims it.
 `verify-containment.sh` checks the running containers: no route out, no DNS, no
 credentials, read-only root, no path to privilege. **Both should pass before the
 number is given to anyone.**
+
+Two optional hostnames, both off until configured. `TULIP_PAGES_HOST` turns on
+pages, and must not be the panel's hostname — see [What it does](#pages).
+`TULIP_ACCESS_TEAM_DOMAIN` and `TULIP_ACCESS_AUD` let the panel accept a person
+Cloudflare Access has authenticated, so adding an operator becomes a policy
+change rather than a shared secret.
 
 Scan the QR with the WhatsApp account Tulip will *be* — a number of its own, not
 a personal one. See [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for pairing,
