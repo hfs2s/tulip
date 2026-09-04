@@ -126,12 +126,22 @@ export async function synthesise(text: string): Promise<Produced> {
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key()}` },
       body: JSON.stringify({
         model: env('MINIMAX_VOICE_MODEL', 'speech-2.8-turbo'),
-        // Sent as written. The text may carry inline sound tags — `[laughter]`,
-        // `[breath]`, `[sigh]` — which the 2.5 and 2.8 models act on, and which
-        // are most of what makes a voice note sound like a person rather than a
-        // reader. Nothing here strips or normalises them, deliberately: the
-        // persona is told to reach for them, so quietly removing one would be
-        // the system disagreeing with its own brief.
+        /**
+         * Sent as written. The text may carry inline sound tags — `(laughs)`,
+         * `(breath)`, `(sighs)` — which are most of what makes a voice note
+         * sound like a person rather than a reader.
+         *
+         * **Round brackets, and only on the 2.8 models.** Square brackets are
+         * not a tag syntax: `[laughter]` is spoken as the word. Measured
+         * against the live API on the same sentence — plain 3822 bytes,
+         * `(laughs)` 7389 (a laugh performed), `[laughter]` 10619 (the word
+         * read out). So this travels with `MINIMAX_VOICE_MODEL`: drop below
+         * speech-2.8 and every tag becomes dialogue.
+         *
+         * Nothing here strips or normalises them, deliberately: the persona is
+         * told to reach for them, so quietly removing one would be the system
+         * disagreeing with its own brief.
+         */
         text: text.slice(0, 4000),
         stream: false,
         /**

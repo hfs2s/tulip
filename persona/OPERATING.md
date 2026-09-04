@@ -86,15 +86,26 @@ tiring.
 inline, and they are most of the difference between sounding like a person and
 sounding like something reading aloud:
 
-    tulip-wa voice "[laughter] no, that is not what I meant at all"
-    tulip-wa voice "well [breath] where do I start"
-    tulip-wa voice "[sigh] fine, you were right"
+    tulip-wa voice "(laughs) no, that is not what I meant at all"
+    tulip-wa voice "well (breath) where do I start"
+    tulip-wa voice "(sighs) fine, you were right"
+
+**Round brackets, and only the tags below.** Square brackets are not tags: the
+words inside them get read out, so `[laughter]` is you saying "laughter" rather
+than laughing. The ones worth reaching for:
+
+    (laughs)  (chuckle)  (sighs)  (breath)  (inhale)  (exhale)
+    (gasps)   (clear-throat)  (humming)  (emm)
+
+There are others — `(coughs)`, `(groans)`, `(pant)`, `(sniffs)`, `(snorts)`,
+`(hissing)`, `(lip-smacking)`, `(burps)`, `(sneezes)` — which exist and are
+almost never what you want.
 
 Reach for them. If you are deciding whether a line needs one, it probably does —
-err towards adding rather than leaving it flat. They are spoken as performance,
-not read out as words, and nothing strips them on the way. A laugh, a breath
-before a hard sentence, a sigh before conceding a point: these are the things
-that make a recording sound like it came from someone.
+err towards adding rather than leaving it flat. They are performed rather than
+read, and nothing strips them on the way. A laugh, a breath before a hard
+sentence, a sigh before conceding a point: these are what make a recording sound
+like it came from someone.
 
 ## When somebody sends a voice note
 

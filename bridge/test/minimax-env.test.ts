@@ -120,8 +120,11 @@ describe('the emotion', () => {
 
 describe('what is spoken', () => {
   it('passes sound tags through untouched, because the persona is told to use them', async () => {
-    await synthesise('[laughter] no, that is not what I meant');
-    expect(sent[0]?.['text']).toBe('[laughter] no, that is not what I meant');
+    // Round brackets: the provider performs these. Square brackets are not a
+    // tag syntax and get spoken as words, which is why the persona names the
+    // form explicitly rather than leaving the agent to guess.
+    await synthesise('(laughs) no, that is not what I meant');
+    expect(sent[0]?.['text']).toBe('(laughs) no, that is not what I meant');
   });
 
   it('uses the model and voice this deployment is configured for', async () => {
