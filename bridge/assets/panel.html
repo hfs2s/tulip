@@ -43,10 +43,14 @@
      Fixed to the viewport rather than sized to the document: a canvas covering
      the full scroll height of a long log page is a large allocation for a
      texture nobody is measuring against the content. */
-  #paper{position:fixed;inset:0;z-index:0;pointer-events:none}
+  /* The grain belongs to the content column, not the window: it is absolute
+     inside `.page-wrap`, so it stops at the rail's edge and scrolls with the
+     page instead of sitting still behind it. */
+  #paper{position:absolute;inset:0;z-index:0;pointer-events:none}
   #paper canvas{display:block;width:100%;height:100%}
   /* Content sits above the grain. */
-  .rail,main{position:relative;z-index:1}
+  .rail,main{position:relative}
+  .page-wrap > .page{position:relative;z-index:1}
   body{margin:0;background:var(--ground);color:var(--ink);
        font:400 14.5px/1.6 var(--body);font-variant-numeric:tabular-nums;
        -webkit-font-smoothing:antialiased;display:flex;overflow:hidden}
@@ -128,7 +132,7 @@
   main{flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto}
   /* flex:none — without it this shrinks as the page grows and clips the heading. */
 
-  .page-wrap{padding:40px 40px 64px;position:relative}
+  .page-wrap{padding:40px 40px 64px;position:relative;flex:1;min-height:0}
   h2{font:400 21px/1.2 var(--display);letter-spacing:-.02em;margin:0 0 4px}
   .sub{font-size:13.5px;color:var(--faint);margin:0 0 20px;max-width:64ch}
 
@@ -421,7 +425,6 @@
 </style>
 </head>
 <body>
-  <div id="paper" aria-hidden="true"></div>
 
   <!-- Mobile only. The rail is a 236px column on a desktop and cannot be one on
        a phone; the previous answer turned it into a horizontal scroller of eight
@@ -470,6 +473,7 @@
 
   <main>
     <div class="page-wrap">
+      <div id="paper" aria-hidden="true"></div>
       <section class="page" id="p-overview"></section>
       <section class="page" id="p-messages"></section>
       <section class="page" id="p-chats"></section>
