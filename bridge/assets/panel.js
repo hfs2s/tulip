@@ -215,8 +215,6 @@ function verdict(s) {
   el('lede').textContent = lede;
   el('whoami').textContent = s.whatsapp.name || 'not paired';
   agentStatus(s);
-  el('railfoot').textContent = (s.audience.everyone ? 'Open to anyone' : 'Allow list only')
-    + (s.audience.groups ? ' · groups ' + s.audience.groupMode : ' · groups off');
   var badge = el('navChats');
   if (badge) badge.textContent = String(s.chats.length);
 }
