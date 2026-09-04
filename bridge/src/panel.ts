@@ -55,6 +55,7 @@ import { log } from './log.js';
 import { paths } from './paths.js';
 import {
   chatHistory,
+  deleteMedia,
   logTail,
   mediaFile,
   mediaList,
@@ -404,6 +405,20 @@ export function startPanel(deps: ApiDeps): Server | null {
           );
           return;
         }
+        // A write, and an irreversible one: there is no trash and nothing keeps
+        // a copy. POST rather than GET so it cannot be triggered by a link, a
+        // prefetch, or an <img> pointed at the panel.
+        if (url.pathname === '/api/media/delete' && req.method === 'POST') {
+          const body = await readBody(req);
+          const result = deleteMedia(
+            typeof body['key'] === 'string' ? body['key'] : '',
+            typeof body['name'] === 'string' ? body['name'] : '',
+            typeof body['dir'] === 'string' ? body['dir'] : '',
+          );
+          if (result.ok) log('panel.write', { path: url.pathname, who: auth.who ?? 'token holder' });
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+
         if (url.pathname === '/api/logs') return send(res, headers, 200, logTail(num('n', 200, 1000)));
         if (url.pathname === '/api/settings' && req.method === 'GET') {
           return send(res, headers, 200, settingsView(deps));
