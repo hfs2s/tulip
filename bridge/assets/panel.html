@@ -50,21 +50,31 @@
   .rail{width:var(--rail);flex:0 0 var(--rail);height:100%;
         background:var(--panel);border-right:1px solid var(--line-soft);
         padding:22px 14px;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
-  /* The mark sits on the word's baseline, not on its centre. `align-items:
-     baseline` is what does it: a flex item with no text of its own takes its
-     bottom edge as its baseline, so the tulip's base and the letters' feet land
-     on the same line — measured at 0.00px apart rather than 7px. */
+  /* The mark sits on the word's baseline, not on its centre. Two things make
+     that true, and the second is the one that is easy to miss:
+
+     `align-items:baseline` aligns the boxes — a flex item with no text of its
+     own takes its bottom edge as its baseline. But the artwork did not fill its
+     box. The viewBox was `0 0 32 32` while the tulip occupied y 4.6 to 26.6, so
+     5.4 units of empty space sat below it and the shape floated 4.39px above
+     the letters however the boxes were aligned. The viewBox is now the artwork's
+     own bounds, so the element's bottom edge *is* the tulip's bottom edge.
+
+     Consequently the mark is no longer square: 17.03 x 22, and every width and
+     height for it must keep that ratio or it letterboxes back to where it was. */
   .brand{display:flex;align-items:baseline;gap:10px;padding:0 10px 30px}
-  .brand svg{width:26px;height:26px;flex:0 0 26px;display:block}
+  .brand svg{width:13.9px;height:18px;flex:0 0 13.9px;display:block}
   .brand b{font:400 19px/1 var(--display);letter-spacing:-.03em;display:block}
 
   /* The mobile bar and its scrim exist at every width and are shown only below
      900px. Kept out of the media query so the rules that make them *work* live
      next to each other rather than being split across the file. */
   .topbar,.nav-scrim{display:none}
-  .topbar-brand{display:flex;align-items:center;gap:9px;min-width:0}
-  .topbar-mark{display:flex;width:24px;height:24px;flex:0 0 24px}
-  .topbar-mark svg{width:100%;height:100%}
+  /* Same lockup, same rule. The 17.03:22 ratio is kept here too — a square box
+     would letterbox the mark and reopen the gap this was fixed to close. */
+  .topbar-brand{display:flex;align-items:baseline;gap:9px;min-width:0}
+  .topbar-mark{display:flex;width:12.4px;height:16px;flex:0 0 12.4px}
+  .topbar-mark svg{width:100%;height:100%;display:block}
   .topbar-brand b{font:400 17px/1 var(--display);letter-spacing:-.03em}
   .topbar-page{margin-left:auto;font-size:13px;color:var(--faint);
                white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -455,7 +465,7 @@
 
   <aside class="rail" id="rail">
     <div class="brand">
-      <svg viewBox="0 0 32 32" aria-hidden="true">
+      <svg viewBox="7.49 4.6 17.03 22" aria-hidden="true">
         <path d="M16 26.6C11.4 24.6 8.2 20.4 7.6 15.2 7.3 12.6 7.6 10.2 8.4 8.4c2 1.2 3.6 3.2 4.7 5.8C13 10.6 14 7.4 16 4.6c2 2.8 3 6 2.9 9.6 1.1-2.6 2.7-4.6 4.7-5.8.8 1.8 1.1 4.2.8 6.8-.6 5.2-3.8 9.4-8.4 11.4z" fill="#21d2ed" opacity=".58"/>
         <path d="M16 4.6c2 2.8 3 6 2.9 9.6 0 5-1.1 9.2-2.9 12.4-1.8-3.2-2.9-7.4-2.9-12.4C13 10.6 14 7.4 16 4.6z" fill="#21d2ed"/>
       </svg>
