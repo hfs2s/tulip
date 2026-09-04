@@ -135,6 +135,25 @@ services:
       - state:/state
       - handoff-in:/handoff/in
       - handoff-out:/handoff/out
+      # The agent's home, READ-ONLY, so the panel's Chat page can render the
+      # agent's own Claude Code transcript as a conversation instead of an
+      # operator reading a raw tmux pane.
+      #
+      # Read the header of bridge/src/transcript.ts before touching this; the
+      # short version is that it buys no trust and is not meant to. These files
+      # are on the agent's read-write volume, so a compromised agent can rewrite
+      # them — the transcript has exactly the standing of status.json, which is
+      # displayed and never decided from. What the mount buys is that the
+      # parsing, the caps and the escaping all happen on the trusted side, and
+      # that shipping the feature does not mean recreating tulip-agent and
+      # killing every live conversation.
+      #
+      # `:ro` is not the control that matters. The control is that a symlink the
+      # agent plants under /workspace is resolved in the BRIDGE's namespace,
+      # where /state holds the WhatsApp credentials — so transcript.ts opens
+      # with O_NOFOLLOW and checks /proc/self/fd, exactly as outbox.ts does for
+      # the outbound file path. Never add a reader here that resolves by name.
+      - workspace:/workspace:ro
       # The agent's real terminal. ttyd runs on the *host* and `docker exec`s
       # into the agent; this is only the socket it listens on. The agent gains
       # nothing from it — no port, no route, nothing added to its image — and

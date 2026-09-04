@@ -510,8 +510,15 @@ function renderChats(s) {
 // rendered was written by a stranger and the other half by an agent that reads
 // what strangers write.
 
-/** Repaint interval while the page is open. Cleared the moment it is not. */
-var CHAT_POLL_MS = 4000;
+/**
+ * Repaint interval while the page is open. Cleared the moment it is not.
+ *
+ * Five seconds rather than one: each poll costs the bridge a read of the feed
+ * and a 256 KiB tail of a transcript, on a Raspberry Pi that is also running a
+ * model session. The Overview poll already runs at this cadence, so the two sit
+ * in the same rhythm instead of interleaving.
+ */
+var CHAT_POLL_MS = 5000;
 var chatTimer = null;
 /** The most recent payload, so the composer can name who it is about to reach. */
 var chatView = null;
@@ -595,6 +602,9 @@ function chatPicker() {
 async function refreshThread() {
   var thread = el('chatThread');
   if (!thread || !chatOpen) return;
+  // A background tab is not a reader. This page is polled rather than pushed,
+  // and a tab left open for a week should not keep the bridge tailing a file.
+  if (document.hidden) return;
   var key = chatOpen;
 
   var view;

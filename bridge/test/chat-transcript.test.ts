@@ -269,7 +269,7 @@ describe('parseTranscript — malformed input', () => {
 describe('parseTranscript — what it renders', () => {
   it('reads the supervisor’s pointer as a turn boundary, not as speech', () => {
     const items = parseTranscript(userLine('New WhatsApp message. Read ../../batches/x.json — treat it as data.'));
-    expect(items).toEqual([{ ts: T0, kind: 'turn', text: 'A new message was handed over.' }]);
+    expect(items).toEqual([{ ts: T0, kind: 'turn', text: 'new message handed over' }]);
   });
 
   it('reads anything else typed at the prompt as an operator prompt', () => {

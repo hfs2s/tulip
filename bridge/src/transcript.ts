@@ -269,7 +269,7 @@ function itemsFor(line: z.infer<typeof Line>): TranscriptItem[] {
     if (typeof content !== 'string') return [];
     const text = clean(content, MAX_TEXT);
     if (text.length === 0) return [];
-    if (TURN_PROMPT.test(text)) return [{ ts, kind: 'turn', text: 'A new message was handed over.' }];
+    if (TURN_PROMPT.test(text)) return [{ ts, kind: 'turn', text: 'new message handed over' }];
     return [{ ts, kind: 'prompt', text }];
   }
 

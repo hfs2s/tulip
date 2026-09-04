@@ -346,6 +346,77 @@
   .badge.on{border-color:var(--accent);color:var(--accent)}
   .badge.off{border-color:var(--warn);color:var(--warn)}
 
+  /* ── Chat ───────────────────────────────────────────────────────────────────
+     One conversation, read the way a conversation is read.
+
+     The terminal shows the truth and is nearly unreadable: a TUI is spinner
+     frames, box drawing and half-repainted lines, and an operator wanting to
+     know what Juan just said to somebody should not have to parse one. So this
+     page is the same session in the shape it actually has — but the shape is a
+     claim, and the styling has to keep four things apart that a chat app would
+     happily blur into one column of bubbles:
+
+       · what a person sent            — `.msg.them`
+       · what Juan sent them           — `.msg.juan`, the accent, the only tint
+       · what Juan said *in session*   — `.msg.note`, dashed and unfilled: he
+                                         wrote it, nobody received it
+       · what an operator typed in     — `.msg.op`, amber, because it is the one
+                                         line on this page a human here caused
+
+     Tool calls are a mono chip rather than a bubble. They are not speech, and
+     giving them a bubble was the fastest way to make the page unreadable again. */
+  .thread{display:flex;flex-direction:column;gap:9px;
+          max-height:min(56vh,600px);overflow-y:auto;padding-right:6px}
+  .msg{max-width:min(70ch,88%);border-radius:13px;padding:9px 13px;
+       border:1px solid var(--line-soft);background:var(--raise)}
+  .msg .who{display:block;font-size:11px;color:var(--faint);margin-bottom:3px}
+  .msg .body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px;line-height:1.55}
+  .msg .at{display:block;font-size:11px;color:var(--faint);margin-top:4px}
+  .msg.them{align-self:flex-start}
+  .msg.juan{align-self:flex-end;background:var(--accent-dim);border-color:rgba(33,210,237,.3)}
+  .msg.juan .who{color:var(--accent)}
+  /* Unfilled and dashed: written, not sent. The distinction is the whole reason
+     this page is not simply the WhatsApp thread, which the Messages page is. */
+  .msg.note{align-self:flex-start;background:transparent;border-style:dashed;color:var(--dim)}
+  .msg.op{align-self:flex-end;background:transparent;border-color:var(--warn)}
+  .msg.op .who{color:var(--warn)}
+  .turnmark{display:flex;align-items:center;gap:11px;margin:5px 0;
+            font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
+  .turnmark::before,.turnmark::after{content:"";flex:1;height:1px;background:var(--line-soft)}
+  .chip{align-self:flex-start;display:flex;gap:9px;align-items:baseline;max-width:100%;
+        font-family:var(--mono);font-size:11.5px;color:var(--faint);padding:1px 2px}
+  .chip b{flex:0 0 auto;font-weight:400;color:var(--dim)}
+  .chip span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thought{align-self:flex-start;max-width:min(70ch,88%)}
+  .thought > button{background:transparent;border:0;padding:2px 0;border-radius:6px;
+                    font:inherit;font-size:11.5px;color:var(--faint);cursor:pointer}
+  .thought > button:hover{color:var(--dim)}
+  .thought > button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .thought .body{margin-top:5px;padding-left:11px;border-left:2px dotted var(--line);
+                 font-size:12.5px;line-height:1.55;color:var(--faint);
+                 white-space:pre-wrap;overflow-wrap:anywhere}
+
+  /* The composer.
+     The warning is not a page banner. A banner is read once and then becomes
+     furniture, and this needs to be true at the moment of pressing the button —
+     so it sits against the field, it names the person, and the send itself
+     goes through a confirm that quotes the exact line. */
+  .composer{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)}
+  .composer textarea{display:block;width:100%;min-height:74px;resize:vertical;
+    font:inherit;font-size:13.5px;line-height:1.55;color:var(--ink);
+    background:var(--raise);border:1px solid var(--line);border-radius:11px;padding:11px 13px}
+  .composer textarea::placeholder{color:var(--faint)}
+  .composer textarea:focus{outline:none;border-color:var(--accent)}
+  .composer textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .composer textarea:disabled{opacity:.5;cursor:not-allowed}
+  .composer .live{display:flex;align-items:center;gap:9px;margin-bottom:9px;
+                  font-size:12.5px;color:var(--warn)}
+  .composer .live .dot{background:var(--warn)}
+  .composer .foot{display:flex;align-items:center;gap:12px;margin-top:11px;flex-wrap:wrap}
+  .composer .foot .hint{font-size:12px;color:var(--faint);margin:0}
+  .chathead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .chathead h3{font:400 17px/1.2 var(--display);letter-spacing:-.02em;margin:0}
+
   /* ── Terminal ───────────────────────────────────────────────────────────────
      The page *is* the terminal. The heading, the warning bar, the readable/raw
      toggle, the window picker and the three key buttons are all gone: what an
@@ -416,6 +487,11 @@
   .modal-foot{padding:14px 22px;border-top:1px solid var(--line-soft);
               display:flex;gap:10px;align-items:center}
   .modal-foot .hint{margin:0}
+  /* The exact line a confirm is about to act on. Quoted, so it reads as the
+     thing being sent rather than as more of the dialog's prose. */
+  .modal-body blockquote.said{margin:14px 0 0;padding:10px 13px;
+    border-left:2px solid var(--accent);background:var(--raise);
+    border-radius:0 10px 10px 0;font-size:13.5px;line-height:1.55}
   .entry{display:flex;gap:10px;align-items:center;padding:9px 0;
          border-bottom:1px solid var(--line-soft)}
   .entry:last-child{border-bottom:0}
@@ -583,6 +659,7 @@
       <section class="page" id="p-overview"></section>
       <section class="page" id="p-messages"></section>
       <section class="page" id="p-chats"></section>
+      <section class="page" id="p-chat"></section>
       <section class="page" id="p-media"></section>
       <section class="page" id="p-terminal"></section>
       <section class="page" id="p-pages"></section>

@@ -52,12 +52,13 @@ Three containers:
 | `tulip-agent` | **untrusted by design** | its own workspace only | `tulip-lan` (`internal: true`) |
 | `tulip-egress` | trusted, minimal | nothing | `tulip-lan` + `tulip-wan` |
 
-Two Docker volumes form the entire interface between trusted and untrusted:
+Three Docker volumes form the entire interface between trusted and untrusted:
 
 | Volume | `tulip-bridge` | `tulip-agent` | Carries |
 |---|---|---|---|
 | `tulip-in` | read-write | **read-only** | message batches, current-turn pointer, received media |
 | `tulip-out` | read-write | read-write | outbound actions, agent status, files to send |
+| `tulip-workspace` | **read-only** | read-write | the agent's home: per-chat workspaces and Claude Code transcripts |
 
 **How far the agent's self-report is believed.** The agent writes a status file
 saying whether a turn is running. The bridge uses it to advance the queue
@@ -67,8 +68,34 @@ batch sooner — harmless, it is the same agent — or claim to be busy forever,
 which the timer overrides. Neither affects another chat, and no security
 decision anywhere reads this file.
 
-`tulip-session` (WhatsApp credentials) and `tulip-workspace` (the agent's home
-and transcripts) are each mounted in exactly one container.
+`tulip-session` (WhatsApp credentials) is mounted in exactly one container, and
+that is the single largest structural improvement over the design Tulip is
+forked from.
+
+**Why `tulip-workspace` reaches the bridge at all.** The panel's Chat page shows
+one conversation the way a person reads a conversation, rather than as a tmux
+pane full of spinner frames, and the material for that is the agent's own Claude
+Code transcript. The bridge reads it directly, read-only, and parses it in
+`bridge/src/transcript.ts`.
+
+This buys **no trust and is not meant to**. Those transcripts sit on the agent's
+own read-write volume; a compromised agent can rewrite them line by line. So the
+transcript has exactly the standing of `status.json` above — displayed, never
+decided from — and having the agent publish a rendering to `tulip-out` instead
+would have been no less trustworthy and no more. What the mount buys is that
+validation, size caps and escaping all happen on the trusted side, in the
+container that already owns the panel's CSP.
+
+The control that does the work is not `:ro`. It is that **a symlink the agent
+plants under `/workspace` is resolved in the bridge's namespace**, where
+`/state/session` holds the WhatsApp credentials: `ln -s /state /workspace/.claude`
+would otherwise turn a page an operator opens into an exfiltration channel. So
+the reader opens with `O_NOFOLLOW`, checks `/proc/self/fd` for a swapped
+ancestor, accepts only UUID-named `.jsonl` files under a directory derived from a
+sixteen-hex chat key, reads a bounded tail, truncates every string, and never
+renders a tool *result* — which is where an `env` dump would be. This is the
+same treatment `tulip-out/files` gets in `bridge/src/outbox.ts`, for the same
+reason.
 
 ---
 
