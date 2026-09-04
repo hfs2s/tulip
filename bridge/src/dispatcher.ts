@@ -15,9 +15,10 @@
  *     chat is served regardless of what the status file claims.
  */
 import { EventEmitter } from 'node:events';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WAMessage } from 'baileys';
-import { inPaths } from '@tulip/shared';
+import { inPaths, transcriptFor } from '@tulip/shared';
 import type { InboundMedia, InboundMessage } from '@tulip/shared';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
@@ -46,10 +47,21 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  */
 async function transcribeIfSpeech(media: InboundMedia): Promise<InboundMedia> {
   if (media.kind !== 'audio' || media.path === null || !canTranscribe()) return media;
-  const result = await transcribe(join(inPaths.root, media.path), media.mimetype, media.seconds);
-  return result.ok
-    ? { ...media, transcript: result.text }
-    : { ...media, transcript: null, error: media.error ?? result.error };
+  const file = join(inPaths.root, media.path);
+  const result = await transcribe(file, media.mimetype, media.seconds);
+  if (!result.ok) return { ...media, transcript: null, error: media.error ?? result.error };
+
+  // Kept beside the recording as well as handed to the agent. It costs a model
+  // call to produce and was previously discarded the moment the turn was built,
+  // which left the panel offering an operator a player and nothing else — a
+  // recording you have to listen to before you can tell whether it mattered.
+  try {
+    writeFileSync(transcriptFor(file), result.text, { mode: 0o644 });
+  } catch (err) {
+    // The turn is already correct; the sidecar is for looking at afterwards.
+    log('transcript.notKept', { err: String((err as Error).message) });
+  }
+  return { ...media, transcript: result.text };
 }
 
 /** How long to wait for the agent to acknowledge a turn before moving on. */

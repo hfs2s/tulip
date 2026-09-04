@@ -66,6 +66,18 @@ export const inPaths = {
   terminal: `${IN_DIR}/terminal.json`,
 } as const;
 
+/**
+ * A voice note's transcript, beside the recording it belongs to.
+ *
+ * A sidecar rather than an index, so the transcript shares the recording's
+ * lifetime exactly: deleting the attachment deletes what was said in it, with
+ * no second place to remember to clean up and no way for the two to disagree.
+ *
+ * Applies to both volumes, which is why it is a function of a path rather than
+ * a member of either map.
+ */
+export const transcriptFor = (media: string): string => `${media}.txt`;
+
 /** Outbound: written by the agent, consumed and deleted by the bridge. */
 export const outPaths = {
   root: OUT_DIR,

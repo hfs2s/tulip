@@ -33,6 +33,38 @@ export type Produced = { ok: true; data: Buffer } | { ok: false; error: string }
 const EMOTIONS = new Set(['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'neutral']);
 
 /**
+ * Every interjection the provider performs. Nothing outside this list is a tag:
+ * it is spoken, so an invented one becomes the agent announcing the word.
+ */
+const SOUND_TAGS = new Set([
+  'laughs', 'chuckle', 'coughs', 'clear-throat', 'groans', 'breath', 'pant',
+  'inhale', 'exhale', 'gasps', 'sniffs', 'sighs', 'snorts', 'burps',
+  'lip-smacking', 'humming', 'hissing', 'emm', 'sneezes',
+]);
+
+/**
+ * Repair the one mistake worth repairing: a real tag written in square brackets.
+ *
+ * `[laughs]` is not a tag — the provider speaks the word — and the agent reached
+ * for that form because an earlier version of its brief told it to. The brief is
+ * fixed, but a session already running carries the old one until it restarts, so
+ * this closes the gap rather than waiting for it.
+ *
+ * Deliberately narrow. Only a square-bracketed token that is *already a known
+ * tag* is rewritten; anything else in brackets is left exactly as written,
+ * because the agent may have meant those words and silently deleting speech is
+ * worse than speaking a stray one.
+ */
+function withSoundTags(text: string): string {
+  return text.replace(/\[([a-z][a-z-]{1,18})\]/gi, (whole, inner: string) => {
+    const tag = inner.toLowerCase();
+    if (!SOUND_TAGS.has(tag)) return whole;
+    log('minimax.tagRepaired', { tag, note: 'square brackets are spoken; sent as a tag instead' });
+    return `(${tag})`;
+  });
+}
+
+/**
  * An environment variable, treating empty as absent.
  *
  * `??` does not, and that cost this deployment both of these capabilities
@@ -142,7 +174,7 @@ export async function synthesise(text: string): Promise<Produced> {
          * told to reach for them, so quietly removing one would be the system
          * disagreeing with its own brief.
          */
-        text: text.slice(0, 4000),
+        text: withSoundTags(text).slice(0, 4000),
         stream: false,
         /**
          * Without this the voice reads Spanish with whatever mouth the model

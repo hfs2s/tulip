@@ -20,11 +20,11 @@
  *     exception: an allow list you cannot read is one you cannot audit, and the
  *     operator reading it is the person who wrote it.
  */
-import { closeSync, createReadStream, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, openSync, readFileSync, readSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
-import { TerminalRequest, TerminalScreen, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
+import { TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
 import { parseConfig, Contact } from './config.js';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
@@ -158,6 +158,31 @@ export function chatHistory(deps: ApiDeps, chatKey: string, limit: number): Json
  */
 const ROOTS = { in: inPaths.media, out: paths.mediaOut } as const;
 
+const isTranscript = (name: string): boolean => name.endsWith('.txt');
+
+/**
+ * The path of one attachment, or null if the request cannot name one.
+ *
+ * Shared by every route that touches a file, because "which file did they
+ * mean" is exactly the question a second implementation gets subtly wrong. The
+ * chat key and name are pattern-checked so nothing from the browser is
+ * concatenated into a path that could climb out, and the resolved path is
+ * re-checked against the root regardless — the same belt and braces the outbox
+ * file resolver uses, for the same reason.
+ */
+export function resolveMedia(chatKey: string, name: string, direction: string): string | null {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return null;
+  if (name !== basename(name) || name.startsWith('.')) return null;
+  // Chosen from a fixed pair rather than built from the parameter, so an
+  // unexpected value can only fail to match — it can never name a third root.
+  if (direction !== 'in' && direction !== 'out') return null;
+
+  const root = resolve(ROOTS[direction]);
+  const candidate = resolve(root, chatKey, name);
+  if (!candidate.startsWith(root + sep)) return null;
+  return candidate;
+}
+
 export function mediaList(deps: ApiDeps, limit: number): Json {
   const items: Array<Record<string, unknown>> = [];
 
@@ -188,7 +213,17 @@ export function mediaList(deps: ApiDeps, limit: number): Json {
           continue;
         }
         if (!stat.isFile()) continue;
+        // A sidecar belongs to the recording beside it, not in the list as an
+        // attachment of its own.
+        if (isTranscript(name)) continue;
         const mime = VIEWABLE[extname(name).toLowerCase()] ?? 'application/octet-stream';
+        let transcript: string | null = null;
+        try {
+          // Capped: this is a caption on a tile, not the transcript of a lecture.
+          transcript = readFileSync(transcriptFor(full), 'utf8').slice(0, 4000).trim() || null;
+        } catch {
+          /* not a voice note, or transcription was not configured when it arrived */
+        }
         items.push({
           chatKey,
           chatName: record?.name ?? null,
@@ -198,6 +233,7 @@ export function mediaList(deps: ApiDeps, limit: number): Json {
           kind: mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'file',
           bytes: stat.size,
           at: stat.mtimeMs,
+          transcript,
         });
       }
     }
@@ -223,19 +259,12 @@ export function mediaFile(
   name: string,
   direction: string,
 ): void {
-  if (!/^[0-9a-f]{16}$/.test(chatKey) || name !== basename(name) || name.startsWith('.')) {
+  const candidate = resolveMedia(chatKey, name, direction);
+  if (candidate === null) {
     res.writeHead(400, { ...headers, 'content-type': 'text/plain' }).end('bad request\n');
     return;
   }
-  // Chosen from a fixed pair rather than built from the parameter, so an
-  // unexpected value can only fail to match — it can never name a third root.
-  if (direction !== 'in' && direction !== 'out') {
-    res.writeHead(400, { ...headers, 'content-type': 'text/plain' }).end('bad request\n');
-    return;
-  }
-  const root = resolve(ROOTS[direction]);
-  const candidate = resolve(root, chatKey, name);
-  if (!candidate.startsWith(root + sep) || !existsSync(candidate)) {
+  if (!existsSync(candidate)) {
     res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
     return;
   }
@@ -248,6 +277,39 @@ export function mediaFile(
     'cache-control': 'private, max-age=300',
   });
   createReadStream(candidate).pipe(res);
+}
+
+/**
+ * Delete one attachment, and whatever was said in it.
+ *
+ * There is no trash and nothing keeps a copy, so this is final — which is why
+ * the panel confirms before calling it and why it is recorded in the feed. The
+ * transcript goes with the recording rather than outliving it: a voice note
+ * an operator deleted should not leave its words behind in the list.
+ *
+ * Deliberately narrow. It removes one named file inside one chat's media
+ * directory and cannot be asked to remove a directory, a chat, or anything
+ * outside those roots — `resolveMedia` is the only way a path is produced here.
+ */
+export function deleteMedia(chatKey: string, name: string, direction: string): { ok: boolean; message: string } {
+  const target = resolveMedia(chatKey, name, direction);
+  if (target === null) return { ok: false, message: 'That is not an attachment this panel can name.' };
+  if (!existsSync(target)) return { ok: false, message: 'It is already gone.' };
+
+  try {
+    unlinkSync(target);
+  } catch (err) {
+    return { ok: false, message: String((err as Error).message) };
+  }
+  try {
+    unlinkSync(transcriptFor(target));
+  } catch {
+    /* most attachments have no transcript, and a leftover sidecar is not worth failing for */
+  }
+
+  log('media.deleted', { chatKey, direction, name });
+  feed.event('media.deleted', `an attachment was deleted from the panel (${direction === 'out' ? 'sent' : 'received'})`);
+  return { ok: true, message: 'Deleted.' };
 }
 
 // ─── Log ─────────────────────────────────────────────────────────────────────

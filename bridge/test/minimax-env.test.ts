@@ -127,6 +127,23 @@ describe('what is spoken', () => {
     expect(sent[0]?.['text']).toBe('(laughs) no, that is not what I meant');
   });
 
+  it('rewrites a known tag written in square brackets, which would be spoken', async () => {
+    await synthesise('[laughs] no, that is not what I meant');
+    expect(sent[0]?.['text']).toBe('(laughs) no, that is not what I meant');
+  });
+
+  it('leaves bracketed words that are not tags exactly as written', async () => {
+    // Silently deleting speech is worse than speaking a stray word, so only a
+    // token that is already a known tag is touched.
+    await synthesise('[honestly] I have no idea');
+    expect(sent[0]?.['text']).toBe('[honestly] I have no idea');
+  });
+
+  it('does not invent tags from ordinary parentheses', async () => {
+    await synthesise('it was fine (mostly) in the end');
+    expect(sent[0]?.['text']).toBe('it was fine (mostly) in the end');
+  });
+
   it('uses the model and voice this deployment is configured for', async () => {
     await synthesise('hola');
     expect(sent[0]?.['model']).toBe('speech-2.8-turbo');
