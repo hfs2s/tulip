@@ -186,7 +186,11 @@ async function main(): Promise<void> {
     }
     if (status !== null) alerted.delete('silent');
 
-    if (snapshot.queued > 0) void currentDispatcher().pump();
+    // Kick for a turn still in flight as well as for queued work. `pump` closes
+    // a finished turn itself, but it can exit with one open — an operator hold,
+    // or the delivery error path — and nothing else reconciles it. Without this
+    // the typing indicator would stay on until the next inbound message.
+    if (snapshot.queued > 0 || snapshot.inFlight !== null) void currentDispatcher().pump();
   }, WATCHDOG_MS).unref();
 
   const shutdown = (signal: string): void => {

@@ -201,12 +201,30 @@ export class Dispatcher extends EventEmitter {
    *
    * Re-entrant callers are ignored rather than queued: `pump` loops until there
    * is nothing ready, so a second call would only duplicate work.
+   *
+   * **The loop also runs while a turn is in flight, and that is the whole
+   * point.** It used to be `while (this.ready.length > 0)`, which meant
+   * `awaitTurnEnd` — reached only at the top of the loop — never ran after the
+   * *last* batch was delivered. The common case is exactly that: one message,
+   * one reply, nothing else queued. So the turn was never closed, and three
+   * things silently did not happen.
+   *
+   *   - `turnEnd` never fired, so the typing indicator stayed on forever. From
+   *     the outside Tulip looked permanently about to say something.
+   *   - `retireBatch` never ran, so the batch stayed on the inbound volume and
+   *     the agent was re-prompted with a message it had already answered. The
+   *     agent noticed this itself and reported it: the same batch arrived three
+   *     times and it went quiet rather than answer twice.
+   *   - `turns.close` never ran, so the turn sat open until its TTL.
+   *
+   * Everything recovered on the *next* inbound message, which is why it looked
+   * intermittent rather than total.
    */
   async pump(): Promise<void> {
     if (this.pumping) return;
     this.pumping = true;
     try {
-      while (this.ready.length > 0) {
+      while (this.ready.length > 0 || this.inFlight !== null) {
         if (state.isHeld()) {
           log('msg.held', { waiting: this.queue.size });
           return;
