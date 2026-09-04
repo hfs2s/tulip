@@ -288,14 +288,6 @@ export class Dispatcher extends EventEmitter {
       }
     } finally {
       this.pumping = false;
-      if (
-        this.pending.size === 0 &&
-        this.ready.length === 0 &&
-        this.queue.size === 0 &&
-        this.inFlight === null
-      ) {
-        this.waitingSince = null;
-      }
     }
   }
 
@@ -406,12 +398,18 @@ export class Dispatcher extends EventEmitter {
     for (const list of this.pending.values()) pending += list.length;
     const outstanding =
       pending > 0 || this.ready.length > 0 || this.queue.size > 0 || this.inFlight !== null;
+    // Messages restored from disk after a restart have no arrival time we ever
+    // saw, so without this the clock would never start for exactly the backlog
+    // an operator most wants to be told about. It starts when we first notice
+    // them, which understates the wait rather than inventing one.
+    if (outstanding && this.waitingSince === null) this.waitingSince = Date.now();
+    else if (!outstanding) this.waitingSince = null;
     return {
       pending,
       ready: this.ready.length,
       queued: this.queue.size,
       inFlight: this.inFlight?.chatKey ?? null,
-      waitingSince: outstanding ? this.waitingSince : null,
+      waitingSince: this.waitingSince,
     };
   }
 }

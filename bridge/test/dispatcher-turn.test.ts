@@ -71,7 +71,14 @@ function build() {
   return { dispatcher, chats };
 }
 
-beforeEach(() => { busyTurn = null; retired.length = 0; });
+beforeEach(() => {
+  busyTurn = null;
+  retired.length = 0;
+  // The Dispatcher builds its own Queue against the shared state dir, and the
+  // queue is durable on purpose. Cleared between tests so one test's backlog is
+  // not another's starting condition.
+  rmSync(join(root, 'queue'), { recursive: true, force: true });
+});
 afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
 
 describe('a turn is closed even when nothing else is queued', () => {
@@ -194,6 +201,23 @@ describe('how long anybody has been waiting', () => {
     const waiting = dispatcher.snapshot().waitingSince;
     expect(waiting).not.toBeNull();
     expect(waiting as number).toBeGreaterThanOrEqual(before);
+  });
+
+  it('starts it for a backlog restored from disk, which no arrival was seen for', async () => {
+    const first = build();
+    await first.dispatcher.handle({
+      key: { remoteJid: '15551234567@s.whatsapp.net', fromMe: false, id: 'm1' },
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      pushName: 'Someone',
+      message: { conversation: 'hello' },
+    } as never);
+
+    // A restart: a fresh dispatcher over the same durable queue. Nothing told
+    // it when that message arrived, and the alert this feeds is exactly the one
+    // an operator wants for a backlog that survived a restart.
+    const second = build();
+    expect(second.dispatcher.snapshot().queued).toBeGreaterThan(0);
+    expect(second.dispatcher.snapshot().waitingSince).not.toBeNull();
   });
 
   it('stops the clock only once nothing is outstanding', async () => {
