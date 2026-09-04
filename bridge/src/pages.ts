@@ -25,7 +25,7 @@
  * the internet through a visitor's browser, which is the containment property
  * wearing a disguise.
  */
-import { createReadStream, existsSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { outPaths } from '@tulip/shared';
@@ -114,6 +114,41 @@ export function listPages(): PageSummary[] {
 
 export type Published = { ok: true; url: string } | { ok: false; error: string };
 
+/** Pictures one page may hold. Enough to carry an argument, not a gallery. */
+export const MAX_IMAGES_PER_PAGE = 5;
+
+/** How many generated pictures a page already has. */
+export function imageCount(slug: string): number {
+  try {
+    return readdirSync(outPaths.page(slug)).filter((n) => n.toLowerCase().endsWith('.jpg')).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Write a generated picture into a page.
+ *
+ * Refuses rather than overwrites when the page is full, and refuses a name that
+ * is not a slug — this lands as a filename the agent then references from its
+ * own HTML, so it is exactly the input a path check exists for.
+ */
+export function writePageImage(slug: string, name: string, data: Buffer): Published {
+  if (!SLUG.test(slug) || !SLUG.test(name)) return { ok: false, error: 'that name is not usable as a file' };
+  const dir = outPaths.page(slug);
+  const root = resolve(outPaths.pages);
+  const target = resolve(dir, `${name}.jpg`);
+  if (!target.startsWith(root + sep)) return { ok: false, error: 'that name is not usable as a file' };
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(target, data, { mode: 0o644 });
+    log('pages.image', { slug, name, bytes: data.length });
+    return { ok: true, url: `${name}.jpg` };
+  } catch (err) {
+    return { ok: false, error: `could not write the picture (${(err as Error).name})` };
+  }
+}
+
 /**
  * Check what the agent has written and hand back the address.
  *
@@ -171,61 +206,23 @@ export function deletePage(slug: string): boolean {
  * resolver uses, and for the same reason: a name that passed a check is not the
  * same object as a name opened a moment later.
  */
-/** Escape for HTML text. Slugs are already narrow; this is belt and braces. */
-const esc = (v: string): string =>
-  v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
-
-const kb = (n: number): string => (n < 1024 ? `${String(n)} B` : `${String(Math.round(n / 1024))} KB`);
+/** Where the pages host sends anyone who arrives at its root. */
+const ROOT_REDIRECT = 'https://hfs2s.app/';
 
 /**
- * The directory: everything published, at the pages host's own root.
+ * The design kit, served from a reserved prefix.
  *
- * Self-contained by necessity — these pages are served under a CSP with no
- * outbound connections, and the directory holds itself to the same rule rather
- * than making an exception for the one page the bridge writes. Tulip's palette,
- * inline, no assets.
+ * A page gets Tulip's palette, type and motion by linking two files rather than
+ * by the agent reinventing them each time — which is both cheaper and the only
+ * way a set of pages looks like one product. Reserved rather than a slug: no
+ * page can be called `_kit`, so nothing the agent writes can shadow it.
  */
-function serveIndex(res: ServerResponse, headers: Record<string, string>): void {
-  const items = listPages();
-  const rows = items.length === 0
-    ? '<p class="empty">Nothing here yet.</p>'
-    : items
-        .map((p) => {
-          const when = new Date(p.at).toISOString().slice(0, 10);
-          return `<li><a href="/${esc(p.slug)}/">${esc(p.slug)}</a>` +
-            `<span>${String(p.files)} file${p.files === 1 ? '' : 's'} · ${kb(p.bytes)} · ${when}</span></li>`;
-        })
-        .join('');
+const KIT_PREFIX = '_kit';
+// Beside the compiled bridge, not in `bridge/assets` — the image ships built
+// output only, and a path into the source tree resolves to nothing at runtime.
+const KIT_DIR = new URL('./web/pagekit/', import.meta.url).pathname;
 
-  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex, nofollow"><title>Pages</title><style>
-:root{--ground:#0d0d0f;--panel:#111113;--ink:#fafafa;--dim:rgba(250,250,250,.64);
---faint:rgba(250,250,250,.42);--line:rgba(255,255,255,.09);--accent:#21d2ed}
-*{box-sizing:border-box}
-body{margin:0;background:var(--ground);color:var(--ink);padding:56px 24px;
- font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-main{max-width:640px;margin:0 auto}
-h1{font-weight:400;font-size:26px;letter-spacing:-.02em;margin:0 0 6px}
-.sub{color:var(--faint);font-size:13.5px;margin:0 0 28px;max-width:52ch}
-ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
-li{display:flex;justify-content:space-between;align-items:baseline;gap:16px;
- padding:14px 0;border-bottom:1px solid var(--line)}
-a{color:var(--ink);text-decoration:none}
-a:hover{color:var(--accent)}
-li span{color:var(--faint);font-size:12px;white-space:nowrap}
-.empty{color:var(--faint)}
-</style></head><body><main>
-<h1>Pages</h1>
-<p class="sub">Small pages built here. Each one runs in your browser and sends nothing anywhere.</p>
-<ul>${rows}</ul>
-</main></body></html>`;
-
-  res.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8' });
-  res.end(body);
-}
-
-export function servePage(res: ServerResponse, url: URL, indexEnabled = true): void {
+export function servePage(res: ServerResponse, url: URL): void {
   const parts = url.pathname.split('/').filter((p) => p.length > 0);
 
   const common = {
@@ -240,12 +237,38 @@ export function servePage(res: ServerResponse, url: URL, indexEnabled = true): v
     'cache-control': 'no-cache',
   };
 
-  if (parts.length === 0) {
-    if (!indexEnabled) {
-      res.writeHead(404, { ...common, 'content-type': 'text/plain' }).end('no directory here\n');
+  if (parts[0] === KIT_PREFIX) {
+    const file = parts[1] ?? '';
+    const type = file === 'kit.css' ? 'text/css; charset=utf-8'
+      : file === 'kit.js' ? 'text/javascript; charset=utf-8'
+        : null;
+    if (type === null) {
+      res.writeHead(404, { ...common, 'content-type': 'text/plain' }).end('no such file\n');
       return;
     }
-    serveIndex(res, common);
+    const path = resolve(KIT_DIR, file);
+    if (!existsSync(path)) {
+      res.writeHead(404, { ...common, 'content-type': 'text/plain' }).end('the kit was not built into this image\n');
+      return;
+    }
+    res.writeHead(200, {
+      ...common,
+      'content-type': type,
+      'content-length': statSync(path).size,
+      // Immutable in practice — it changes only when the image is rebuilt, and
+      // a page that caches it loads instantly on a second visit.
+      'cache-control': 'public, max-age=3600',
+    });
+    createReadStream(path).pipe(res);
+    return;
+  }
+
+  // The root is not a directory. Listing every page would make each of them
+  // discoverable by anyone who finds the hostname, when the point of a page is
+  // that its author hands somebody the link. The operator's own listing lives
+  // in the panel, behind the token, where it belongs.
+  if (parts.length === 0) {
+    res.writeHead(302, { ...common, location: ROOT_REDIRECT }).end();
     return;
   }
 

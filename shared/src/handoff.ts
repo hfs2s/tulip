@@ -274,6 +274,24 @@ export const OutboxAction = z.discriminatedUnion('kind', [
     .object({
       id: z.string().uuid(),
       turnId: TurnId,
+      /**
+       * Generate a picture and write it *into* a page rather than sending it.
+       *
+       * A separate verb from `image` because the destination is the difference
+       * that matters: one goes to a person and one goes to a file, and they
+       * spend the same daily allowance.
+       */
+      kind: z.literal('pageImage'),
+      slug: z.string().min(3).max(48).regex(/^[a-z0-9][a-z0-9-]*$/, 'lowercase letters, digits and dashes'),
+      /** The file it lands as, so the agent can reference it from its HTML. */
+      name: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/, 'lowercase letters, digits and dashes'),
+      prompt: z.string().min(1).max(1000),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
       kind: z.literal('image'),
       /** A description. The bridge generates and sends it; no key reaches the agent. */
       prompt: z.string().min(1).max(1000),

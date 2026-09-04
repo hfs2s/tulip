@@ -39,7 +39,7 @@ import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
 import { retainOutbound } from './mediaStore.js';
 import { claim } from './spend.js';
-import { publishPage } from './pages.js';
+import { imageCount, MAX_IMAGES_PER_PAGE, publishPage, writePageImage } from './pages.js';
 import type { Limiter } from './ratelimit.js';
 import type { TurnRegistry } from './turns.js';
 import type { Config } from './config.js';
@@ -567,6 +567,33 @@ export class Outbox extends EventEmitter {
         // Recorded against both chats, so a message that crossed conversations
         // is visible from the one it came from as well as the one it went to.
         feed.event('crossChat.sent', `${turn.chatKey} -> ${action.chatKey}`);
+        break;
+      }
+
+      case 'pageImage': {
+        if (!this.deps.config.agent.images) return this.refuse('images');
+        if (imageCount(action.slug) >= MAX_IMAGES_PER_PAGE) {
+          await this.answer(action.id, 'page', {
+            ok: false,
+            error: `a page may hold ${String(MAX_IMAGES_PER_PAGE)} pictures — delete one or reuse a name`,
+          });
+          break;
+        }
+        // The same daily allowance as a picture sent to a person: the cost is
+        // in making it, not in where it lands.
+        if (!claim('images', this.deps.config.limits.imagesPerDay)) {
+          await this.answer(action.id, 'page', { ok: false, error: "today's picture allowance is spent" });
+          break;
+        }
+        const made = await generateImage(action.prompt);
+        if (!made.ok) {
+          await this.answer(action.id, 'page', { ok: false, error: made.error });
+          break;
+        }
+        const written = writePageImage(action.slug, action.name, made.data);
+        await this.answer(action.id, 'page', written.ok
+          ? { ok: true, items: [{ title: action.name, url: written.url, published: null, text: '' }] }
+          : { ok: false, error: written.error });
         break;
       }
 

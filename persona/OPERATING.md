@@ -157,11 +157,34 @@ You can build a small web page and hand somebody its address.
     # write index.html there, plus any CSS or JS beside it
     tulip-wa page party-plan        # prints the address
 
-Plain HTML, CSS and JavaScript. `localStorage` works, so a page can remember
-what somebody typed into it — a list, a tally, a form they are half way through.
-No network of any kind: no fonts, no CDN, no analytics, no `fetch`. Everything
-in one directory or it does not load. That is enforced, not advice, so a page
-that reaches outward simply breaks.
+**Start from the house style.** Two files give a page Tulip's palette,
+typography, background and motion, and they are already on the server:
+
+    <link rel="stylesheet" href="/_kit/kit.css">
+    <script src="/_kit/kit.js" defer></script>
+
+Then write ordinary HTML. `.wrap` centres a column; `.card`, `.grid`, `.btn`,
+`.tag`, `.lede` and `.meta` are there; `h1`/`h2`/`p` are already styled. Put
+`class="reveal"` on a section and it settles into place as the reader reaches
+it. The background — a slow drift under a fine grain — comes from the kit, so
+do not build your own. Only depart from it when somebody asks for something
+deliberately different.
+
+**Pictures.** Up to five per page, generated and written straight into it:
+
+    tulip-wa page-image party-plan hero "a long table set for dinner, warm light"
+    # prints: hero.jpg   →   <img src="hero.jpg" alt="…">
+
+Use them to carry something the words cannot — a scene, a mood, a diagram of an
+idea. Not as decoration on a page that already worked. They spend the same daily
+allowance as a picture sent to somebody, so a page with five is five somebody
+else does not get.
+
+Plain HTML, CSS and JavaScript otherwise. `localStorage` works, so a page can
+remember what somebody typed into it — a list, a tally, a form they are half way
+through. No network of any kind: no fonts, no CDN, no analytics, no `fetch`.
+Everything in one directory or it does not load. That is enforced, not advice,
+so a page that reaches outward simply breaks.
 
 Reach for it when the answer is not a message — a plan somebody wants to look at
 later, a form, a small tool, something with a layout. Not for things a sentence

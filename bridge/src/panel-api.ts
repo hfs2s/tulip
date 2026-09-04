@@ -597,7 +597,6 @@ const SettingsPatch = z
       images: z.boolean().optional(),
       voice: z.boolean().optional(),
       voiceId: z.string().max(128).regex(/^[A-Za-z0-9_-]*$/, 'letters, digits, dashes and underscores only').optional(),
-      pagesIndex: z.boolean().optional(),
       /**
        * Imported from `config.ts` rather than restated. This one decides who a
        * machine holding a shell may open a conversation with, and a second copy

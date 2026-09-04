@@ -264,17 +264,6 @@ const Agent = z
      * box.
      */
     voiceId: z.string().max(128).default(''),
-    /**
-     * Whether the pages host answers its own root with a list of everything
-     * published.
-     *
-     * A convenience with a consequence: a page is otherwise reachable only by
-     * its address, and a directory makes every one of them discoverable by
-     * anyone who finds the hostname. On by default because a small set of
-     * pages nobody can find is a filing cabinet with no drawer, but it is the
-     * switch to reach for if a page should be shared rather than browsed.
-     */
-    pagesIndex: z.boolean().default(true),
   })
   .strict()
   .default({});

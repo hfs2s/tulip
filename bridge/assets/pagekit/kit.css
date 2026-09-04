@@ -1,0 +1,118 @@
+/* Tulip's look, for pages the agent builds.
+ *
+ * Served from the pages host so a page can link it and inherit the product's
+ * palette, type and motion without deciding any of it. Everything here is
+ * same-origin and self-contained: the pages CSP is `default-src 'self'` with
+ * `connect-src 'none'`, so no webfont, no CDN, no request of any kind.
+ *
+ * The background is CSS rather than the panel's WebGL bundle. A mesh of slow
+ * radial gradients under an SVG-turbulence grain gets within a hair of the same
+ * surface for about a kilobyte, and a 700 KB shader library on a page somebody
+ * opens on a phone to read four paragraphs is the wrong trade.
+ */
+
+:root{
+  --ground:#0d0d0f; --panel:#111113; --raise:#141416;
+  --ink:#fafafa; --dim:rgba(250,250,250,.64); --faint:rgba(250,250,250,.42);
+  --line:rgba(255,255,255,.09); --line-soft:rgba(255,255,255,.055);
+  --accent:#21d2ed; --accent-dim:rgba(33,210,237,.14);
+  --warn:#f0b429; --bad:#ff6b6b;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --r-card:14px; --r-pill:999px;
+  --ease:cubic-bezier(.2,.7,.2,1);
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font:16px/1.6 var(--sans); letter-spacing:-.005em;
+  min-height:100vh; position:relative; overflow-x:hidden;
+}
+
+/* The surface: three slow lights under a fixed grain. Fixed so it stays put
+   while the page scrolls over it, which is the whole reason it reads as depth
+   rather than as a decoration attached to the top of the document. */
+body::before{
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:
+    radial-gradient(60% 50% at 18% 12%, rgba(33,210,237,.10), transparent 70%),
+    radial-gradient(50% 45% at 82% 28%, rgba(33,210,237,.05), transparent 72%),
+    radial-gradient(70% 60% at 50% 92%, rgba(120,150,190,.07), transparent 75%);
+  animation:tulip-drift 46s var(--ease) infinite alternate;
+}
+body::after{
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.5;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.34'/%3E%3C/svg%3E");
+  mix-blend-mode:soft-light;
+}
+@keyframes tulip-drift{
+  from{transform:translate3d(-1.5%,-1%,0) scale(1.05)}
+  to{transform:translate3d(1.5%,1.5%,0) scale(1.12)}
+}
+
+/* Content sits above the surface. Without this the grain paints over the text. */
+main,header,footer,section,article{position:relative;z-index:1}
+
+.wrap{max-width:760px;margin:0 auto;padding:88px 24px 120px}
+h1{font-size:clamp(34px,6vw,58px);line-height:1.05;letter-spacing:-.035em;font-weight:400;margin:0 0 18px}
+h2{font-size:clamp(23px,3.4vw,30px);line-height:1.15;letter-spacing:-.02em;font-weight:400;margin:64px 0 12px}
+h3{font-size:19px;font-weight:500;letter-spacing:-.01em;margin:36px 0 8px}
+p{margin:0 0 18px;color:var(--dim);max-width:68ch}
+.lede{font-size:clamp(17px,2.2vw,20px);color:var(--dim);max-width:60ch;margin-bottom:34px}
+a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-dim)}
+a:hover{border-bottom-color:var(--accent)}
+small,.meta{font-size:12.5px;color:var(--faint)}
+code,kbd{font-family:var(--mono);font-size:.9em;background:var(--raise);
+  border:1px solid var(--line);border-radius:6px;padding:2px 6px}
+hr{border:0;border-top:1px solid var(--line-soft);margin:56px 0}
+ul,ol{color:var(--dim);padding-left:20px} li{margin:6px 0}
+blockquote{margin:24px 0;padding-left:16px;border-left:2px solid var(--line);color:var(--dim)}
+
+.card{background:var(--panel);border:1px solid var(--line-soft);
+  border-radius:var(--r-card);padding:24px 26px;margin:20px 0}
+.grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.tag{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;
+  color:var(--faint);border:1px solid var(--line);border-radius:var(--r-pill);padding:4px 10px}
+.tag.on{color:var(--accent);border-color:var(--accent)}
+
+.btn{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:14px;
+  padding:11px 20px;border-radius:var(--r-pill);border:1px solid var(--line);
+  background:var(--raise);color:var(--ink);cursor:pointer;
+  transition:transform .18s var(--ease),border-color .18s var(--ease),background .18s var(--ease)}
+.btn:hover{transform:translateY(-1px);border-color:var(--accent)}
+.btn:active{transform:translateY(0)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#07272c;font-weight:500}
+.btn:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+
+input,textarea,select{font:inherit;font-size:15px;color:var(--ink);background:var(--raise);
+  border:1px solid var(--line);border-radius:10px;padding:11px 13px;width:100%;
+  transition:border-color .18s var(--ease)}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent)}
+
+figure{margin:32px 0}
+figure img{width:100%;height:auto;display:block;border-radius:var(--r-card);border:1px solid var(--line-soft)}
+figcaption{margin-top:10px;font-size:12.5px;color:var(--faint)}
+
+/* Motion. Elements start displaced and settle when they come into view; the
+   easing overshoots very slightly, which is what makes it read as spring rather
+   than as a fade. `.reveal` is applied by kit.js so a page with JS disabled
+   shows everything rather than nothing. */
+.is-ready .reveal{opacity:0;transform:translateY(18px)}
+.is-ready .reveal.in{opacity:1;transform:none;
+  transition:opacity .62s var(--ease),transform .62s cubic-bezier(.16,.9,.24,1.06)}
+.is-ready .reveal.in:nth-child(2){transition-delay:.06s}
+.is-ready .reveal.in:nth-child(3){transition-delay:.12s}
+.is-ready .reveal.in:nth-child(4){transition-delay:.18s}
+.is-ready .reveal.in:nth-child(5){transition-delay:.24s}
+
+@media (prefers-reduced-motion:reduce){
+  body::before{animation:none}
+  .is-ready .reveal,.is-ready .reveal.in{opacity:1;transform:none;transition:none}
+  .btn:hover{transform:none}
+}
+@media (max-width:600px){
+  .wrap{padding:56px 18px 88px}
+  .card{padding:20px}
+}

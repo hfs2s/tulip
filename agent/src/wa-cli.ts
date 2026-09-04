@@ -34,6 +34,9 @@ const USAGE = `usage:
                               sound tags are performed: (laughs) (chuckle)
                               (sighs) (breath). Anything else — including square
                               brackets — is read out as words.
+  tulip-wa page-image <page> <name> <prompt>
+                              generate a picture into that page and print the
+                              filename to reference. Five per page.
   tulip-wa page <name>        publish out/pages/<name>/ and print its address.
                               Write index.html there first; CSS and JS beside it
                               work, and so does browser storage. No network.
@@ -310,6 +313,28 @@ switch (command) {
     const text = rest.join(' ').trim() || readFileSync(0, 'utf8').trim();
     if (text.length === 0) die('tulip-wa voice: need something to say');
     queue({ kind: 'voice', text: text.slice(0, 2000) });
+    break;
+  }
+
+  case 'page-image': {
+    const slug = (rest[0] ?? '').trim().toLowerCase();
+    const name = (rest[1] ?? '').trim().toLowerCase();
+    const prompt = rest.slice(2).join(' ').trim();
+    if (!slug || !name || !prompt) {
+      die('tulip-wa page-image: `tulip-wa page-image <page> <name> <describe the picture>`');
+    }
+    const id = queue({ kind: 'pageImage', slug, name, prompt: prompt.slice(0, 1000) });
+    const result = await awaitResult(id, 120_000);
+    if (result === null) {
+      process.stdout.write('page-image: no answer from the bridge within 120s.\n');
+      break;
+    }
+    if (!result.ok) {
+      process.stdout.write(`${result.error ?? 'page-image: refused'}\n`);
+      break;
+    }
+    // Printed as the filename to reference from the page's own HTML.
+    process.stdout.write(`${result.items[0]?.url ?? ''}\n`);
     break;
   }
 

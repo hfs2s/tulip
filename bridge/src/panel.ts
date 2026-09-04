@@ -311,7 +311,7 @@ export function startPanel(deps: ApiDeps): Server | null {
           res.writeHead(405, { 'content-type': 'text/plain' }).end('pages are read-only\n');
           return;
         }
-        servePage(res, url, deps.config.agent.pagesIndex);
+        servePage(res, url);
         return;
       }
 

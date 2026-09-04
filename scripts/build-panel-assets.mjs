@@ -50,6 +50,23 @@ for (const name of ['panel.html', 'panel.js', 'favicon.svg']) {
   console.log(`  ✓ ${name} (${statSync(join(out, name)).size} bytes)`);
 }
 
+// ── The page kit ─────────────────────────────────────────────────────────────
+// Tulip's palette, type and motion, for the static pages the agent builds. They
+// are served on the pages host from a reserved `_kit` prefix, so a page links
+// two files instead of the agent reinventing a design system each time — which
+// is the only way a set of pages looks like one product.
+const kit = join(out, 'pagekit');
+mkdirSync(kit, { recursive: true });
+for (const name of ['kit.css', 'kit.js']) {
+  const source = join(root, 'bridge', 'assets', 'pagekit', name);
+  if (!existsSync(source)) {
+    console.warn(`  ! pagekit/${name}: missing from bridge/assets/pagekit`);
+    continue;
+  }
+  cpSync(source, join(kit, name));
+  console.log(`  ✓ pagekit/${name} (${statSync(join(kit, name)).size} bytes)`);
+}
+
 /** Resolve a file inside an installed package, or null if it is not there. */
 function fromPackage(specifier) {
   try {

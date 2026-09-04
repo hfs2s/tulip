@@ -2010,12 +2010,6 @@ async function renderSettings() {
     field(tools, row[1], row[2] + (keyed ? '' : ' Currently unavailable: no key is configured.'), wrap);
   });
 
-  field(tools, 'Public page directory',
-    'Whether the pages host answers its own address with a list of everything published. Off, a page is reachable only by its own link — which is the difference between sharing one and letting anyone browse them all.',
-    liveSwitch(s.agent && s.agent.pagesIndex, function (on, input) {
-      saveSettings({ agent: { pagesIndex: on } }, function () { input.checked = !on; });
-    }));
-
   field(tools, 'Voice',
     'Which MiniMax voice speaks. Leave empty for this deployment’s default. A name that does not exist fails the whole request — the provider answers “voice id not exist” — and voice notes quietly fall back to text until it is corrected, so change it and then send yourself one.',
     textField(s.agent && s.agent.voiceId, 'e.g. English_engaging_instructor_vv2', function (v, revert) {
