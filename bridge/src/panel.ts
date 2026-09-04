@@ -78,6 +78,7 @@ import {
   pageDelete,
   memoryList,
   memoryForget,
+  personaDocs,
 } from './panel-api.js';
 
 const COOKIE = 'tulip_token';
@@ -480,6 +481,9 @@ export function startPanel(deps: ApiDeps): Server | null {
         }
         // Method guard matters: without it this also swallows the POST and
         // silently returns the current values instead of applying the change.
+        if (url.pathname === '/api/persona' && req.method === 'GET') {
+          return send(res, headers, 200, personaDocs());
+        }
         if (url.pathname === '/api/memory' && req.method === 'GET') {
           return send(res, headers, 200, memoryList());
         }

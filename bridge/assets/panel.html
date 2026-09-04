@@ -324,6 +324,16 @@
   .field{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;
          padding:13px 0;border-bottom:1px solid var(--line-soft)}
   /* A <label> when it names a checkbox, so the words are a hit target too. */
+  /* The persona reader. Long prose, so a narrower measure than a settings row. */
+  .doc{max-width:70ch}
+  .doc h3{font:400 17px/1.3 var(--display);margin:22px 0 6px;color:var(--ink)}
+  .doc h4,.doc h5{font:500 14px/1.35 var(--body);margin:16px 0 4px;color:var(--dim)}
+  .doc p{font-size:13.5px;line-height:1.65;color:var(--dim);margin:0 0 10px}
+  .doc li{font-size:13.5px;line-height:1.6;color:var(--dim);margin:3px 0 3px 18px}
+  .doc pre{font-family:var(--mono);font-size:12px;line-height:1.5;color:var(--faint);
+           background:var(--raise);border:1px solid var(--line-soft);border-radius:8px;
+           padding:10px 12px;margin:8px 0;white-space:pre-wrap;overflow-x:auto}
+
   .field-name{display:block}
   label.field-name{cursor:pointer}
   .field:last-child{border-bottom:0}
@@ -662,6 +672,7 @@
       <section class="page" id="p-chat"></section>
       <section class="page" id="p-media"></section>
       <section class="page" id="p-terminal"></section>
+      <section class="page" id="p-persona"></section>
       <section class="page" id="p-memory"></section>
       <section class="page" id="p-pages"></section>
       <section class="page" id="p-settings"></section>

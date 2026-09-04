@@ -60,6 +60,13 @@ COPY shared/package.json ./shared/
 COPY bridge/package.json ./bridge/
 COPY package.json ./
 
+# The persona, so the panel can show the operator what Tulip has been told to
+# be. Read-only reference, never loaded or executed here — the agent's own copy
+# is what actually runs. Both images are built from the same tree by one
+# `docker compose build`, so they agree; build only one and the panel shows the
+# other's brief, which is why the page says which build it is from.
+COPY persona /persona
+
 # The state and handoff directories are volumes at run time. Creating them here
 # with the right owner means the container does not need to be root to fix them
 # on first boot.

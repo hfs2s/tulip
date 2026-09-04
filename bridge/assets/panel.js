@@ -93,6 +93,8 @@ var ICONS = {
   messages: '<path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1z"/>',
   chats: '<path d="M16.2 12.5H18a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H7.6a1 1 0 0 0-1 1v1.4"/><path d="M13 7.8H4.6a1 1 0 0 0-1 1v6.6a1 1 0 0 0 1 1H6v3.1l3.9-3.1H13a1 1 0 0 0 1-1V8.8a1 1 0 0 0-1-1z"/>',
   // A sheet with a corner turned: a page, which is what these are.
+  // A page with a person on it: the brief, not the person.
+  persona: '<path d="M12 12.4a3.4 3.4 0 1 0 0-6.8 3.4 3.4 0 0 0 0 6.8z"/><path d="M5.4 20.2a6.6 6.6 0 0 1 13.2 0"/>',
   // A head in profile: what it carries between rooms.
   memory: '<path d="M15.6 4.2a4.3 4.3 0 0 0-8.2 1.6c0 .7.2 1.4.5 2l-2 3.3h2v3.6a2 2 0 0 0 2 2h1.4v3.1"/><path d="M11.6 8.4a1.9 1.9 0 1 0 3.4 1.2"/>',
   pages: '<path d="M14 3.5H6.5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V8z"/><path d="M14 3.5V8h4.5"/><path d="M8.8 12.5h6.4"/><path d="M8.8 16h4.2"/>',
@@ -105,7 +107,7 @@ var ICONS = {
 };
 var PAGES = [
   ['overview', 'Overview'], ['messages', 'Messages'], ['chats', 'Chats'], ['chat', 'Chat'],
-  ['media', 'Media'], ['terminal', 'Terminal'], ['memory', 'Memory'], ['pages', 'Pages'], ['settings', 'Settings'],
+  ['media', 'Media'], ['terminal', 'Terminal'], ['persona', 'Persona'], ['memory', 'Memory'], ['pages', 'Pages'], ['settings', 'Settings'],
   ['log', 'Log']
 ];
 
@@ -1025,6 +1027,74 @@ function fitTerminal() {
   if (width <= 0) return;
   var size = Math.max(5, Math.min(16, Math.floor(width / TERM_COLS / 0.6)));
   if (term.options.fontSize !== size) term.options.fontSize = size;
+}
+
+/**
+ * Tulip's brief, as the agent receives it.
+ *
+ * Rendered rather than editable. These files are version-controlled and reach a
+ * conversation only when its session next spawns, so an editor here would
+ * promise something it cannot deliver — a change that looks saved and takes
+ * effect at some unrelated moment, or never, for a chat that has been talking
+ * for an hour.
+ *
+ * The markdown is rendered by hand and conservatively: headings, bullets, code
+ * and bold. This is a document the agent is told to treat as instructions, so
+ * the safest possible thing to do with it in a browser is to show it as text
+ * with a little structure — never as HTML.
+ */
+async function renderPersona() {
+  var p = head('persona', 'Persona', 'What Tulip has been told to be. Assembled in this order into every chat’s brief when its session starts — so a conversation already running keeps the version it began with.'), mine = renderToken;
+
+  var data;
+  try { data = await api('/api/persona'); } catch (err) { p.appendChild(node('p', 'empty', err.message)); return; }
+  if (stale(mine)) return;
+
+  data.parts.forEach(function (part) {
+    var card = node('div', 'card');
+    card.appendChild(node('h2', null, part.name.replace('.md', '')));
+    if (part.text === null) {
+      card.appendChild(node('p', 'empty', 'Missing from this build.'));
+      p.appendChild(card);
+      return;
+    }
+    card.appendChild(node('p', 'sub', bytes(part.bytes)));
+    card.appendChild(markdown(part.text));
+    p.appendChild(card);
+  });
+}
+
+/**
+ * Enough markdown to read a brief, and no more.
+ *
+ * Deliberately not a parser. Every line becomes a text node, so nothing in
+ * these files can become an element — they are instructions written for an
+ * agent, and the panel renders text written by strangers under a CSP that
+ * exists for exactly this reason.
+ */
+function markdown(src) {
+  var out = node('div', 'doc');
+  var lines = src.split('\n');
+  var block = null;
+
+  lines.forEach(function (line) {
+    if (line.trim() === '```' || line.trim().indexOf('```') === 0) {
+      if (block) { out.appendChild(block); block = null; }
+      else { block = node('pre'); }
+      return;
+    }
+    if (block) { block.appendChild(document.createTextNode(line + '\n')); return; }
+    if (line.trim() === '') return;
+    if (line.indexOf('#### ') === 0) { out.appendChild(node('h5', null, line.slice(5))); return; }
+    if (line.indexOf('### ') === 0) { out.appendChild(node('h4', null, line.slice(4))); return; }
+    if (line.indexOf('## ') === 0) { out.appendChild(node('h3', null, line.slice(3))); return; }
+    if (line.indexOf('# ') === 0) { out.appendChild(node('h3', null, line.slice(2))); return; }
+    if (line.indexOf('    ') === 0) { out.appendChild(node('pre', null, line.trim())); return; }
+    if (/^[-*] /.test(line.trim())) { out.appendChild(node('li', null, line.trim().slice(2))); return; }
+    out.appendChild(node('p', null, line));
+  });
+  if (block) out.appendChild(block);
+  return out;
 }
 
 /**
@@ -2104,6 +2174,7 @@ function render() {
   else if (route === 'terminal') renderTerminal();
   else if (route === 'pages') void renderPages();
   else if (route === 'memory') void renderMemory();
+  else if (route === 'persona') void renderPersona();
   else if (route === 'settings') renderSettings();
   else if (route === 'log') renderLog();
 }

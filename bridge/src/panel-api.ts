@@ -468,6 +468,33 @@ export function pageDelete(slug: string): { ok: boolean; message: string } {
   return { ok: true, message: 'Deleted.' };
 }
 
+// ─── Persona ─────────────────────────────────────────────────────────────────
+
+/** The four files, in the order they are assembled into the agent's brief. */
+const PERSONA_PARTS = ['IDENTITY.md', 'VOICE.md', 'OPERATING.md', 'BOUNDARIES.md'] as const;
+const PERSONA_DIR = process.env['TULIP_PERSONA_DOCS'] ?? '/persona';
+
+/**
+ * What Tulip has been told to be, for reading.
+ *
+ * Read-only, deliberately. These files are version-controlled and reach a
+ * conversation only when its session next spawns, so an editor here would
+ * promise something it could not deliver — a change that appears saved and
+ * takes effect at some unrelated moment. Editing belongs in the repository,
+ * where it is reviewed and can be reverted.
+ */
+export function personaDocs(): Json {
+  const parts = PERSONA_PARTS.map((name) => {
+    try {
+      const path = join(PERSONA_DIR, name);
+      return { name, text: readFileSync(path, 'utf8'), bytes: statSync(path).size };
+    } catch {
+      return { name, text: null, bytes: 0 };
+    }
+  });
+  return { parts, total: parts.reduce((sum, p) => sum + p.bytes, 0) };
+}
+
 // ─── Memory ──────────────────────────────────────────────────────────────────
 
 /**
