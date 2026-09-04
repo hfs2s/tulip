@@ -1678,10 +1678,24 @@ function mountFlow() {
   try {
     new PaperShaders.ShaderMount(host, PaperShaders.neuroNoiseFragmentShader, {
       u_colorBack: [0.051, 0.051, 0.059, 1],
-      u_colorMid: [0.075, 0.086, 0.098, 1],
-      u_colorFront: [0.106, 0.133, 0.149, 1],
-      u_brightness: 0.32,
-      u_contrast: 0.34
+      u_colorMid: [0.098, 0.125, 0.141, 1],
+      u_colorFront: [0.176, 0.243, 0.271, 1],
+      u_brightness: 0.62,
+      u_contrast: 0.55,
+      // Not optional, and their absence is silent. The library computes
+      // `v_objectUV` in a *vertex* prelude from these, so an unsupplied
+      // `u_scale` is zero, the UV collapses to a point, and every pixel samples
+      // the same place — a perfectly uniform field with no error anywhere. It
+      // renders, it animates, and it looks like the shader is broken.
+      u_fit: 0,
+      u_scale: 0.9,
+      u_rotation: 0,
+      u_originX: 0.5,
+      u_originY: 0.5,
+      u_offsetX: 0,
+      u_offsetY: 0,
+      u_worldWidth: 0,
+      u_worldHeight: 0
     }, undefined, FLOW);
   } catch (err) {
     console.warn('[tulip] neuro noise did not mount:', err && err.message ? err.message : err);
