@@ -616,7 +616,18 @@ export class Outbox extends EventEmitter {
       case 'pageNew': {
         const made = scaffoldPage(action.slug, action.title);
         await this.answer(action.id, 'page', made.ok
-          ? { ok: true, items: [{ title: action.slug, url: made.url, published: null, text: '' }] }
+          ? {
+              ok: true,
+              items: [{
+                title: action.slug,
+                url: made.url,
+                published: null,
+                // Said here as well as in the brief, because this is the moment
+                // it matters: everything after this point is minutes of silence
+                // for whoever asked.
+                text: 'If you have not already told them you are building this, do it now — a page takes minutes and silence reads as being ignored.',
+              }],
+            }
           : { ok: false, error: made.error });
         break;
       }

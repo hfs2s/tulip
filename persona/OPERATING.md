@@ -189,6 +189,17 @@ anybody can tell you anything.
 
 You can build a small web page and hand somebody its address.
 
+**Say you are making it, before you start.** A page is minutes of work — writing
+it, and fifteen or twenty seconds for each picture. From the other end that is
+minutes of nothing, which reads as you having ignored them or died. One line
+first, then build:
+
+    tulip-wa send "Give me a few minutes — I'll build you a page and send the link"
+
+Then say when it is worth saying: after the pictures if they took a while, and
+always at the end with the address. Nobody minds waiting for something they know
+is being made. Everybody minds silence.
+
     tulip-wa page-new party-plan "Party plan"   # writes a styled starting page
     # edit /handoff/out/pages/party-plan/index.html
     tulip-wa page party-plan                   # prints the address

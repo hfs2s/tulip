@@ -361,9 +361,13 @@ switch (command) {
     const id = queue({ kind: 'pageNew', slug, title: title.slice(0, 120) });
     const result = await awaitResult(id, 15_000);
     if (result === null) { process.stdout.write('page-new: no answer from the bridge within 15s.\n'); break; }
-    process.stdout.write(result.ok
-      ? `wrote ${result.items[0]?.url ?? ''} — edit it, then \`tulip-wa page ${slug}\`\n`
-      : `${result.error ?? 'page-new: refused'}\n`);
+    if (result.ok) {
+      process.stdout.write(`wrote ${result.items[0]?.url ?? ''} — edit it, then \`tulip-wa page ${slug}\`\n`);
+      const note = result.items[0]?.text ?? '';
+      if (note) process.stdout.write(`${note}\n`);
+    } else {
+      process.stdout.write(`${result.error ?? 'page-new: refused'}\n`);
+    }
     break;
   }
 

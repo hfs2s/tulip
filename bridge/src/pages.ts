@@ -175,6 +175,10 @@ export function scaffoldPage(slug: string, title: string): Published {
     mkdirSync(dir, { recursive: true });
     writeFileSync(index, html, { mode: 0o644 });
     log('pages.scaffolded', { slug });
+    // The reminder rides on the answer the agent is already reading, because a
+    // rule in the brief did not survive contact with a long task: building a
+    // page is minutes of silence at the other end, and silence reads as being
+    // ignored.
     return { ok: true, url: `${slug}/index.html` };
   } catch (err) {
     return { ok: false, error: `could not write the page (${(err as Error).name})` };
