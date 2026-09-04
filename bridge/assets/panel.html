@@ -127,17 +127,15 @@
   /* `main` is the scroll container, so the rail simply never moves. */
   main{flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto}
   /* flex:none — without it this shrinks as the page grows and clips the heading. */
-  .masthead{position:relative;flex:none;overflow:hidden;
-            border-bottom:1px solid var(--line-soft);padding:38px 40px 32px}
-  #shader{position:absolute;inset:0;opacity:.38;pointer-events:none}
-  .masthead::after{content:"";position:absolute;inset:0;pointer-events:none;
-    background:linear-gradient(180deg,rgba(13,13,15,.1),var(--ground))}
-  .masthead-in{position:relative;z-index:1;max-width:900px}
-  h1{font:400 clamp(30px,4.4vw,54px)/1.05 var(--display);letter-spacing:-.04em;margin:0 0 10px}
-  h1.stopped{color:var(--bad)}
-  .lede{font-size:15.5px;color:var(--dim);margin:0;max-width:62ch}
+  /* The status strip. Absent when the bot is answering, which is why the page
+     is otherwise nothing but the paper grain and the content on top of it. */
+  .alertbar{flex:none;display:flex;gap:10px;align-items:baseline;
+            padding:12px 40px;border-bottom:1px solid var(--line-soft);
+            background:var(--panel);font-size:13.5px;color:var(--dim)}
+  .alertbar b{color:var(--warn);font-weight:500}
+  .alertbar.stopped b{color:var(--bad)}
 
-  .page-wrap{padding:28px 40px 64px;position:relative}
+  .page-wrap{padding:40px 40px 64px;position:relative}
   h2{font:400 21px/1.2 var(--display);letter-spacing:-.02em;margin:0 0 4px}
   .sub{font-size:13.5px;color:var(--faint);margin:0 0 20px;max-width:64ch}
 
@@ -350,7 +348,7 @@
     body{flex-direction:column;overflow:auto}
     main{overflow:visible}
 
-    /* flex:none for the same reason .masthead carries it: `body` is a flex
+    /* flex:none because `body` is a flex
        column here, so without it the bar is squeezed whenever `main` overflows
        — measured at 41px on short pages and 58px on tall ones. `--bar` is a
        constant, and it positions both the dropdown and its scrim, so the two
@@ -416,7 +414,7 @@
     .nav{width:100%;min-height:46px;padding:11px 12px;white-space:nowrap}
     .nav .count{display:inline-block}
 
-    .masthead{padding:26px 20px 22px}
+    .alertbar{padding:10px 20px}
     .page-wrap{padding:20px 20px 48px}
     .line{grid-template-columns:52px 1fr;gap:10px}
     .line .tag{display:none}
@@ -427,7 +425,6 @@
   }
   @media (prefers-reduced-motion:reduce){
     *{animation:none!important;transition:none!important}
-    #shader{display:none}
   }
 </style>
 </head>
@@ -480,13 +477,10 @@
   </aside>
 
   <main>
-    <header class="masthead">
-      <div id="shader"></div>
-      <div class="masthead-in">
-        <h1 id="headline">Connecting…</h1>
-        <p class="lede" id="lede">Reading the bridge's state.</p>
-      </div>
-    </header>
+    <!-- Only ever visible when something is wrong. The masthead this replaced
+         spent 38px of every page saying "Answering people.", which is the one
+         state that needs no announcement. -->
+    <div class="alertbar" id="alert" role="status" hidden></div>
     <div class="page-wrap">
       <section class="page" id="p-overview"></section>
       <section class="page" id="p-messages"></section>

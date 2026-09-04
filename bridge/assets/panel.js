@@ -192,30 +192,48 @@ function go(next) {
   render();
 }
 
-// ── Masthead verdict ────────────────────────────────────────────────────────
+/**
+ * Say what is wrong, and otherwise say nothing.
+ *
+ * This replaced a masthead that spent 38px of every page announcing "Answering
+ * people." — the one state that needs no announcement, and which pushed every
+ * page's actual content below the fold to say it. The states that *do* need
+ * announcing were in the same box, so they moved here rather than being lost:
+ * a strip that is `hidden` while the bot is answering and appears when it is
+ * not.
+ *
+ * The rail's status dot carries the same state as a colour. This carries the
+ * sentence — which container to restart, how many messages are waiting — and a
+ * colour alone cannot.
+ */
 function verdict(s) {
-  var h = el('headline'), stopped = true, lede;
+  var bar = el('alert'), stopped = true, headline, detail;
   if (!s.whatsapp.connected) {
-    h.textContent = 'Not answering — WhatsApp is disconnected.';
-    lede = 'The bridge reconnects on its own. If this persists, the number may have been unlinked.';
+    headline = 'Not answering — WhatsApp is disconnected.';
+    detail = 'The bridge reconnects on its own. If this persists, the number may have been unlinked.';
   } else if (s.agent.fatal) {
-    h.textContent = 'Not answering — ' + s.agent.fatal + '.';
-    lede = 'Only you can clear this. Messages keep arriving and are recorded meanwhile.';
+    headline = 'Not answering — ' + s.agent.fatal + '.';
+    detail = 'Only you can clear this. Messages keep arriving and are recorded meanwhile.';
   } else if (!s.agent.reporting) {
-    h.textContent = 'Not answering — the agent is silent.';
-    lede = 'Its container may be down or restarting. Nothing is lost; messages queue until it returns.';
+    headline = 'Not answering — the agent is silent.';
+    detail = 'Its container may be down or restarting. Nothing is lost; messages queue until it returns.';
   } else if (s.hold.active) {
-    h.textContent = 'Holding.';
-    lede = s.queue.queued ? plural(s.queue.queued, 'message') + ' waiting. Resume to hand them over.'
-                          : 'Nothing waiting. New messages queue rather than reach the agent.';
+    headline = 'Holding.';
+    detail = s.queue.queued ? plural(s.queue.queued, 'message') + ' waiting. Resume to hand them over.'
+                            : 'Nothing waiting. New messages queue rather than reach the agent.';
   } else {
     stopped = false;
-    h.textContent = 'Answering people.';
-    lede = s.agent.sessions === 0 ? 'Idle and listening. Nobody is mid-conversation.'
-         : plural(s.agent.sessions, 'conversation') + ' open right now.';
   }
-  h.className = stopped ? 'stopped' : '';
-  el('lede').textContent = lede;
+
+  if (bar) {
+    clear(bar);
+    bar.hidden = !stopped;
+    bar.className = 'alertbar' + (s.hold.active ? '' : ' stopped');
+    if (stopped) {
+      bar.appendChild(node('b', null, headline));
+      bar.appendChild(node('span', null, detail));
+    }
+  }
   el('whoami').textContent = s.whatsapp.name || 'not paired';
   agentStatus(s);
   var badge = el('navChats');
@@ -1477,7 +1495,19 @@ function render() {
 }
 
 async function refresh() {
-  try { state = await api('/api/state'); } catch (err) { el('lede').textContent = 'Lost contact with the bridge. Retrying.'; return; }
+  try {
+    state = await api('/api/state');
+  } catch (err) {
+    var bar = el('alert');
+    if (bar) {
+      clear(bar);
+      bar.hidden = false;
+      bar.className = 'alertbar stopped';
+      bar.appendChild(node('b', null, 'Lost contact with the bridge.'));
+      bar.appendChild(node('span', null, 'Retrying. Nothing is lost meanwhile.'));
+    }
+    return;
+  }
   verdict(state);
   // First successful load paints whatever page is showing; after that only the
   // state-driven pages need repainting on a poll.
@@ -1537,6 +1567,20 @@ function ready(img) {
   });
 }
 
+/**
+ * How fast the grain moves. The library's own default is 1.
+ *
+ * At 0.03 the fibres take most of a minute to travel their own width, which is
+ * the point: it should read as paper catching the light rather than as
+ * something on the page doing something. If you can tell it is moving without
+ * staring at it, it is too fast.
+ *
+ * Zero under `prefers-reduced-motion`, which also stops the render loop rather
+ * than merely slowing it — a full-viewport WebGL surface animating behind an
+ * operator console is exactly what that setting is asking us not to do.
+ */
+var DRIFT = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.03;
+
 async function mountPaper() {
   if (typeof PaperShaders === 'undefined' || !PaperShaders.ShaderMount) return;
   if (!PaperShaders.paperTextureFragmentShader) return;
@@ -1573,31 +1617,12 @@ async function mountPaper() {
       u_offsetY: 0,
       u_worldWidth: 0,
       u_worldHeight: 0
-    }, undefined, 0);
+    }, undefined, DRIFT);
   } catch (err) {
     console.warn('[tulip] paper texture did not mount:', err && err.message ? err.message : err);
   }
 }
 
-function mountShader() {
-  try {
-    if (typeof PaperShaders === 'undefined' || !PaperShaders.ShaderMount) return;
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    var host = el('shader');
-    var sizing = PaperShaders.defaultPatternSizing || {};
-    var uniforms = Object.assign({}, sizing, {
-      u_colorBack: [0.051, 0.051, 0.059, 1],
-      u_colors: [[0.13, 0.82, 0.93, 1], [0.08, 0.28, 0.36, 1], [0.05, 0.05, 0.06, 1]],
-      u_colorsCount: 3,
-      u_softness: 0.9,
-      u_intensity: 0.32,
-      u_noise: 0.28,
-      u_shape: 3,
-      u_scale: 0.7
-    });
-    new PaperShaders.ShaderMount(host, PaperShaders.grainGradientFragmentShader, uniforms, undefined, 0.14);
-  } catch (err) { /* a backdrop is never worth a broken page */ }
-}
 
 /**
  * Put the mark in the mobile bar.
@@ -1618,7 +1643,6 @@ buildNav();
 mountTopbarMark();
 wireNavToggle();
 void mountPaper();
-mountShader();
 go((location.hash || '#/overview').replace('#/', '') || 'overview');
 window.addEventListener('hashchange', function () { go((location.hash || '#/overview').replace('#/', '')); });
 
