@@ -1307,7 +1307,11 @@ async function renderSettings() {
   // again, and again, each one a real config write.
   var modeSeg = node('div', 'seg');
   modeSeg.setAttribute('role', 'group');
-  var modes = [['mention', 'Mention'], ['trigger', 'Trigger'], ['observe', 'Observe']];
+  // "Observe" is the config value and a bad label: it reads as passive, as though
+  // the agent watches and never speaks, when it is in fact the only mode where
+  // the agent gets to use its judgement. An operator read that label, moved off
+  // it, and then asked for the mode it describes.
+  var modes = [['mention', 'Mentions'], ['trigger', 'Triggers'], ['observe', 'Judgement']];
   function paintModes(active) {
     Array.prototype.forEach.call(modeSeg.children, function (btn, i) {
       btn.setAttribute('aria-pressed', modes[i][0] === active ? 'true' : 'false');
@@ -1329,7 +1333,7 @@ async function renderSettings() {
     modeSeg.appendChild(b);
   });
   paintModes(s.groups.replyTo);
-  field(groups, 'Group mode', 'When Tulip should speak up in a group. Mention: only when somebody @-mentions it by name — the quiet default. Trigger: only when a message contains one of the trigger words below. Observe: every message in the room is handed over, so it follows the whole conversation and joins in when it has something to say. Observe is the expensive one — every single message becomes a paid turn, whether or not anyone wanted a reply.', modeSeg);
+  field(groups, 'Group mode', 'When Tulip should speak up in a group.  ·  Mentions: only when somebody @-mentions it — a real WhatsApp mention, the kind you make by tapping the name, not the letters typed out — or replies to one of its messages. The quietest setting, and the one most likely to look broken, because typing “Juan” is not a mention.  ·  Triggers: the above, plus any message containing one of the trigger words below.  ·  Judgement: Tulip follows the whole conversation and decides for itself. It answers a question nobody else has answered when it actually knows, settles a factual disagreement, reacts to something funny — and stays silent for everything else, which is most things. This is the setting that behaves like a person in the room. It is also the expensive one: every message becomes a paid turn whether or not it replies, though messages arriving together are batched into one.', modeSeg);
   listField(groups, 'Trigger words', 'Only used when Group mode is set to Trigger. Ignored otherwise.',
     s.groups.triggers || [], 'e.g. juan',
     'A group message containing any of these is answered; everything else in the room is ignored. Upper and lower case do not matter, and a phrase with spaces works as well as a single word — “hey juan” is a fine trigger. Keep them distinctive: a word like “the” means Tulip answers almost everything.',
