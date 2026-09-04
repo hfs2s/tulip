@@ -42,7 +42,7 @@ import { claim } from './spend.js';
 import { imageCount, MAX_IMAGES_PER_PAGE, publishPage, scaffoldPage, usesKit, writePageImage } from './pages.js';
 import { remember } from './memory.js';
 import type { Limiter } from './ratelimit.js';
-import type { TurnRegistry } from './turns.js';
+import type { Turn, TurnRegistry } from './turns.js';
 import type { Config } from './config.js';
 import type { ChatRegistry } from './chats.js';
 import type { WhatsApp } from './whatsapp.js';
@@ -406,6 +406,30 @@ export class Outbox extends EventEmitter {
     });
   }
 
+  /**
+   * Fill a silence the agent is about to create.
+   *
+   * `turn.sends` is the exact question — has anything reached this person
+   * during this turn — so a turn that has already spoken needs nothing, and one
+   * that has not is about to go quiet for minutes.
+   *
+   * Deliberately not counted against `outboundPerTurn`. That allowance exists
+   * to bound what the agent can push through the reply channel; this is the
+   * bridge saying "wait" on its behalf, and it would be perverse for keeping
+   * somebody informed to cost the agent a reply.
+   */
+  private async holdingMessage(turn: Turn, text: string): Promise<void> {
+    if (turn.sends > 0) return;
+    try {
+      await this.deps.wa.sendText(turn.chatJid, text);
+      feed.outbound(turn.chatKey, 'text', text);
+      log('outbox.holding', { chatKey: turn.chatKey, why: 'a page is being built' });
+    } catch (err) {
+      // A holding message that fails must not fail the thing it announced.
+      log('outbox.holdingFailed', { err: String((err as Error).message) });
+    }
+  }
+
   private async answer(actionId: string, kind: 'search' | 'fetch' | 'chats' | 'page', outcome: ExaOutcome): Promise<void> {
     const result = ToolResult.safeParse({
       actionId,
@@ -614,6 +638,15 @@ export class Outbox extends EventEmitter {
       }
 
       case 'pageNew': {
+        // Say something before the silence starts, and say it from here rather
+        // than trusting the brief. The brief already asked for this — under
+        // "slow work", which the agent did not connect to building a page — and
+        // the result was minutes of nothing at the other end.
+        //
+        // Only when the turn has produced nothing yet, so this never talks over
+        // an agent that did the right thing on its own. After this the agent's
+        // own words take over.
+        await this.holdingMessage(turn, 'Working on a page for you — give me a few minutes and I will send the link.');
         const made = scaffoldPage(action.slug, action.title);
         await this.answer(action.id, 'page', made.ok
           ? {

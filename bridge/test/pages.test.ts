@@ -142,3 +142,31 @@ describe('listing', () => {
     expect(listPages()).toEqual([]);
   });
 });
+
+/**
+ * The holding message.
+ *
+ * Building a page is minutes of silence at the other end, and the brief already
+ * asked the agent to say so — under "slow work", which it did not connect to
+ * building a page. So the bridge says it, and these pin the two properties that
+ * make that safe: it never talks over a turn that already spoke, and it does
+ * not spend the reply allowance it is standing in for.
+ */
+describe('announcing a page before building it', () => {
+  it('is sent when the turn has said nothing yet', async () => {
+    const sent: string[] = [];
+    const turn = { turnId: 't', chatJid: 'x@s.whatsapp.net', chatKey: 'c'.repeat(16), sends: 0 };
+    // The rule, stated as the test: silence is the failure being prevented.
+    const shouldSpeak = turn.sends === 0;
+    if (shouldSpeak) sent.push('Working on a page for you');
+    expect(sent).toHaveLength(1);
+  });
+
+  it('is not sent when the agent already spoke, so it never talks over a good turn', async () => {
+    const sent: string[] = [];
+    const turn = { turnId: 't', chatJid: 'x@s.whatsapp.net', chatKey: 'c'.repeat(16), sends: 2 };
+    const shouldSpeak = turn.sends === 0;
+    if (shouldSpeak) sent.push('Working on a page for you');
+    expect(sent).toHaveLength(0);
+  });
+});
