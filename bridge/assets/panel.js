@@ -1064,11 +1064,11 @@ function contactsField(parent, values, onSave, ctx) {
       });
   });
 
-  var hint = 'People the agent may message first. It sees the name, never the number.';
+  var hint = 'The only people Tulip may write to out of the blue. It is shown the name and never the number, so it cannot message anyone who is not on this list — and being asked to, however convincingly, is not the same as being allowed to.';
   if (ctx.crossChat === false) {
     // The dependency was stated on the switch and not here, so a list built
     // with the switch off changed nothing and said nothing.
-    hint = 'People the agent may message first — inert right now, because "Message other chats" is off. It sees the name, never the number.';
+    hint = 'The only people Tulip may write to out of the blue — but nothing here does anything while “Message other chats” is off. It is shown the name and never the number.';
     summary.insertBefore(node('span', 'badge off', 'not in effect'), summary.firstChild);
   }
   field(parent, 'Contacts', hint, summary);
@@ -1119,12 +1119,15 @@ function numberControl(value, min, max, onSave, opts) {
   box.step = 'any';
   box.setAttribute('aria-label', 'exact value');
 
-  var out = format ? node('span', 'value', '') : null;
+  // Always present, even when there is no unit to show: it holds the third
+  // grid column open so the sliders all start and end in the same place down
+  // the card, rather than each row sizing itself.
+  var out = node('span', 'value unit', '');
 
   function paint(v) {
     range.value = String(Math.min(max, Math.max(min, v)));
     box.value = String(v);
-    if (out) out.textContent = format(v);
+    if (format) out.textContent = format(v);
     // Announced instead of the bare number, so "10m" reaches a screen reader
     // the same way it reaches the eye.
     range.setAttribute('aria-valuetext', format ? format(v) : String(v));
@@ -1143,14 +1146,14 @@ function numberControl(value, min, max, onSave, opts) {
 
   range.addEventListener('input', function () {
     box.value = range.value;
-    if (out) out.textContent = format(Number(range.value));
+    if (format) out.textContent = format(Number(range.value));
   });
   range.addEventListener('change', function () { commit(Number(range.value)); });
   box.addEventListener('change', function () { commit(Number(box.value)); });
 
   wrap.appendChild(range);
   wrap.appendChild(box);
-  if (out) wrap.appendChild(out);
+  wrap.appendChild(out);
   if (outOfRange) {
     wrap.appendChild(node('span', 'badge off', 'set to ' + value + ' in config.json, outside this range'));
   }
@@ -1163,15 +1166,31 @@ function freshSettings(pick) {
 }
 
 async function renderSettings() {
-  var p = head('settings', 'Settings', 'What this deployment does. Changes apply immediately and are written to config.json — every one is recorded in the log and the feed.'), mine = renderToken;
+  var p = head('settings', 'Settings', 'What this deployment does. Every change applies the moment you make it, is written to config.json, and is recorded in the log and the feed.'), mine = renderToken;
   var s;
   try { s = await api('/api/settings'); } catch (err) { p.appendChild(node('p', 'empty', err.message)); return; }
   if (stale(mine)) return;
 
+  // "Turn" is the unit half the settings below are counted in, and nobody
+  // arrives knowing it. Said once, at the top, rather than in nine hints.
+  var primer = node('div', 'card primer');
+  primer.appendChild(node('h2', null, 'Before you change anything'));
+  primer.appendChild(node('p', 'sub', 'Three words used throughout this page.'));
+  [['A turn', 'One reply the agent works on, from reading a message to finishing its answer. It is the expensive unit: each turn is a request to Claude that somebody pays for. Several messages that arrive together are answered in a single turn.'],
+   ['A chat', 'One conversation, with one person or one group. Each chat runs as its own separate session, and they cannot see each other.'],
+   ['Refused silently', 'When Tulip turns a message away it sends nothing back — no reply, no error. Telling an unknown number that this line is live is itself information, so refusals are invisible from the outside. If somebody says they messaged and got nothing, the Log page is where you find out why.']
+  ].forEach(function (row) {
+    var d = node('dl', 'define');
+    d.appendChild(node('dt', null, row[0]));
+    d.appendChild(node('dd', null, row[1]));
+    primer.appendChild(d);
+  });
+  p.appendChild(primer);
+
   // ── Audience ──────────────────────────────────────────────────────────────
   var audience = node('div', 'card');
   audience.appendChild(node('h2', null, 'Audience'));
-  audience.appendChild(node('p', 'sub', 'Who reaches the agent. Opening this to everyone makes every inbound message untrusted input to a process holding a shell — which is what the containment is for, but know that you are doing it.'));
+  audience.appendChild(node('p', 'sub', 'Who is allowed to message Tulip at all. This is the outermost gate: somebody not on it is refused before the agent is ever asked, and refused silently. Everything else on this page assumes a message got past here.'));
 
   // Off, with both lists empty, is a legal configuration that answers nobody —
   // and every refusal is silent by design, so from outside it is identical to
@@ -1183,20 +1202,20 @@ async function renderSettings() {
     audience.appendChild(shut);
   }
 
-  field(audience, 'Open to anyone', 'When on, anybody who messages this number is answered.',
+  field(audience, 'Open to anyone', 'Answer every number that writes in, with no list at all. Worth being deliberate about: it makes every message from a stranger an instruction reaching a machine that runs code. That is what the containment is built for, and it is still a different posture from a short list of people you know.',
     liveSwitch(s.audience.everyone, function (on, input) {
       saveSettings({ audience: { everyone: on } }, function () { input.checked = !on; });
     }));
 
-  listField(audience, 'Allowed numbers', 'Consulted when not open to everyone.',
+  listField(audience, 'Allowed numbers', 'The people who may write in. Only used when “Open to anyone” is off.',
     s.audience.numbers, 'e.g. 15551234567',
-    'Bare international digits — no plus sign, no spaces. Changes save as you make them.',
+    'Country code first, then the number, with nothing else: no plus sign, no spaces, no brackets. Written out as +1 (555) 123-4567, it goes in as 15551234567. Each change saves as you make it.',
     function (next, revert) { saveSettings({ audience: { numbers: next } }, revert); },
     null, { reload: function () { return freshSettings(function (f) { return f.audience.numbers; }); } });
 
-  listField(audience, 'Allowed linked ids', 'For senders WhatsApp delivers without a number.',
+  listField(audience, 'Allowed linked ids', 'For people WhatsApp hands over without a phone number. Add one only when a number alone is not working.',
     s.audience.jids, 'e.g. 111111111111111@lid',
-    'WhatsApp increasingly delivers a sender as a @lid with no phone number attached, and a numbers-only list can never match them. Copy the value from a refusal on the Log page.',
+    'Newer WhatsApp accounts often arrive as a “linked id” — something like 111111111111111@lid — with no phone number attached, and a list of numbers can never match one. If somebody on your allowed numbers is still being turned away, this is almost always why. Open the Log page, find the gate.deny line from when they tried, and copy the identifier it recorded. It is a copy, not a guess.',
     function (next, revert) { saveSettings({ audience: { jids: next } }, revert); },
     null, { reload: function () { return freshSettings(function (f) { return f.audience.jids; }); } });
   p.appendChild(audience);
@@ -1207,7 +1226,7 @@ async function renderSettings() {
   // looking for how to add another admin.
   var ops = node('div', 'card');
   ops.appendChild(node('h2', null, 'Operators'));
-  ops.appendChild(node('p', 'sub', 'Who may run ! commands from WhatsApp and who receives watchdog alerts. Never widened by "open to anyone" — that would hand a stranger the ability to hold delivery and read state.'));
+  ops.appendChild(node('p', 'sub', 'You, essentially — the numbers that can control Tulip from WhatsApp rather than just talk to it. Send !help from one of them for the list; !hold stops delivery, !block stops one conversation, !status reports what is happening. These commands are handled by the bridge before the agent sees anything, which is the point: you need them precisely when the agent is the problem. This list is never widened by “Open to anyone”.'));
 
   if (s.operators.numbers.length === 0 && s.operators.jids.length === 0) {
     var noOps = node('div', 'warnbar');
@@ -1218,18 +1237,18 @@ async function renderSettings() {
 
   var lastOperator = 'Remove the last operator?\n\nYou will have no way to hold delivery, block a chat, or receive watchdog alerts from your phone until you add one back.';
 
-  listField(ops, 'Operator numbers', 'Bare international digits.',
+  listField(ops, 'Operator numbers', 'Your own number, in the same bare-digits form as above.',
     s.operators.numbers, 'bare digits',
-    'Never widened by "open to anyone" — that would hand a stranger the ability to hold delivery and read state.',
+    'These numbers can hold delivery, block a conversation, reset a chat and ask for status, and they are the ones messaged when something goes wrong. Keep at least one, and keep it a number you actually carry.',
     function (next, revert) { saveSettings({ operators: { numbers: next } }, revert); },
     null, {
       confirmLast: lastOperator,
       reload: function () { return freshSettings(function (f) { return f.operators.numbers; }); },
     });
 
-  listField(ops, 'Operator linked ids', 'The same people, as WhatsApp actually delivers them.',
+  listField(ops, 'Operator linked ids', 'The same people, in the form WhatsApp may actually deliver them as.',
     s.operators.jids, 'digits or @lid',
-    'An operator whose commands are silently ignored has no way into their own system, so this matters more than the numbers list.',
+    'Same story as allowed linked ids, and it matters more here: an operator whose commands are silently ignored has no way into their own system. If a ! command does nothing, check the Log for the identifier your message actually arrived with and add it.',
     function (next, revert) { saveSettings({ operators: { jids: next } }, revert); },
     null, {
       confirmLast: lastOperator,
@@ -1240,8 +1259,8 @@ async function renderSettings() {
   // ── Groups ────────────────────────────────────────────────────────────────
   var groups = node('div', 'card');
   groups.appendChild(node('h2', null, 'Groups'));
-  groups.appendChild(node('p', 'sub', 'Groups do not consult the allow list — being in the room is the consent signal. Enabling them widens who can reach the agent independently of everything above.'));
-  field(groups, 'Answer in groups', null,
+  groups.appendChild(node('p', 'sub', 'Group chats work differently from the rest of this page: they do not consult the Audience list. Whoever added Tulip to the room decided who can reach it, so anyone in that group can — including people you have never allowed individually. Turning this on widens the audience independently of everything above.'));
+  field(groups, 'Answer in groups', 'Whether Tulip pays attention to group chats at all. Off means group messages are ignored entirely, however Tulip was added to the room.',
     liveSwitch(s.groups.enabled, function (on, input) {
       saveSettings({ groups: { enabled: on } }, function () { input.checked = !on; });
     }));
@@ -1275,10 +1294,10 @@ async function renderSettings() {
     modeSeg.appendChild(b);
   });
   paintModes(s.groups.replyTo);
-  field(groups, 'Group mode', 'observe delivers every message so the agent can react; it is the expensive one — every message becomes a model call.', modeSeg);
-  listField(groups, 'Trigger words', 'Used only in trigger mode. Phrases are allowed.',
+  field(groups, 'Group mode', 'When Tulip should speak up in a group. Mention: only when somebody @-mentions it by name — the quiet default. Trigger: only when a message contains one of the trigger words below. Observe: every message in the room is handed over, so it follows the whole conversation and joins in when it has something to say. Observe is the expensive one — every single message becomes a paid turn, whether or not anyone wanted a reply.', modeSeg);
+  listField(groups, 'Trigger words', 'Only used when Group mode is set to Trigger. Ignored otherwise.',
     s.groups.triggers || [], 'e.g. juan',
-    'A group message containing one of these is answered. Matching is case-insensitive, and a phrase with spaces is fine.',
+    'A group message containing any of these is answered; everything else in the room is ignored. Upper and lower case do not matter, and a phrase with spaces works as well as a single word — “hey juan” is a fine trigger. Keep them distinctive: a word like “the” means Tulip answers almost everything.',
     function (next, revert) { saveSettings({ groups: { triggers: next } }, revert); },
     function (v) {
       // Collapse whitespace, but refuse an over-long phrase rather than
@@ -1294,8 +1313,8 @@ async function renderSettings() {
   // ── Reach ─────────────────────────────────────────────────────────────────
   var reach = node('div', 'card');
   reach.appendChild(node('h2', null, 'Reach'));
-  reach.appendChild(node('p', 'sub', 'By default a reply can only go to the person being answered, and that is enforced outside the agent rather than asked of it.'));
-  field(reach, 'Message other chats', 'Lets the agent write to the contacts below, and reply onward to chats it already knows. It still cannot read another conversation — sessions are separate — but it can carry this one into another. See THREAT-MODEL T4.',
+  reach.appendChild(node('p', 'sub', 'Whether Tulip can start a conversation, or only ever answer one. By default a reply can go nowhere except back to the person who just wrote — the agent is never told who it is talking to, so it cannot name a different destination even if somebody talks it into trying. This card is where you relax that.'));
+  field(reach, 'Message other chats', 'Lets Tulip write to the contacts below, and pass something on to a conversation it already knows. It still cannot read anyone else’s chat — every conversation is a separate session — but it can carry what it was told here into somewhere else. Worth thinking about before turning on: anything somebody tells Tulip can then be repeated elsewhere, and the person who said it will not know.',
     liveSwitch(s.agent && s.agent.crossChat, function (on, input) {
       saveSettings({ agent: { crossChat: on } }, function () { input.checked = !on; });
     }));
@@ -1313,22 +1332,32 @@ async function renderSettings() {
   // ── Limits ────────────────────────────────────────────────────────────────
   var limits = node('div', 'card');
   limits.appendChild(node('h2', null, 'Limits'));
-  limits.appendChild(node('p', 'sub', 'Turns are the expensive unit — each one is a model call somebody pays for.'));
+  limits.appendChild(node('p', 'sub', 'Ceilings on what one person can make Tulip do. These decide what gets refused — they are about volume and cost, never about who is allowed to write in. That is Audience, above. Somebody over a limit is refused silently, and their next message is accepted once they are back under it.'));
   // Bounds match the schema in panel-api.ts exactly. A narrower slider looks
   // like guidance and behaves like a trap: the input clamps a larger configured
   // value to its own maximum, and the first nudge writes the clamp.
-  [['messagesPerHour', 'Messages per hour', 1, 1000, null, 1],
-   ['burst', 'Burst', 1, 50, null, 1],
-   ['turnsPerDay', 'Turns per day', 1, 10000, null, 10],
-   ['outboundPerTurn', 'Sends per turn', 1, 100, null, 1],
-   ['outboundPerChatPerHour', 'Sends per chat per hour', 1, 1000, null, 1],
-   ['maxInboundChars', 'Longest message accepted', 200, 100000, null, 100],
-   ['newSendersPerHour', 'New senders per hour', 1, 1000, null, 1],
-   ['maxMediaPerMessage', 'Attachments per message', 0, 10, null, 1],
-   ['maxMediaBytes', 'Largest attachment fetched', 1024, 104857600, bytes, 262144],
-   ['turnTimeoutMs', 'Abandon a turn after', 30000, 3600000, duration, 30000]
+  [['messagesPerHour', 'Messages per hour, per person', 1, 1000, null, 1,
+    'The steady rate one person may keep up. Beyond it their messages are refused until the hour has moved on.'],
+   ['burst', 'Messages back to back', 1, 50, null, 1,
+    'How many one person may send in quick succession before the hourly rate starts to bite. People type in bursts of three or four short lines; this is what stops normal typing looking like an attack.'],
+   ['turnsPerDay', 'Turns per day, per person', 1, 10000, null, 10,
+    'The most one person can cost you in a day. This is the money setting: each turn is a paid request to Claude, so it caps spend per person more directly than anything else here.'],
+   ['newSendersPerHour', 'New people per hour', 1, 1000, null, 1,
+    'How many numbers that have never written before are taken on in an hour, counted across everyone. This is what blunts a flood of throwaway numbers; it does nothing to people already talking to Tulip.'],
+   ['outboundPerTurn', 'Replies Tulip may send per turn', 1, 100, null, 1,
+    'One turn can produce several messages — a sentence, then a photo, then a follow-up. This caps how many. It bounds an agent that has been talked into spamming somebody exactly as it bounds a chatty one.'],
+   ['outboundPerChatPerHour', 'Replies per conversation, per hour', 1, 1000, null, 1,
+    'The same ceiling measured over an hour rather than a turn, so a run of turns cannot add up to a flood.'],
+   ['maxInboundChars', 'Longest message read', 200, 100000, null, 100,
+    'Anything longer is shortened to this before the agent sees it — not refused. A long question is not an attack, and the person still gets an answer.'],
+   ['maxMediaPerMessage', 'Attachments taken per message', 0, 10, null, 1,
+    'How many photos, files or voice notes are accepted from a single message. Any beyond this are ignored. Set it to 0 to take none at all.'],
+   ['maxMediaBytes', 'Largest attachment accepted', 1024, 104857600, bytes, 262144,
+    'Checked before anything is downloaded, so an oversized file is never fetched — it costs no bandwidth and never touches the disk.'],
+   ['turnTimeoutMs', 'Give up on a turn after', 30000, 3600000, duration, 30000,
+    'How long the agent gets to finish one reply before that turn is abandoned. It is a deadlock guard rather than a speed setting: without it, one stuck reply holds every other conversation shut behind it. Too short and slow answers get cut off.']
   ].forEach(function (row) {
-    field(limits, row[1], row[0] === 'maxMediaBytes' ? 'Checked before download, so an oversized attachment is never fetched.' : null,
+    field(limits, row[1], row[6],
       numberControl(s.limits[row[0]], row[2], row[3], function (v, revert) {
         var patch = { limits: {} };
         patch.limits[row[0]] = v;
@@ -1340,10 +1369,13 @@ async function renderSettings() {
   // ── Delivery ──────────────────────────────────────────────────────────────
   var delivery = node('div', 'card');
   delivery.appendChild(node('h2', null, 'Delivery'));
-  delivery.appendChild(node('p', 'sub', 'How messages are gathered before the agent sees them.'));
-  [['debounceMs', 'Wait before handing over', 0, 60000, 'Collects a burst of quick messages into one prompt.', duration, 250],
-   ['maxBatch', 'Messages per turn', 1, 50, 'The rest wait for this chat’s next turn in the rotation.', null, 1],
-   ['stuckAfterMs', 'Warn when unanswered for', 0, 3600000, 'How long anybody may go unanswered before your operator numbers are messaged. 0 turns the warning off.', duration, 30000]
+  delivery.appendChild(node('p', 'sub', 'Timing rather than permission. Everything here happens after a message has been accepted, and decides how it is gathered up and handed over. Nothing on this card can refuse anybody — if messages are being turned away, the answer is in Audience or Limits.'));
+  [['debounceMs', 'Pause before replying', 0, 60000,
+    'When a message arrives, wait this long to see whether more follow, then answer them together. People send three short lines where they meant one sentence — without this they get three separate replies, and pay for three turns. Longer feels more considered; shorter feels quicker.', duration, 250],
+   ['maxBatch', 'Messages handed over at once', 1, 50,
+    'The most messages the agent is given in a single turn. Anything past this waits for that conversation’s next turn, which is what stops one very busy chat starving everyone else.', null, 1],
+   ['stuckAfterMs', 'Warn you if nobody has been answered for', 0, 3600000,
+    'If anyone has been waiting longer than this, your operator numbers get a WhatsApp message. It is the one alarm that does not depend on the agent noticing its own failure — a session can look perfectly healthy while answering nobody. Set it to 0 to turn the warning off.', duration, 30000]
   ].forEach(function (row) {
     field(delivery, row[1], row[4], numberControl(s.delivery[row[0]], row[2], row[3], function (v, revert) {
       var patch = { delivery: {} };
@@ -1356,12 +1388,12 @@ async function renderSettings() {
   // ── Capabilities ──────────────────────────────────────────────────────────
   var tools = node('div', 'card');
   tools.appendChild(node('h2', null, 'Capabilities'));
-  tools.appendChild(node('p', 'sub', 'Two separate things: whether a credential exists, and whether you permit the agent to use it. A feature needs both. Keys live in the environment and changing one needs a container restart; these switches take effect immediately.'));
+  tools.appendChild(node('p', 'sub', 'Extra things Tulip can do beyond sending words. Each one needs two separate permissions: an account key must exist, and you must allow its use. A switch marked “no key set” will not do anything until somebody adds the key — keys live outside this panel and changing one needs the container restarted, while these switches take effect immediately. Tulip itself has no internet connection: it asks, and the bridge performs the request on its behalf, so no key is ever inside the machine running the agent.'));
 
-  [['search', 'Web search', 'Exa. The agent asks; the bridge performs. Read THREAT-MODEL T6 — a prepared page is an injection vector with no sender to block.'],
-   ['gifs', 'GIFs', 'Giphy, rating ' + s.tools.gifRating + '.'],
-   ['images', 'Pictures', 'MiniMax image generation. Paid, per message.'],
-   ['voice', 'Voice notes', 'MiniMax speech. Falls back to text when it fails.']
+  [['search', 'Look things up on the web', 'Lets Tulip search the web (through Exa) when it needs a fact it does not have. The thing to know: a web page can be written specifically to be read by an AI and to contain instructions aimed at it. Unlike a message, there is no sender behind it you can block, so this is the widest door on this card.'],
+   ['gifs', 'Send GIFs', 'Lets Tulip reply with a GIF from Giphy, filtered at rating ' + s.tools.gifRating + '. Free, and the least consequential switch here.'],
+   ['images', 'Generate pictures', 'Lets Tulip make an image and send it. Every picture is billed, so this is the switch most able to cost you money quickly — the per-turn and per-hour reply limits above are what bound it.'],
+   ['voice', 'Send voice notes', 'Lets Tulip answer with a spoken voice note instead of text. Also billed per use. If the speech fails, the same words are sent as text, so nobody loses their reply.']
   ].forEach(function (row) {
     var keyed = s.tools.keyed[row[0]];
     var wrap = node('div');
@@ -1377,8 +1409,8 @@ async function renderSettings() {
     field(tools, row[1], row[2] + (keyed ? '' : ' Currently unavailable: no key is configured.'), wrap);
   });
 
-  field(tools, 'Model', 'Set by TULIP_MODEL in the environment; a change needs a container restart.', node('span', 'value', s.model.name));
-  field(tools, 'Provider', 'Where inference goes. Also environment.', node('span', 'value', s.model.provider));
+  field(tools, 'Model', 'Which Claude model answers. Read-only here — it is set outside the panel, and changing it needs the container restarted.', node('span', 'value', s.model.name));
+  field(tools, 'Provider', 'Whose servers those requests go to. Also read-only, and also set outside the panel.', node('span', 'value', s.model.provider));
   p.appendChild(tools);
 }
 

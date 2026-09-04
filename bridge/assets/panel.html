@@ -199,7 +199,14 @@
   /* A slider and a box. The slider makes the range legible; the box is the one
      that can express an exact value, which for the millisecond fields the
      slider cannot — an hour of range across 170 pixels. */
-  .numeric{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+  /* A grid rather than a flex row, so every slider on a card is exactly the
+     same length and they line up down the column. A flex row let each control
+     size itself, which made ten sliders ten different lengths. */
+  .numeric{display:grid;grid-template-columns:1fr 9ch 4.5ch;
+           align-items:center;gap:10px;width:290px}
+  .numeric .range{width:100%}
+  .numeric .unit{text-align:left}
+  .numeric .badge{grid-column:1/-1;justify-self:start;margin-top:2px}
   .numbox{font:inherit;font-family:var(--mono);font-size:12.5px;color:var(--ink);
           background:var(--raise);border:1px solid var(--line);border-radius:8px;
           padding:6px 8px;width:9ch;text-align:right}
@@ -210,7 +217,18 @@
   .field-name{display:block}
   label.field-name{cursor:pointer}
   .field:last-child{border-bottom:0}
-  .field .hint{font-size:12.5px;color:var(--faint);margin-top:2px;max-width:58ch}
+  .field .hint{font-size:12.5px;line-height:1.5;color:var(--faint);margin-top:3px;max-width:62ch}
+
+  /* The vocabulary card. A definition list, because that is what it is: the
+     three words the rest of the page is written in. */
+  .primer .define{display:grid;grid-template-columns:14ch 1fr;gap:14px;
+                  padding:11px 0;border-bottom:1px solid var(--line-soft)}
+  .primer .define:last-child{border-bottom:0;padding-bottom:0}
+  .primer dt{color:var(--ink);font-weight:500}
+  .primer dd{margin:0;font-size:12.5px;line-height:1.55;color:var(--faint);max-width:62ch}
+  @media (max-width:900px){
+    .primer .define{grid-template-columns:1fr;gap:4px}
+  }
   .value{font-family:var(--mono);font-size:12.5px;color:var(--dim)}
 
   .badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;
@@ -349,8 +367,7 @@
        not fit in 360px. Stack them and let the controls have the width. */
     .field{grid-template-columns:1fr;gap:10px}
     .field > :last-child{justify-self:start}
-    .numeric{justify-content:flex-start;width:100%}
-    .range{flex:1 1 auto;width:auto;min-width:120px}
+    .numeric{width:100%}
     .adder{flex-wrap:wrap}
     .adder input{flex:1 1 100%}
 
