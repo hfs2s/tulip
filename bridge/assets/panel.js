@@ -214,10 +214,47 @@ function verdict(s) {
   h.className = stopped ? 'stopped' : '';
   el('lede').textContent = lede;
   el('whoami').textContent = s.whatsapp.name || 'not paired';
+  agentStatus(s);
   el('railfoot').textContent = (s.audience.everyone ? 'Open to anyone' : 'Allow list only')
     + (s.audience.groups ? ' · groups ' + s.audience.groupMode : ' · groups off');
   var badge = el('navChats');
   if (badge) badge.textContent = String(s.chats.length);
+}
+
+/**
+ * Whether the agent is there, and what it is doing.
+ *
+ * Read in the order that a person cares about, which is not the order the
+ * fields arrive in: the states that mean "nobody is being answered" come first,
+ * and the difference between them matters. A silent agent is a container that
+ * needs restarting; a fatal state is a session that accepts input, looks
+ * perfectly healthy, and fails every turn instantly — the failure this whole
+ * deployment learned the expensive way, so it does not get to share a colour
+ * with "idle".
+ *
+ * Holding is amber rather than red because nothing is broken: somebody turned
+ * delivery off on purpose, and messages are queueing safely.
+ */
+function agentStatus(s) {
+  var dot = el('agentDot');
+  var label = el('agentState');
+  if (!dot || !label) return;
+
+  var state;
+  if (!s.whatsapp.connected) state = ['down', 'WhatsApp disconnected'];
+  else if (s.agent.fatal) state = ['down', 'needs you'];
+  else if (!s.agent.reporting) state = ['down', 'offline'];
+  else if (s.hold.active) state = ['busy', 'holding'];
+  else if (s.agent.busyTurn || s.queue.inFlight) state = ['busy', 'replying'];
+  else state = ['live', 'online'];
+
+  dot.className = 'dot ' + state[0];
+  label.textContent = state[1];
+  // The colour is the glance; the title is what makes it answerable to anyone
+  // who cannot use colour to tell three states apart.
+  dot.setAttribute('title', 'Agent: ' + state[1]);
+  dot.setAttribute('role', 'img');
+  dot.setAttribute('aria-label', 'Agent status: ' + state[1]);
 }
 
 // ── Pages ───────────────────────────────────────────────────────────────────
