@@ -47,6 +47,14 @@
      inside `.page-wrap`, so it stops at the rail's edge and scrolls with the
      page instead of sitting still behind it. */
   #paper{position:absolute;inset:0;z-index:0;pointer-events:none}
+  /* Two layers, because they do different jobs. `flow` is the neuro field and
+     is the only thing moving; `grain` is the paper texture over the top, which
+     is what stops a slow gradient reading as a screen artefact. Opacities are
+     the tuning knob — the shaders are configured near-black already, and these
+     take them the rest of the way down. */
+  #paper > div{position:absolute;inset:0}
+  #paper-flow{opacity:.5}
+  #paper-grain{opacity:.85}
   #paper canvas{display:block;width:100%;height:100%}
   /* Content sits above the grain. */
   .rail,main{position:relative}
@@ -473,7 +481,10 @@
 
   <main>
     <div class="page-wrap">
-      <div id="paper" aria-hidden="true"></div>
+      <div id="paper" aria-hidden="true">
+        <div id="paper-flow"></div>
+        <div id="paper-grain"></div>
+      </div>
       <section class="page" id="p-overview"></section>
       <section class="page" id="p-messages"></section>
       <section class="page" id="p-chats"></section>

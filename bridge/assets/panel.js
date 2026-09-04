@@ -1553,12 +1553,55 @@ function ready(img) {
  * than merely slowing it — a full-viewport WebGL surface animating behind an
  * operator console is exactly what that setting is asking us not to do.
  */
-var DRIFT = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.03;
+/**
+ * How fast the field moves, against the library's default of 1.
+ *
+ * The grain does not move at all: two animated layers is twice the GPU for an
+ * effect one of them already carries, and shimmering grain reads as a fault
+ * rather than as motion.
+ *
+ * Zero under `prefers-reduced-motion`, which stops the render loop rather than
+ * merely slowing it — a full-column WebGL surface animating behind an operator
+ * console is exactly what that setting is asking us not to do.
+ */
+var FLOW = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.28;
+var DRIFT = 0;
+
+/**
+ * The moving layer.
+ *
+ * Neuro noise rather than the paper texture, because the paper shader's motion
+ * is grain shimmering in place — at any speed low enough not to distract, it is
+ * invisible, and at a speed you can see it looks like a fault. This one flows,
+ * so it reads as movement at a speed slow enough to ignore.
+ *
+ * Colours sit a few percent above the page's own ground with the faintest cool
+ * cast, so it reads as depth rather than as a gradient somebody chose. The
+ * brightness and contrast are held low for the same reason; `#paper-flow`'s
+ * opacity is the knob to reach for if it wants to be fainter still.
+ */
+function mountFlow() {
+  if (typeof PaperShaders === 'undefined' || !PaperShaders.ShaderMount) return;
+  if (!PaperShaders.neuroNoiseFragmentShader) return;
+  var host = el('paper-flow');
+  if (!host) return;
+  try {
+    new PaperShaders.ShaderMount(host, PaperShaders.neuroNoiseFragmentShader, {
+      u_colorBack: [0.051, 0.051, 0.059, 1],
+      u_colorMid: [0.075, 0.086, 0.098, 1],
+      u_colorFront: [0.106, 0.133, 0.149, 1],
+      u_brightness: 0.32,
+      u_contrast: 0.34
+    }, undefined, FLOW);
+  } catch (err) {
+    console.warn('[tulip] neuro noise did not mount:', err && err.message ? err.message : err);
+  }
+}
 
 async function mountPaper() {
   if (typeof PaperShaders === 'undefined' || !PaperShaders.ShaderMount) return;
   if (!PaperShaders.paperTextureFragmentShader) return;
-  var host = el('paper');
+  var host = el('paper-grain');
   if (!host) return;
 
   try {
@@ -1616,6 +1659,7 @@ function mountTopbarMark() {
 buildNav();
 mountTopbarMark();
 wireNavToggle();
+mountFlow();
 void mountPaper();
 go((location.hash || '#/overview').replace('#/', '') || 'overview');
 window.addEventListener('hashchange', function () { go((location.hash || '#/overview').replace('#/', '')); });
