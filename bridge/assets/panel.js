@@ -95,7 +95,7 @@ var ICONS = {
 };
 var PAGES = [
   ['overview', 'Overview'], ['messages', 'Messages'], ['chats', 'Chats'], ['media', 'Media'],
-  ['tools', 'Tools'], ['terminal', 'Terminal'], ['settings', 'Settings'], ['log', 'Log']
+  ['terminal', 'Terminal'], ['settings', 'Settings'], ['log', 'Log']
 ];
 
 function buildNav() {
@@ -626,27 +626,6 @@ function binButton(m) {
     });
   });
   return b;
-}
-
-function renderTools() {
-  var p = head('tools', 'Tools', 'Maintenance actions. None of these change who the agent answers — that lives in a file on disk.');
-  var card = node('div', 'card');
-  [['pump', 'Kick delivery', 'Re-runs the delivery loop if something looks stuck.', ''],
-   ['hold', 'Hold delivery', 'Stop handing messages over. They keep arriving and are recorded.', ''],
-   ['release', 'Resume delivery', 'Hand over everything that queued while held.', '']
-  ].forEach(function (t) {
-    var row = node('div', 'toolrow');
-    var left = node('div');
-    left.appendChild(node('div', null, t[1]));
-    left.appendChild(node('div', 'hint', t[2]));
-    row.appendChild(left);
-    var b = node('button', 'sm', 'Run');
-    b.type = 'button';
-    b.addEventListener('click', function () { act(t[0]); });
-    row.appendChild(b);
-    card.appendChild(row);
-  });
-  p.appendChild(card);
 }
 
 // ── Terminal ────────────────────────────────────────────────────────────────
@@ -1574,7 +1553,6 @@ function render() {
   else if (route === 'messages') renderMessages();
   else if (route === 'chats') renderChats(state);
   else if (route === 'media') renderMedia();
-  else if (route === 'tools') renderTools();
   else if (route === 'terminal') renderTerminal();
   else if (route === 'settings') renderSettings();
   else if (route === 'log') renderLog();

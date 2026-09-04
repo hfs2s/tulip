@@ -354,12 +354,39 @@ export class Dispatcher extends EventEmitter {
 
   private finishTurn(why: string): void {
     if (!this.inFlight) return;
-    const { turnId, chatKey } = this.inFlight;
+    const { turnId, chatKey, startedAt } = this.inFlight;
     this.deps.turns.close(turnId, Date.now());
     retireBatch(turnId);
     this.inFlight = null;
     log('turn.end', { chatKey, why });
+    this.noteSilentTurn(chatKey, startedAt);
     this.emit('turnEnd', { chatKey, turnId });
+  }
+
+  /**
+   * A turn that answered nobody.
+   *
+   * Staying quiet is a real choice in a group — most messages there are not for
+   * the agent, and the persona is told to use that. In a direct message it is
+   * not: somebody wrote, the gate accepted it, the bridge delivered it, and
+   * nothing came back. From their side that is indistinguishable from the
+   * number being dead, which is the failure this deployment produces most often
+   * and notices least.
+   *
+   * Recorded rather than repaired. Sending an apology on the agent's behalf
+   * would put words in its mouth and might talk over a reply that was merely
+   * slow. What this buys is that the Messages page shows a reason where there
+   * was previously a gap nobody could account for.
+   */
+  private noteSilentTurn(chatKey: string, startedAt: number): void {
+    const record = this.deps.chats.get(chatKey);
+    if (record?.isGroup === true) return;
+    const answered = feed
+      .recent(200)
+      .some((e) => e.chatKey === chatKey && e.kind === 'out' && e.ts >= startedAt);
+    if (answered) return;
+    log('turn.silent', { chatKey, ms: Date.now() - startedAt });
+    feed.event('turn.silent', 'a turn ended without answering a direct message');
   }
 
   /** Open a turn and publish it to the inbound volume. */
