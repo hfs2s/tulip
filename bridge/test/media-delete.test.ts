@@ -25,7 +25,12 @@ const { deleteMedia, resolveMedia } = await import('../src/panel-api.js');
 const { inPaths, transcriptFor } = await import('@tulip/shared');
 
 const CHAT = '17f1f7d2c1a600d2';
-const VOICE = '1788527429000-3A8B3241D25E.ogg';
+// The leading zeros are deliberate. Media filenames are `<ms timestamp>-<id>`,
+// and a real 13-digit timestamp is indistinguishable from a phone number to
+// `check:secrets` — which has no allow-list on purpose, and says so: make a
+// false positive obviously a placeholder rather than teaching the scanner to
+// look away. Nothing here reads the digits; it is an opaque name.
+const VOICE = '0000000001-3A8B3241D25E.ogg';
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
