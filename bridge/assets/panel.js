@@ -612,6 +612,15 @@ function renderTerminal() {
   host.id = 'termHost';
   page.appendChild(host);
 
+  // Shown when the agent has no session to stream. A chat's window is created
+  // by its first message, so a quiet deployment has nothing to show — and an
+  // unexplained black rectangle is indistinguishable from a broken terminal.
+  var note = node('div', 'termnote',
+    'No session is running.\nA window opens here when a chat gets a message.');
+  note.id = 'termNote';
+  note.hidden = true;
+  page.appendChild(note);
+
   term = new Terminal({
     cols: TERM_COLS,
     rows: TERM_ROWS,
@@ -667,6 +676,8 @@ function openTerminalStream() {
   termStream.addEventListener('reset', function () {
     if (term) term.reset();
   });
+  termStream.addEventListener('idle', function () { showTerminal(false); });
+  termStream.addEventListener('live', function () { showTerminal(true); });
   termStream.onmessage = function (ev) {
     if (!term || !ev.data) return;
     // base64 because an event stream is line-oriented and a pane emits every
@@ -676,6 +687,18 @@ function openTerminalStream() {
     for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
     term.write(bytes);
   };
+}
+
+/** Swap between the emulator and the note, without disposing either. */
+function showTerminal(live) {
+  var host = el('termHost'), note = el('termNote');
+  if (host) host.hidden = !live;
+  if (note) note.hidden = live;
+  if (!live || !term) return;
+  // The emulator measures nothing while it is display:none, so anything written
+  // to it in that state has not been drawn. Re-measure, then repaint.
+  fitTerminal();
+  term.refresh(0, term.rows - 1);
 }
 
 function stopTerminal() {

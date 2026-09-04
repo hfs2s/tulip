@@ -293,7 +293,8 @@
   .termhost{flex:1;min-width:0;min-height:0;background:#000;overflow:auto;padding:8px 10px}
   .termhost .xterm{height:100%}
   .termnote{margin:auto;color:var(--faint);font-family:var(--mono);font-size:13px;
-            text-align:center;padding:24px;line-height:1.7}
+            text-align:center;padding:24px;line-height:1.7;white-space:pre-line}
+  .termnote[hidden],.termhost[hidden]{display:none}
   .warnbar{border:1px solid var(--warn);color:var(--warn);border-radius:10px;
            padding:11px 14px;font-size:13px;margin-bottom:16px}
   .logline{font-family:var(--mono);font-size:12px;padding:5px 0;

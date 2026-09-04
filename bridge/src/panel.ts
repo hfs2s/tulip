@@ -455,6 +455,21 @@ export function startPanel(deps: ApiDeps): Server | null {
           terminalWatch(null, TERMINAL_WATCH_S);
           const readPane = paneReader();
 
+          // Whether there is a session to show at all. A chat's window is
+          // created on its first message, so a quiet deployment has no tmux
+          // server and nothing to stream — which without this is an empty black
+          // rectangle and no way to tell it from a terminal that has broken.
+          let wasIdle: boolean | null = null;
+          const announce = (): void => {
+            const screen = terminalScreen() as { window: string | null };
+            const idle = screen.window === null;
+            if (idle === wasIdle) return;
+            wasIdle = idle;
+            res.write(`event: ${idle ? 'idle' : 'live'}\ndata: \n\n`);
+          };
+          announce();
+          const presence = setInterval(announce, 1000);
+
           const refresh = setInterval(() => terminalWatch(null, TERMINAL_WATCH_S), TERMINAL_REFRESH_MS);
           const tick = setInterval(() => {
             const { reset, bytes } = readPane();
@@ -466,6 +481,7 @@ export function startPanel(deps: ApiDeps): Server | null {
           const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
 
           req.on('close', () => {
+            clearInterval(presence);
             clearInterval(refresh);
             clearInterval(tick);
             clearInterval(ping);
