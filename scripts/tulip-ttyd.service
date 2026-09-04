@@ -14,10 +14,17 @@ Type=exec
 ExecStart=/home/leonora/Repositories/tulip/scripts/tulip-ttyd.sh
 Restart=always
 RestartSec=3
+# ttyd creates its socket owned by whoever runs it — root here, because
+# `docker exec` needs to be — and has no flag to say otherwise. The bridge
+# connects as uid 1000, and connecting to a UNIX socket needs write permission
+# on the socket itself, so hand it over once it exists. The 0700 directory the
+# script creates is what keeps this from being a shell anyone on the box can
+# reach.
+ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do [ -S /run/tulip/ttyd.sock ] && break; sleep 0.2; done; chown 1000:1000 /run/tulip/ttyd.sock && chmod 0600 /run/tulip/ttyd.sock'
 # The socket lives under /run and must not survive a reboot: a stale socket file
-# is indistinguishable from a live one until something tries to connect.
-RuntimeDirectory=tulip
-RuntimeDirectoryMode=0700
+# is indistinguishable from a live one until something tries to connect. The
+# directory is created by the script rather than by RuntimeDirectory=, which
+# would own it as root and leave uid 1000 unable to traverse it.
 
 [Install]
 WantedBy=multi-user.target
