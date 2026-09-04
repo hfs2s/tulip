@@ -39,7 +39,7 @@ import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
 import { retainOutbound } from './mediaStore.js';
 import { claim } from './spend.js';
-import { imageCount, MAX_IMAGES_PER_PAGE, publishPage, writePageImage } from './pages.js';
+import { imageCount, MAX_IMAGES_PER_PAGE, publishPage, scaffoldPage, usesKit, writePageImage } from './pages.js';
 import { remember } from './memory.js';
 import type { Limiter } from './ratelimit.js';
 import type { TurnRegistry } from './turns.js';
@@ -613,12 +613,27 @@ export class Outbox extends EventEmitter {
         break;
       }
 
+      case 'pageNew': {
+        const made = scaffoldPage(action.slug, action.title);
+        await this.answer(action.id, 'page', made.ok
+          ? { ok: true, items: [{ title: action.slug, url: made.url, published: null, text: '' }] }
+          : { ok: false, error: made.error });
+        break;
+      }
+
       case 'page': {
         // The address comes back as an ordinary result item, so the answer file
         // keeps one shape. A page has no text to carry — the point is the URL.
         const published = publishPage(action.slug);
+        // Published either way: a page that opted out of the house style is a
+        // choice the agent is allowed to make, and refusing would turn a look
+        // into a gate. Saying so is enough, and it is said where it will be
+        // read rather than in a log nobody opens.
+        const note = published.ok && !usesKit(action.slug)
+          ? ' (this page does not use the house style — link /_kit/kit.css unless you meant to)'
+          : '';
         await this.answer(action.id, 'page', published.ok
-          ? { ok: true, items: [{ title: action.slug, url: published.url, published: null, text: '' }] }
+          ? { ok: true, items: [{ title: action.slug + note, url: published.url, published: null, text: '' }] }
           : { ok: false, error: published.error });
         break;
       }

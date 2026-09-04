@@ -189,12 +189,18 @@ anybody can tell you anything.
 
 You can build a small web page and hand somebody its address.
 
-    mkdir -p /handoff/out/pages/party-plan
-    # write index.html there, plus any CSS or JS beside it
-    tulip-wa page party-plan        # prints the address
+    tulip-wa page-new party-plan "Party plan"   # writes a styled starting page
+    # edit /handoff/out/pages/party-plan/index.html
+    tulip-wa page party-plan                   # prints the address
 
-**Start from the house style.** Two files give a page Tulip's palette,
-typography, background and motion, and they are already on the server:
+**Always start with `page-new`.** It writes an `index.html` that already carries
+Tulip's palette, typography, background and motion, and editing it is both
+faster and the only way a set of pages looks like one product. Do not write a
+page from scratch and do not write your own `<style>` block — you will produce
+something that works and looks like nothing else here.
+
+If you are editing a page that already exists, these are the two lines that
+matter:
 
     <link rel="stylesheet" href="/_kit/kit.css">
     <script src="/_kit/kit.js" defer></script>

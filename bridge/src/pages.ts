@@ -25,7 +25,7 @@
  * the internet through a visitor's browser, which is the containment property
  * wearing a disguise.
  */
-import { createReadStream, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { outPaths } from '@tulip/shared';
@@ -113,6 +113,82 @@ export function listPages(): PageSummary[] {
 }
 
 export type Published = { ok: true; url: string } | { ok: false; error: string };
+
+/**
+ * A starting page, already wearing the house style.
+ *
+ * The brief told the agent to link the kit and it wrote its own stylesheet
+ * anyway — an instruction competing with a very strong prior about what a
+ * self-contained HTML file looks like, and losing. A scaffold does not argue
+ * with the prior: the first thing in the file is already the right thing, and
+ * editing beats starting over.
+ *
+ * Refuses to overwrite. A page being rebuilt from scratch is the agent's call,
+ * not a side effect of asking for a starting point.
+ */
+export function scaffoldPage(slug: string, title: string): Published {
+  const host = pagesHost();
+  if (host === null) return { ok: false, error: 'no page hostname is configured on this deployment' };
+  if (!SLUG.test(slug)) {
+    return { ok: false, error: 'a page name is 3-48 characters of lowercase letters, digits and dashes' };
+  }
+  const dir = outPaths.page(slug);
+  const index = join(dir, 'index.html');
+  if (existsSync(index)) return { ok: false, error: `${slug}/index.html already exists — edit it` };
+
+  const safe = title.replace(/[&<>"']/g, ' ').trim().slice(0, 120) || 'A page';
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${safe}</title>
+<link rel="stylesheet" href="/_kit/kit.css">
+<script src="/_kit/kit.js" defer></script>
+</head>
+<body>
+<main class="wrap">
+
+  <section class="reveal">
+    <h1>${safe}</h1>
+    <p class="lede">One sentence saying what this is and who it is for.</p>
+  </section>
+
+  <section class="reveal">
+    <h2>A section</h2>
+    <p>Ordinary paragraphs. Put <code>class="reveal"</code> on a section and it
+      settles into place as the reader reaches it.</p>
+  </section>
+
+  <section class="reveal">
+    <div class="grid">
+      <div class="card"><h3>A card</h3><p>Cards, buttons and tags are in the kit.</p></div>
+      <div class="card"><h3>Another</h3><p>Delete what you do not need.</p></div>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>
+`;
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(index, html, { mode: 0o644 });
+    log('pages.scaffolded', { slug });
+    return { ok: true, url: `${slug}/index.html` };
+  } catch (err) {
+    return { ok: false, error: `could not write the page (${(err as Error).name})` };
+  }
+}
+
+/** Whether a page opted out of the house style, so publishing can say so. */
+export function usesKit(slug: string): boolean {
+  try {
+    return readFileSync(join(outPaths.page(slug), 'index.html'), 'utf8').includes('/_kit/kit.css');
+  } catch {
+    return true; // Unreadable is not the same as unstyled; do not nag about it.
+  }
+}
 
 /** Pictures one page may hold. Enough to carry an argument, not a gallery. */
 export const MAX_IMAGES_PER_PAGE = 5;

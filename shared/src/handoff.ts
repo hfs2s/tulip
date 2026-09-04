@@ -291,6 +291,22 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       id: z.string().uuid(),
       turnId: TurnId,
       /**
+       * Write a starting page already wearing the house style.
+       *
+       * A scaffold rather than an instruction, because the instruction lost: an
+       * agent told to link a stylesheet still wrote its own, which is what a
+       * strong prior about self-contained HTML does to a line of prose.
+       */
+      kind: z.literal('pageNew'),
+      slug: z.string().min(3).max(48).regex(/^[a-z0-9][a-z0-9-]*$/, 'lowercase letters, digits and dashes'),
+      title: z.string().min(1).max(120),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
        * Generate a picture and write it *into* a page rather than sending it.
        *
        * A separate verb from `image` because the destination is the difference

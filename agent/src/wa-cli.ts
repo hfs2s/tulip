@@ -34,6 +34,9 @@ const USAGE = `usage:
                               sound tags are performed: (laughs) (chuckle)
                               (sighs) (breath). Anything else — including square
                               brackets — is read out as words.
+  tulip-wa page-new <name> <title>
+                              START HERE for a page: writes an index.html that
+                              already uses the house style. Edit it, then publish.
   tulip-wa remember <text>    remember something for EVERY conversation, not
                               just this one. Never secrets, never anything
                               personal about somebody who is not here.
@@ -348,6 +351,19 @@ switch (command) {
     }
     // Printed as the filename to reference from the page's own HTML.
     process.stdout.write(`${result.items[0]?.url ?? ''}\n`);
+    break;
+  }
+
+  case 'page-new': {
+    const slug = (rest[0] ?? '').trim().toLowerCase();
+    const title = rest.slice(1).join(' ').trim();
+    if (!slug || !title) die('tulip-wa page-new: `tulip-wa page-new <name> <title>`');
+    const id = queue({ kind: 'pageNew', slug, title: title.slice(0, 120) });
+    const result = await awaitResult(id, 15_000);
+    if (result === null) { process.stdout.write('page-new: no answer from the bridge within 15s.\n'); break; }
+    process.stdout.write(result.ok
+      ? `wrote ${result.items[0]?.url ?? ''} — edit it, then \`tulip-wa page ${slug}\`\n`
+      : `${result.error ?? 'page-new: refused'}\n`);
     break;
   }
 
