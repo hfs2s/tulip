@@ -171,8 +171,84 @@ export function deletePage(slug: string): boolean {
  * resolver uses, and for the same reason: a name that passed a check is not the
  * same object as a name opened a moment later.
  */
-export function servePage(res: ServerResponse, url: URL): void {
+/** Escape for HTML text. Slugs are already narrow; this is belt and braces. */
+const esc = (v: string): string =>
+  v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
+
+const kb = (n: number): string => (n < 1024 ? `${String(n)} B` : `${String(Math.round(n / 1024))} KB`);
+
+/**
+ * The directory: everything published, at the pages host's own root.
+ *
+ * Self-contained by necessity — these pages are served under a CSP with no
+ * outbound connections, and the directory holds itself to the same rule rather
+ * than making an exception for the one page the bridge writes. Tulip's palette,
+ * inline, no assets.
+ */
+function serveIndex(res: ServerResponse, headers: Record<string, string>): void {
+  const items = listPages();
+  const rows = items.length === 0
+    ? '<p class="empty">Nothing here yet.</p>'
+    : items
+        .map((p) => {
+          const when = new Date(p.at).toISOString().slice(0, 10);
+          return `<li><a href="/${esc(p.slug)}/">${esc(p.slug)}</a>` +
+            `<span>${String(p.files)} file${p.files === 1 ? '' : 's'} · ${kb(p.bytes)} · ${when}</span></li>`;
+        })
+        .join('');
+
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, nofollow"><title>Pages</title><style>
+:root{--ground:#0d0d0f;--panel:#111113;--ink:#fafafa;--dim:rgba(250,250,250,.64);
+--faint:rgba(250,250,250,.42);--line:rgba(255,255,255,.09);--accent:#21d2ed}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);padding:56px 24px;
+ font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+main{max-width:640px;margin:0 auto}
+h1{font-weight:400;font-size:26px;letter-spacing:-.02em;margin:0 0 6px}
+.sub{color:var(--faint);font-size:13.5px;margin:0 0 28px;max-width:52ch}
+ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+li{display:flex;justify-content:space-between;align-items:baseline;gap:16px;
+ padding:14px 0;border-bottom:1px solid var(--line)}
+a{color:var(--ink);text-decoration:none}
+a:hover{color:var(--accent)}
+li span{color:var(--faint);font-size:12px;white-space:nowrap}
+.empty{color:var(--faint)}
+</style></head><body><main>
+<h1>Pages</h1>
+<p class="sub">Small pages built here. Each one runs in your browser and sends nothing anywhere.</p>
+<ul>${rows}</ul>
+</main></body></html>`;
+
+  res.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8' });
+  res.end(body);
+}
+
+export function servePage(res: ServerResponse, url: URL, indexEnabled = true): void {
   const parts = url.pathname.split('/').filter((p) => p.length > 0);
+
+  const common = {
+    // Same rules as any built page: no outbound connections, nothing embedded.
+    'content-security-policy':
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+      "img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data:; " +
+      "connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'x-robots-tag': 'noindex, nofollow',
+    'cache-control': 'no-cache',
+  };
+
+  if (parts.length === 0) {
+    if (!indexEnabled) {
+      res.writeHead(404, { ...common, 'content-type': 'text/plain' }).end('no directory here\n');
+      return;
+    }
+    serveIndex(res, common);
+    return;
+  }
+
   const slug = parts[0] ?? '';
   if (!SLUG.test(slug)) {
     res.writeHead(404, { 'content-type': 'text/plain' }).end('no such page\n');

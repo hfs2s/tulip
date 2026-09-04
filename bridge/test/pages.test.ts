@@ -99,6 +99,41 @@ describe('slugs', () => {
   });
 });
 
+describe('the directory at the root', () => {
+  const render = async (enabled: boolean): Promise<{ status: number; body: string }> => {
+    const { servePage } = await import('../src/pages.js');
+    let status = 0;
+    let body = '';
+    const res = {
+      writeHead(code: number) { status = code; return this; },
+      end(chunk?: string) { body = chunk ?? ''; return this; },
+    } as unknown as import('node:http').ServerResponse;
+    servePage(res, new URL('http://pages.example.com/'), enabled);
+    return { status, body };
+  };
+
+  it('lists what has been published', async () => {
+    build('party-plan');
+    build('tally');
+    const out = await render(true);
+    expect(out.status).toBe(200);
+    expect(out.body).toContain('party-plan');
+    expect(out.body).toContain('tally');
+  });
+
+  it('is a 404 when switched off, so pages stay share-by-link', async () => {
+    build('party-plan');
+    const out = await render(false);
+    expect(out.status).toBe(404);
+    expect(out.body).not.toContain('party-plan');
+  });
+
+  it('says so plainly when there is nothing', async () => {
+    const out = await render(true);
+    expect(out.body).toContain('Nothing here yet');
+  });
+});
+
 describe('listing', () => {
   it('reports what is there, newest first, and forgets what is deleted', () => {
     build('one');

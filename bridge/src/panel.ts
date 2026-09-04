@@ -58,6 +58,8 @@ import { log } from './log.js';
 import { paths } from './paths.js';
 import {
   chatHistory,
+  chatTranscript,
+  sendToChat,
   deleteMedia,
   logTail,
   mediaFile,
@@ -309,7 +311,7 @@ export function startPanel(deps: ApiDeps): Server | null {
           res.writeHead(405, { 'content-type': 'text/plain' }).end('pages are read-only\n');
           return;
         }
-        servePage(res, url);
+        servePage(res, url, deps.config.agent.pagesIndex);
         return;
       }
 
@@ -423,6 +425,25 @@ export function startPanel(deps: ApiDeps): Server | null {
         if (url.pathname === '/api/feed') return send(res, headers, 200, feed.recent(num('n', 120, 500)));
         if (url.pathname === '/api/chat') {
           return send(res, headers, 200, chatHistory(deps, url.searchParams.get('key') ?? '', num('n', 200, 1000)));
+        }
+        // The masked chat: one conversation, the bridge's own messages
+        // interleaved with the agent's account of what it did between them.
+        if (url.pathname === '/api/chat/transcript' && req.method === 'GET') {
+          const view = chatTranscript(deps, url.searchParams.get('key') ?? '', num('n', 200, 600)) as {
+            ok?: boolean;
+          };
+          return send(res, headers, view.ok === false ? 404 : 200, view);
+        }
+        // Types into a live conversation with a member of the public. POST, and
+        // refused loudly rather than quietly — see `sendToChat`.
+        if (url.pathname === '/api/chat/send' && req.method === 'POST') {
+          const body = await readBody(req);
+          const result = sendToChat(
+            deps,
+            typeof body['key'] === 'string' ? body['key'] : '',
+            typeof body['text'] === 'string' ? body['text'] : '',
+          );
+          return send(res, headers, result.ok ? 200 : 400, result);
         }
         if (url.pathname === '/api/media/list') return send(res, headers, 200, mediaList(deps, num('n', 120, 500)));
         if (url.pathname === '/api/media') {

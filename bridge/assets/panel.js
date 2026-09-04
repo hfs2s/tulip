@@ -8,6 +8,8 @@ var state = null;
 var route = 'overview';
 var feedFilter = 'all';
 var chatQuery = '';
+/** Which conversation the Chat page is showing, or null for the picker. */
+var chatOpen = null;
 var termWindow = null;
 var booted = false;
 
@@ -90,6 +92,7 @@ var ICONS = {
   overview: '<path d="M3.5 18a8.5 8.5 0 1 1 17 0"/><path d="M12 18l4.4-5.6"/>',
   messages: '<path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1z"/>',
   chats: '<path d="M16.2 12.5H18a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H7.6a1 1 0 0 0-1 1v1.4"/><path d="M13 7.8H4.6a1 1 0 0 0-1 1v6.6a1 1 0 0 0 1 1H6v3.1l3.9-3.1H13a1 1 0 0 0 1-1V8.8a1 1 0 0 0-1-1z"/>',
+  chat: '<path d="M20.5 12c0 3.9-3.8 7-8.5 7-1 0-2-.15-2.9-.42L4 20l1.3-3.4C4.2 15.3 3.5 13.7 3.5 12c0-3.9 3.8-7 8.5-7s8.5 3.1 8.5 7z"/><path d="M8.6 10.4h6.8"/><path d="M8.6 13.4h4.4"/>',
   media: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="8.6" cy="9.9" r="1.4"/><path d="M3.5 16.2l4.4-3.9 3.6 3.1 3-2.6 6 4.9"/>',
   tools: '<path d="M14.7 6.3a4 4 0 0 0 5 5L15 16l-3 3-4-4 3-3z"/><path d="M6 18l1.5-1.5"/>',
   terminal: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7.5 9.5l3 2.5-3 2.5"/><path d="M12.5 15h4"/>',
@@ -97,8 +100,9 @@ var ICONS = {
   log: '<path d="M6 4.5h9l4 4v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-14a1 1 0 0 1 1-1z"/><path d="M14.5 4.5v4.5H19"/><path d="M8.5 13h7M8.5 16.5h5"/>'
 };
 var PAGES = [
-  ['overview', 'Overview'], ['messages', 'Messages'], ['chats', 'Chats'], ['media', 'Media'],
-  ['terminal', 'Terminal'], ['pages', 'Pages'], ['settings', 'Settings'], ['log', 'Log']
+  ['overview', 'Overview'], ['messages', 'Messages'], ['chats', 'Chats'], ['chat', 'Chat'],
+  ['media', 'Media'], ['terminal', 'Terminal'], ['pages', 'Pages'], ['settings', 'Settings'],
+  ['log', 'Log']
 ];
 
 function buildNav() {
@@ -118,7 +122,9 @@ function buildNav() {
     b.appendChild(svg);
     b.appendChild(node('span', null, p[1]));
     if (p[0] === 'chats') { var c = node('span', 'count', '0'); c.id = 'navChats'; b.appendChild(c); }
-    b.addEventListener('click', function () { go(p[0]); });
+    // Chat keeps whichever conversation is open, so coming back from another
+    // page returns to it rather than to an empty picker.
+    b.addEventListener('click', function () { go(p[0] === 'chat' && chatOpen ? 'chat/' + chatOpen : p[0]); });
     nav.appendChild(b);
   });
 }
@@ -165,15 +171,27 @@ function wireNavToggle() {
   });
 }
 
+/**
+ * Change page.
+ *
+ * The Chat page carries a chat key in the route — `#/chat/<key>` — so a reload,
+ * a bookmark or a link out of the Chats table all land on the same
+ * conversation. Nothing else on this page has an argument, hence the split
+ * rather than a router.
+ */
 function go(next) {
-  route = next;
+  var parts = String(next).split('/');
+  var page = parts[0] || 'overview';
+  if (page === 'chat') chatOpen = /^[0-9a-f]{16}$/.test(parts[1] || '') ? parts[1] : null;
+
+  route = page;
   if (location.hash !== '#/' + next) location.hash = '#/' + next;
   // Choosing a page is the end of the menu's job.
   setNav(false);
   var crumb = el('topbarPage');
   if (crumb) {
     for (var i = 0; i < PAGES.length; i++) {
-      if (PAGES[i][0] === next) { crumb.textContent = PAGES[i][1]; break; }
+      if (PAGES[i][0] === route) { crumb.textContent = PAGES[i][1]; break; }
     }
   }
   PAGES.forEach(function (p) {
@@ -189,6 +207,7 @@ function go(next) {
   // too and the emulator fills what is left of the window.
   var wrap = document.querySelector('.page-wrap');
   if (route !== 'terminal') stopTerminal();
+  if (route !== 'chat') stopChatPoll();
   var scroller = document.querySelector('main');
   if (scroller) scroller.scrollTop = 0;
   render();
@@ -450,8 +469,16 @@ function renderChats(s) {
     tr.appendChild(node('td', null, c.turnsToday));
     tr.appendChild(node('td', 'muted', ago(s.now - c.lastSeenAt)));
     var td = document.createElement('td');
+    // Reading one conversation is the common thing to want from this table, and
+    // blocking somebody is the rare one, so it leads.
+    var open = node('button', 'sm', 'Open');
+    open.type = 'button';
+    open.setAttribute('aria-label', 'Open the conversation with ' + (c.name || c.chatKey));
+    open.addEventListener('click', function () { go('chat/' + c.chatKey); });
+    td.appendChild(open);
     var b = node('button', 'sm' + (c.blocked ? '' : ' danger'), c.blocked ? 'Unblock' : 'Block');
     b.type = 'button';
+    b.style.marginLeft = '8px';
     b.addEventListener('click', function () { act(c.blocked ? 'unblock' : 'block', c.chatKey); });
     td.appendChild(b);
     tr.appendChild(td);
@@ -468,6 +495,293 @@ function renderChats(s) {
   scroller.appendChild(table);
   card.appendChild(scroller);
   p.appendChild(card);
+}
+
+// ── Chat ────────────────────────────────────────────────────────────────────
+// The masked chat: one conversation, read as a conversation.
+//
+// The Terminal page shows the session as it really is and is nearly unreadable
+// — a TUI is spinner frames and half-repainted lines, and finding out what Juan
+// just told somebody should not require parsing one. This page shows the same
+// session in the shape it actually has, from `/api/chat/transcript`.
+//
+// Everything on it arrives as text and reaches the DOM through `textContent`,
+// which matters more here than anywhere else on this page: half of what is
+// rendered was written by a stranger and the other half by an agent that reads
+// what strangers write.
+
+/** Repaint interval while the page is open. Cleared the moment it is not. */
+var CHAT_POLL_MS = 4000;
+var chatTimer = null;
+/** The most recent payload, so the composer can name who it is about to reach. */
+var chatView = null;
+
+function stopChatPoll() {
+  if (chatTimer !== null) { clearInterval(chatTimer); chatTimer = null; }
+}
+
+function renderChat() {
+  var p = head('chat', 'Chat', 'One conversation, as a conversation. What somebody sent, what Juan sent back, and what he did in between — instead of a terminal.');
+  stopChatPoll();
+  chatView = null;
+
+  p.appendChild(chatPicker());
+
+  if (!chatOpen) {
+    var none = node('div', 'card');
+    none.appendChild(node('p', 'empty', 'Choose a conversation above, or open one from the Chats page.'));
+    p.appendChild(none);
+    return;
+  }
+
+  var card = node('div', 'card');
+  var head_ = node('div', 'chathead');
+  var title = node('h3', null, '…');
+  title.id = 'chatWho';
+  head_.appendChild(title);
+  head_.appendChild(node('span', 'key', chatOpen));
+  var badge = node('span', 'badge', 'checking');
+  badge.id = 'chatState';
+  head_.appendChild(badge);
+  card.appendChild(head_);
+
+  var thread = node('div', 'thread');
+  thread.id = 'chatThread';
+  thread.setAttribute('role', 'log');
+  thread.setAttribute('aria-label', 'The conversation');
+  thread.appendChild(node('p', 'empty', 'Reading the session…'));
+  card.appendChild(thread);
+
+  card.appendChild(composer());
+  p.appendChild(card);
+
+  void refreshThread();
+  chatTimer = setInterval(function () { void refreshThread(); }, CHAT_POLL_MS);
+}
+
+/** Every chat, as a select. The same list the Chats page filters. */
+function chatPicker() {
+  var controls = node('div', 'controls');
+  var picker = document.createElement('select');
+  picker.setAttribute('aria-label', 'Which conversation to show');
+  var blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = 'Choose a conversation…';
+  picker.appendChild(blank);
+
+  var rows = (state && state.chats) ? state.chats : [];
+  rows.forEach(function (c) {
+    var option = document.createElement('option');
+    option.value = c.chatKey;
+    option.textContent = (c.name || 'Someone') + (c.isGroup ? ' (group)' : '') + ' · ' + c.chatKey;
+    if (c.chatKey === chatOpen) option.selected = true;
+    picker.appendChild(option);
+  });
+  picker.addEventListener('change', function () {
+    go(picker.value ? 'chat/' + picker.value : 'chat');
+  });
+  controls.appendChild(picker);
+  if (!rows.length) controls.appendChild(node('span', 'muted', 'Nobody has messaged yet.'));
+  return controls;
+}
+
+/**
+ * Fetch and repaint the thread.
+ *
+ * Scroll position is preserved unless the reader was already at the bottom, in
+ * which case it follows. A log that yanks you back to the newest line every few
+ * seconds is one you cannot read the middle of.
+ */
+async function refreshThread() {
+  var thread = el('chatThread');
+  if (!thread || !chatOpen) return;
+  var key = chatOpen;
+
+  var view;
+  try {
+    view = await api('/api/chat/transcript?key=' + encodeURIComponent(key) + '&n=300');
+  } catch (err) {
+    // Only if nothing has painted yet: a failed poll should not blank a thread
+    // that is on screen and readable.
+    if (!chatView) { clear(thread).appendChild(node('p', 'empty', err.message)); }
+    return;
+  }
+  // The operator moved on while this was in flight.
+  if (key !== chatOpen || !thread.isConnected) return;
+
+  chatView = view;
+  var who = el('chatWho');
+  if (who) who.textContent = (view.chat && view.chat.name) || 'Someone';
+  paintChatState(view);
+
+  var pinned = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 48;
+  clear(thread);
+  if (!view.items.length) {
+    thread.appendChild(node('p', 'empty', 'Nothing yet. A session starts on their next message.'));
+  } else {
+    view.items.forEach(function (item) { thread.appendChild(itemNode(item)); });
+  }
+  if (pinned) thread.scrollTop = thread.scrollHeight;
+  paintComposer(view);
+}
+
+/** Whether there is a session to type into, said in words rather than colour. */
+function paintChatState(view) {
+  var badge = el('chatState');
+  if (!badge) return;
+  var blocked = view.chat && view.chat.blocked;
+  var text = blocked ? 'blocked' : !view.reporting ? 'agent not reporting' : view.live ? 'session open' : 'asleep';
+  badge.className = 'badge' + (blocked ? ' off' : view.live ? ' on' : '');
+  badge.textContent = text;
+}
+
+/** One timeline entry. Every branch ends in text, and text only. */
+function itemNode(item) {
+  if (item.kind === 'turn') return node('div', 'turnmark', item.text);
+
+  if (item.kind === 'tool') {
+    var chip = node('div', 'chip');
+    chip.appendChild(node('b', null, item.tool || 'tool'));
+    if (item.text) chip.appendChild(node('span', null, item.text));
+    return chip;
+  }
+
+  if (item.kind === 'thought') {
+    var wrap = node('div', 'thought');
+    var toggle = node('button', null, '▸ thinking · ' + plural(item.text.split(/\s+/).length, 'word'));
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', 'false');
+    var body = node('div', 'body', item.text);
+    body.hidden = true;
+    toggle.addEventListener('click', function () {
+      var open = toggle.getAttribute('aria-expanded') === 'true';
+      toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+      body.hidden = open;
+      toggle.textContent = (open ? '▸' : '▾') + toggle.textContent.slice(1);
+    });
+    wrap.appendChild(toggle);
+    wrap.appendChild(body);
+    return wrap;
+  }
+
+  // The three that are somebody speaking. `note` is the one worth reading
+  // twice: Juan wrote it in his session and nobody received it.
+  var cls = item.kind === 'said'
+    ? (item.direction === 'out' ? 'msg juan' : 'msg them')
+    : item.kind === 'prompt' ? 'msg op' : 'msg note';
+  var who = item.kind === 'said' ? item.who
+    : item.kind === 'prompt' ? 'typed from this panel'
+      : 'Juan, in session — not sent';
+
+  var msg = node('div', cls);
+  msg.appendChild(node('span', 'who', who));
+  msg.appendChild(node('div', 'body', item.text));
+  msg.appendChild(node('span', 'at', hhmm(item.ts)));
+  return msg;
+}
+
+/**
+ * The box that types into a live conversation.
+ *
+ * The warning is against the field rather than at the top of the page. A page
+ * banner is read once and becomes furniture; what has to be true is that the
+ * person is named at the moment of pressing the button — so the label carries
+ * the name, and the confirm quotes the exact line that will be typed.
+ */
+function composer() {
+  var wrap = node('div', 'composer');
+
+  var live = node('div', 'live');
+  live.appendChild(node('span', 'dot'));
+  var warning = node('span', null, '');
+  warning.id = 'chatWarn';
+  live.appendChild(warning);
+  wrap.appendChild(live);
+
+  var box = document.createElement('textarea');
+  box.id = 'chatBox';
+  box.rows = 3;
+  box.maxLength = 2000;
+  box.placeholder = 'Type into Juan’s session…';
+  box.setAttribute('aria-describedby', 'chatWarn');
+  wrap.appendChild(box);
+
+  var foot = node('div', 'foot');
+  var send = node('button', 'primary', 'Send into the session');
+  send.type = 'button';
+  send.id = 'chatSend';
+  send.addEventListener('click', function () { confirmSend(box); });
+  foot.appendChild(send);
+  foot.appendChild(node('p', 'hint', 'Juan reads it at his prompt. Whatever he does next happens on WhatsApp.'));
+  wrap.appendChild(foot);
+  return wrap;
+}
+
+/** Enable or disable the composer, and say why when it is off. */
+function paintComposer(view) {
+  var box = el('chatBox'), send = el('chatSend'), warning = el('chatWarn');
+  if (!box || !send || !warning) return;
+  var who = (view.chat && view.chat.name) || 'this person';
+  var off = !view.reporting
+    ? 'The agent is not reporting, so there is nothing to type into.'
+    : !view.live
+      ? 'No session is open for this chat. One starts on their next message.'
+      : null;
+  box.disabled = send.disabled = off !== null;
+  warning.textContent = off || ('Live. ' + who + ' is on the other end of this session.');
+  send.textContent = off ? 'Send into the session' : 'Send to ' + who;
+}
+
+/**
+ * Confirm, then send.
+ *
+ * A second step for something with no undo: the line goes into a running Claude
+ * Code prompt inside a conversation with a member of the public. The dialog
+ * shows the exact text that will be typed rather than what was in the box,
+ * because the two differ whenever the box held a line break.
+ */
+function confirmSend(box) {
+  var raw = box.value;
+  var line = raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!line) { toast('Nothing to send.'); return; }
+  var view = chatView || {};
+  var who = (view.chat && view.chat.name) || 'this person';
+  var key = chatOpen;
+
+  openModal('Type this into Juan’s session?', 'He is mid-conversation with ' + who + ' on WhatsApp.', function (body, modal, dismiss) {
+    body.appendChild(node('p', 'hint',
+      'This is typed at Juan’s prompt exactly as written, as though it had arrived in the conversation. '
+      + 'What he does with it is his — including anything he sends to ' + who + '. It cannot be recalled.'));
+    body.appendChild(node('blockquote', 'said', line));
+    if (line !== raw.trim()) {
+      body.appendChild(node('p', 'hint',
+        'Line breaks became spaces: a newline at the prompt submits the message halfway through.'));
+    }
+
+    var actions = node('div', 'modal-actions');
+    var cancel = node('button', 'sm', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', dismiss);
+    var go_ = node('button', 'sm primary', 'Type it to ' + who);
+    go_.type = 'button';
+    go_.addEventListener('click', async function () {
+      go_.disabled = true;
+      try {
+        var result = await api('/api/chat/send', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ key: key, text: line })
+        });
+        toast(result.message || 'Typed.');
+        box.value = '';
+        dismiss();
+        void refreshThread();
+      } catch (err) { go_.disabled = false; toast(err.message, true); }
+    });
+    actions.appendChild(cancel);
+    actions.appendChild(go_);
+    body.appendChild(actions);
+  });
 }
 
 async function renderMedia() {
@@ -1684,6 +1998,12 @@ async function renderSettings() {
     field(tools, row[1], row[2] + (keyed ? '' : ' Currently unavailable: no key is configured.'), wrap);
   });
 
+  field(tools, 'Public page directory',
+    'Whether the pages host answers its own address with a list of everything published. Off, a page is reachable only by its own link — which is the difference between sharing one and letting anyone browse them all.',
+    liveSwitch(s.agent && s.agent.pagesIndex, function (on, input) {
+      saveSettings({ agent: { pagesIndex: on } }, function () { input.checked = !on; });
+    }));
+
   field(tools, 'Voice',
     'Which MiniMax voice speaks. Leave empty for this deployment’s default. A name that does not exist fails the whole request — the provider answers “voice id not exist” — and voice notes quietly fall back to text until it is corrected, so change it and then send yourself one.',
     textField(s.agent && s.agent.voiceId, 'e.g. English_engaging_instructor_vv2', function (v, revert) {
@@ -1724,6 +2044,9 @@ function render() {
   if (route === 'overview') renderOverview(state);
   else if (route === 'messages') renderMessages();
   else if (route === 'chats') renderChats(state);
+  // Deliberately not in NEEDS_STATE: this page owns a poll and a text box, and
+  // repainting it every five seconds would restart the one and empty the other.
+  else if (route === 'chat') renderChat();
   else if (route === 'media') renderMedia();
   else if (route === 'terminal') renderTerminal();
   else if (route === 'pages') void renderPages();

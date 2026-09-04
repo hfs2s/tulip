@@ -36,6 +36,10 @@ import { log } from './log.js';
 import { paths } from './paths.js';
 import type { Limiter } from './ratelimit.js';
 import { state } from './state.js';
+// The masked chat's other half. `sessionTranscript` is the agent's own Claude
+// Code transcript and has nothing to do with `transcriptFor` above, which is a
+// voice note's sidecar — see the header of `transcript.ts`.
+import { mergeTimeline, sessionTranscript, type SaidItem } from './transcript.js';
 import type { WhatsApp } from './whatsapp.js';
 
 export interface ApiDeps {
@@ -143,6 +147,133 @@ export function chatHistory(deps: ApiDeps, chatKey: string, limit: number): Json
     limits: deps.limiter.stats(chatKey),
     messages,
   };
+}
+
+// ─── One chat, as a conversation ─────────────────────────────────────────────
+
+/**
+ * The masked chat: the agent's live session for one chat, rendered as a
+ * conversation rather than as a terminal.
+ *
+ * Two sources, and the difference between them is the whole point of the shape:
+ *
+ *   · **The messages** come from the bridge's own feed. They are first-hand —
+ *     the bridge received them and the bridge sent them — and they are the
+ *     conversation that actually happened on WhatsApp.
+ *   · **The session items** come from `bridge/src/transcript.ts`, which reads a
+ *     file the untrusted container wrote. They are the agent's account of
+ *     itself, on exactly the same footing as `status.json`: displayed, never
+ *     decided from. Read that module's header before changing anything here.
+ *
+ * `live` is what gates sending. It comes from the agent's status report, which
+ * is advisory everywhere else — here it is load-bearing for a reason given in
+ * `sendToChat`, and the failure mode of trusting it is a refused send rather
+ * than a misdirected one.
+ */
+export function chatTranscript(deps: ApiDeps, chatKey: string, limit: number): Json {
+  const record = deps.chats.get(chatKey);
+  if (record === null) return { ok: false, message: 'No such chat.' };
+
+  const said: SaidItem[] = feed
+    .recent(4000)
+    .filter((e) => e.chatKey === chatKey && (e.kind === 'in' || e.kind === 'out'))
+    .map((e) => ({
+      ts: e.ts,
+      kind: 'said' as const,
+      direction: e.kind === 'out' ? ('out' as const) : ('in' as const),
+      who: e.kind === 'out' ? 'Juan' : (e.from ?? e.chatName ?? 'Someone'),
+      text: e.text ?? (e.detail ? `(${e.detail})` : ''),
+    }));
+
+  const status = readStatus();
+  return {
+    ok: true,
+    chat: {
+      chatKey: record.chatKey,
+      name: record.name,
+      isGroup: record.isGroup,
+      blocked: record.blocked,
+      messages: record.messages,
+      lastSeenAt: record.lastSeenAt,
+    },
+    // Whether a tmux window exists for this chat right now. Without one there
+    // is nothing to type into — see `sendToChat`.
+    live: status?.sessions.some((s) => s.chatKey === chatKey) ?? false,
+    reporting: status !== null,
+    items: mergeTimeline(said, sessionTranscript(chatKey), limit),
+  };
+}
+
+/**
+ * Type a line into the agent's session for one chat.
+ *
+ * This reuses the terminal's path — `terminalKeys` — rather than opening a
+ * second one, so there is one place where a keystroke can reach a live
+ * conversation and one place to get it right. Three refusals stand in front of
+ * it, and the second is the one that matters:
+ *
+ *   · the chat key must be a chat we issued a key for;
+ *   · **the chat must have a live window.** `resolveWindow` in the supervisor
+ *     falls back to the busy window, then the most recent session, then
+ *     `windows[0]` when the window it was asked for is not open. That fallback
+ *     is right for a terminal following whatever is active and catastrophic
+ *     here: a message meant for a sleeping chat would be typed into whichever
+ *     stranger happened to be talking. So a chat with no window is refused, and
+ *     the operator is told to wait for the person's next message;
+ *   · the line must be one line. `send-keys -l` types a newline as a newline,
+ *     and the TUI reads that as submit — so a pasted paragraph would send its
+ *     first line as a prompt and leave the rest typed at a stale one.
+ *
+ * The Enter is sent as a key rather than as a newline in the text, for the same
+ * reason `sendLine` does it in `agent/src/tmux.ts`.
+ */
+export function sendToChat(deps: ApiDeps, chatKey: string, raw: string): { ok: boolean; message: string } {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.' };
+  if (deps.chats.get(chatKey) === null) return { ok: false, message: 'No such chat.' };
+
+  const line = typedLine(raw);
+  if (line.length === 0) return { ok: false, message: 'Nothing to send.' };
+  if (line.length > MAX_TYPED) {
+    return { ok: false, message: `That is longer than ${MAX_TYPED} characters. Say it in fewer.` };
+  }
+
+  const status = readStatus();
+  if (status === null) return { ok: false, message: 'The agent is not reporting. Nothing would be typed.' };
+  if (!status.sessions.some((s) => s.chatKey === chatKey)) {
+    return {
+      ok: false,
+      message: 'This chat has no session open, so there is nowhere to type. It wakes on their next message.',
+    };
+  }
+
+  const window = `c-${chatKey}`;
+  const result = terminalKeys(window, [
+    { text: line, literal: true },
+    { text: 'Enter', literal: false },
+  ]) as { ok?: boolean; message?: string };
+  if (result.ok === false) return { ok: false, message: result.message ?? 'The keystrokes could not be written.' };
+
+  log('chat.typed', { chatKey, window, chars: line.length });
+  feed.event('operator.typed', `${chatKey} — ${line.slice(0, 160)}`);
+  return { ok: true, message: 'Typed into the session.' };
+}
+
+/** Matches `TerminalRequest`'s own per-key cap, so nothing is silently trimmed. */
+const MAX_TYPED = 2000;
+
+/**
+ * Flatten what an operator typed into the single line tmux will type.
+ *
+ * Collapsing rather than refusing, because a pasted two-line note is a normal
+ * thing to want to send and "your message contains a newline" is a bad answer
+ * to it. What the operator confirms in the panel is this exact line, not what
+ * they typed, so nothing is changed behind their back.
+ */
+export function typedLine(raw: string): string {
+  return raw
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // ─── Media ───────────────────────────────────────────────────────────────────
@@ -466,6 +597,7 @@ const SettingsPatch = z
       images: z.boolean().optional(),
       voice: z.boolean().optional(),
       voiceId: z.string().max(128).regex(/^[A-Za-z0-9_-]*$/, 'letters, digits, dashes and underscores only').optional(),
+      pagesIndex: z.boolean().optional(),
       /**
        * Imported from `config.ts` rather than restated. This one decides who a
        * machine holding a shell may open a conversation with, and a second copy
@@ -651,11 +783,65 @@ export function terminalWatch(window: string | null, seconds: number): Json {
 export function terminalKeys(window: string | null, keys: Array<{ text: string; literal: boolean }>): Json {
   keySeq += keys.length;
   pending = [...pending, ...keys].slice(-KEY_WINDOW);
+  if (window !== null) {
+    aimWindow = window;
+    aimSeq = keySeq;
+    aimSince = Date.now();
+  }
   log('terminal.send', { window, count: keys.length, seq: keySeq });
   return writeTerminal(window, 120, pending);
 }
 
-function writeTerminal(window: string | null, seconds: number, keys: Array<{ text: string; literal: boolean }>): Json {
+/**
+ * Keys addressed to a named window, held there until the agent has typed them.
+ *
+ * There is one request file, and it carries one window for the whole sliding
+ * key window. That is fine while every writer asks for `null` — "follow the
+ * active chat" — and becomes a cross-chat mis-delivery the moment one of them
+ * names a window, which the Chat page does:
+ *
+ *   1. the Chat page writes `{ window: 'c-<A>', keys: [...] }`;
+ *   2. before the agent's 250ms tick collects it, the Terminal page's own
+ *      stream renews its watch and rewrites the file as `{ window: null, keys:
+ *      [same keys] }` — `terminalWatch` resends `pending` unchanged;
+ *   3. the agent resolves `null` to whichever chat is busy, and types A's
+ *      message into B's conversation.
+ *
+ * `keysToApply` does not help: those keys are still unapplied, so they are
+ * still eligible. So the aim is sticky. Until the agent reports having applied
+ * everything up to `aimSeq` — it publishes its applied count in `screen.json`
+ * — a watch renewal cannot move the window off the chat the keys were meant
+ * for. The wall-clock cap is there because the agent may never report at all,
+ * and pinning the operator's terminal to a dead window forever is a worse
+ * failure than the one being fixed.
+ */
+let aimWindow: string | null = null;
+let aimSeq = 0;
+let aimSince = 0;
+const AIM_HOLD_MS = 20_000;
+
+/** The highest key index the agent says it has typed. Zero if it has not said. */
+function appliedSeq(): number {
+  try {
+    const parsed = TerminalScreen.safeParse(JSON.parse(readFileSync(outPaths.screen, 'utf8')));
+    return parsed.success ? parsed.data.keySeq : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** The window this write must name, which is not always the one it asked for. */
+function aim(requested: string | null): string | null {
+  if (aimWindow === null) return requested;
+  if (Date.now() - aimSince > AIM_HOLD_MS || appliedSeq() >= aimSeq) {
+    aimWindow = null;
+    return requested;
+  }
+  return aimWindow;
+}
+
+function writeTerminal(requested: string | null, seconds: number, keys: Array<{ text: string; literal: boolean }>): Json {
+  const window = aim(requested);
   const request = TerminalRequest.safeParse({
     window,
     watchUntil: new Date(Date.now() + seconds * 1000).toISOString(),
