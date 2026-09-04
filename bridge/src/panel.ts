@@ -44,6 +44,7 @@
  * Iris has one of those, and it is the sharpest edge in that codebase.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -51,6 +52,7 @@ import { fileURLToPath } from 'node:url';
 import { writeFileAtomic } from '@tulip/shared';
 import { feed } from './feed.js';
 import { accessConfig, verifiedEmail } from './access.js';
+import { PTY_PREFIX, proxyRequest, proxyUpgrade, ptyAvailable } from './pty.js';
 import { log } from './log.js';
 import { paths } from './paths.js';
 import {
@@ -313,6 +315,14 @@ export function startPanel(deps: ApiDeps): Server | null {
         log('panel.write', { path: url.pathname, who: auth.who ?? 'token holder' });
       }
 
+      // The agent's real terminal, proxied from a host socket. Same-origin and
+      // inside the gate above, so the panel's own cookie is the only credential
+      // and there is no second authentication path to get wrong.
+      if (url.pathname === PTY_PREFIX || url.pathname.startsWith(`${PTY_PREFIX}/`)) {
+        proxyRequest(req, res, headers);
+        return;
+      }
+
       // Move the token out of the URL as soon as it has been presented, so it
       // stops appearing in the address bar and in any onward Referer.
       if (url.searchParams.has('t')) {
@@ -529,6 +539,30 @@ export function startPanel(deps: ApiDeps): Server | null {
     })();
   });
 
+  /**
+   * The terminal's WebSocket.
+   *
+   * Authenticated by the same cookie, checked here rather than delegated: an
+   * upgrade never reaches the request handler, so the gate above does not see
+   * it. This is the one place in the panel with a second check, and it exists
+   * because the alternative — an unauthenticated upgrade path to a writable
+   * shell — is the worst possible thing to leave open.
+   */
+  server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const url = new URL(req.url ?? '/', 'http://panel.invalid');
+    if (url.pathname !== PTY_PREFIX && !url.pathname.startsWith(`${PTY_PREFIX}/`)) {
+      socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
+      return;
+    }
+    const supplied = cookieValue(req.headers.cookie, COOKIE);
+    if (supplied === null || !tokenMatches(supplied, token)) {
+      log('pty.upgradeRefused', { address: req.socket.remoteAddress ?? 'unknown' });
+      socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      return;
+    }
+    proxyUpgrade(req, socket, head);
+  });
+
   feed.on('entry', (row: unknown) => {
     const payload = `data: ${JSON.stringify(row)}\n\n`;
     for (const stream of streams) {
@@ -545,6 +579,11 @@ export function startPanel(deps: ApiDeps): Server | null {
       host: deps.config.panel.host,
       port: deps.config.panel.port,
       note: 'exposure is set by the publish address in docker-compose.yml, not by this bind address',
+    });
+    log('pty.status', {
+      note: ptyAvailable()
+        ? 'the agent terminal socket is mounted; the Terminal page is a real pty'
+        : 'no terminal socket mounted — see scripts/tulip-ttyd.service',
     });
   });
 

@@ -1,0 +1,23 @@
+# Install on the Pi:
+#   sudo cp scripts/tulip-ttyd.service /etc/systemd/system/
+#   sudo systemctl enable --now tulip-ttyd
+#
+# Root, because it creates the socket directory and calls `docker exec`. It
+# hands nothing to the agent: see the header of scripts/tulip-ttyd.sh.
+[Unit]
+Description=Tulip agent terminal (ttyd on a UNIX socket)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=exec
+ExecStart=/home/leonora/Repositories/tulip/scripts/tulip-ttyd.sh
+Restart=always
+RestartSec=3
+# The socket lives under /run and must not survive a reboot: a stale socket file
+# is indistinguishable from a live one until something tries to connect.
+RuntimeDirectory=tulip
+RuntimeDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

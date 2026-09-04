@@ -677,61 +677,44 @@ function fitTerminal() {
   if (term.options.fontSize !== size) term.options.fontSize = size;
 }
 
+/**
+ * The agent's terminal, as a terminal.
+ *
+ * An iframe onto ttyd, proxied same-origin at `/pty` by the bridge. Everything
+ * that makes a terminal feel like one — the cursor, resize, scrollback, keys
+ * arriving in the order they were typed — is ttyd's own client talking to a
+ * real pty, rather than this page reconstructing a screen from sampled bytes.
+ *
+ * Same-origin is what keeps it simple: the panel's cookie authenticates the
+ * iframe and its WebSocket, with no second credential to pass through and no
+ * cross-origin gate to hand-roll.
+ *
+ * The frame is created once and kept. Rebuilding it on every state refresh
+ * would drop the connection twice a second, and a reconnect loses scrollback.
+ */
 function renderTerminal() {
   var page = el('p-terminal');
-
-  // `render()` runs on every state refresh. Rebuilding the emulator there would
-  // blank the screen twice a second, so an existing one is left alone.
-  if (term && el('termHost')) { fitTerminal(); return; }
+  if (el('ptyFrame')) return;
   clear(page);
 
-  if (typeof Terminal !== 'function') {
-    page.appendChild(node('div', 'termnote',
-      'The terminal emulator was not bundled into this build.\nRun the panel asset build and reload.'));
-    return;
-  }
+  page.appendChild(node('div', 'warnbar',
+    'Anything you type goes into a live conversation with a member of the public.'));
 
-  var host = node('div', 'termhost');
-  host.id = 'termHost';
-  page.appendChild(host);
-
-  // Shown when the agent has no session to stream. A chat's window is created
-  // by its first message, so a quiet deployment has nothing to show — and an
-  // unexplained black rectangle is indistinguishable from a broken terminal.
-  var note = node('div', 'termnote',
-    'No session is running.\nA window opens here when a chat gets a message.');
-  note.id = 'termNote';
-  note.hidden = true;
-  page.appendChild(note);
-
-  term = new Terminal({
-    cols: TERM_COLS,
-    rows: TERM_ROWS,
-    convertEol: false,
-    cursorBlink: true,
-    scrollback: 0,
-    fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
-    fontSize: 12,
-    theme: { background: '#000000', foreground: '#d6d6de', cursor: '#21d2ed' }
+  var frame = document.createElement('iframe');
+  frame.id = 'ptyFrame';
+  frame.className = 'ptyframe';
+  frame.src = '/pty/';
+  frame.title = 'The agent\u2019s terminal';
+  // ttyd installs its own "are you sure you want to leave" handler, which turns
+  // an ordinary navigation into a browser prompt. It is same-origin, so it can
+  // simply be removed.
+  frame.addEventListener('load', function () {
+    try {
+      var w = frame.contentWindow;
+      if (w) w.onbeforeunload = null;
+    } catch (err) { /* nothing to do */ }
   });
-  term.open(host);
-  fitTerminal();
-
-  // Straight to the agent. There is no local echo: what appears on screen is
-  // what the pane actually did with the keystroke, which is the only honest
-  // thing to show when the round trip crosses a volume.
-  term.onData(function (data) {
-    var key = termKeyFor(data);
-    if (key) sendKeys([key]);
-  });
-
-  if (termFit) window.removeEventListener('resize', termFit);
-  termFit = fitTerminal;
-  window.addEventListener('resize', termFit);
-
-  // Only now, with something to write to. Opening the stream from the route
-  // switch would drop whatever arrived before the first paint.
-  openTerminalStream();
+  page.appendChild(frame);
 }
 
 async function sendKeys(keys) {

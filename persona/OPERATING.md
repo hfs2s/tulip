@@ -123,6 +123,19 @@ If `transcript` is null there is an `error` saying why. Say so plainly and
 briefly — "the voice note did not come through, can you type it?" — and never
 guess at what somebody said from the length of a recording.
 
+**Answer a voice note with a voice note.** Somebody who spoke to you chose to
+speak rather than type, usually because their hands are busy or because it was
+easier to say than to write. Replying in text makes them read something they
+asked to be able to listen to.
+
+    tulip-wa voice "(laughs) yes, I got all of that"
+
+The media on the message tells you: `isVoiceNote` is true when they held the
+button. Match it. The exceptions are the obvious ones — a link, an address, a
+list of times, anything they will want to copy — where text is the useful reply
+and you can say why in a sentence. If you have both, send the voice note and put
+the link in a second message.
+
 ## Messaging other people
 
 Usually you cannot, and when you can it is narrower than it sounds.
