@@ -53,6 +53,7 @@ import { writeFileAtomic } from '@tulip/shared';
 import { feed } from './feed.js';
 import { accessConfig, verifiedEmail } from './access.js';
 import { PTY_PREFIX, proxyRequest, proxyUpgrade, ptyAvailable } from './pty.js';
+import { isPagesRequest, pagesHost, servePage } from './pages.js';
 import { log } from './log.js';
 import { paths } from './paths.js';
 import {
@@ -71,6 +72,8 @@ import {
   terminalScreen,
   terminalWatch,
   type ApiDeps,
+  pagesList,
+  pageDelete,
 } from './panel-api.js';
 
 const COOKIE = 'tulip_token';
@@ -296,6 +299,20 @@ export function startPanel(deps: ApiDeps): Server | null {
         'cache-control': 'no-store',
       };
 
+      // Before the gate, and deliberately: a built page is public, and it is
+      // served on its own hostname so that agent-authored JavaScript is never
+      // same-origin with the operator's session. Nothing below this point can
+      // be reached on that hostname, so a page cannot borrow the panel's
+      // authentication even if the check further down were wrong.
+      if (isPagesRequest(req.headers.host)) {
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          res.writeHead(405, { 'content-type': 'text/plain' }).end('pages are read-only\n');
+          return;
+        }
+        servePage(res, url);
+        return;
+      }
+
       if (throttled(address)) {
         res.writeHead(429, { ...headers, 'content-type': 'text/plain' }).end('too many attempts\n');
         return;
@@ -440,6 +457,13 @@ export function startPanel(deps: ApiDeps): Server | null {
         }
         // Method guard matters: without it this also swallows the POST and
         // silently returns the current values instead of applying the change.
+        if (url.pathname === '/api/pages' && req.method === 'GET') {
+          return send(res, headers, 200, pagesList());
+        }
+        if (url.pathname === '/api/pages/delete' && req.method === 'POST') {
+          const result = pageDelete(url.searchParams.get('slug') ?? '');
+          return send(res, headers, result.ok ? 200 : 404, result);
+        }
         if (url.pathname === '/api/settings' && req.method === 'POST') {
           const result = updateSettings(deps, await readBody(req));
           return send(res, headers, result.ok ? 200 : 400, result);
@@ -584,6 +608,12 @@ export function startPanel(deps: ApiDeps): Server | null {
       host: deps.config.panel.host,
       port: deps.config.panel.port,
       note: 'exposure is set by the publish address in docker-compose.yml, not by this bind address',
+    });
+    const pages = pagesHost();
+    log('pages.status', {
+      note: pages === null
+        ? 'no page hostname configured — the agent cannot publish pages'
+        : `pages are served on ${pages}, which is deliberately not this panel's origin`,
     });
     log('pty.status', {
       note: ptyAvailable()

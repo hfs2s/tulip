@@ -39,6 +39,7 @@ import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
 import { retainOutbound } from './mediaStore.js';
 import { claim } from './spend.js';
+import { publishPage } from './pages.js';
 import type { Limiter } from './ratelimit.js';
 import type { TurnRegistry } from './turns.js';
 import type { Config } from './config.js';
@@ -404,7 +405,7 @@ export class Outbox extends EventEmitter {
     });
   }
 
-  private async answer(actionId: string, kind: 'search' | 'fetch' | 'chats', outcome: ExaOutcome): Promise<void> {
+  private async answer(actionId: string, kind: 'search' | 'fetch' | 'chats' | 'page', outcome: ExaOutcome): Promise<void> {
     const result = ToolResult.safeParse({
       actionId,
       kind,
@@ -566,6 +567,16 @@ export class Outbox extends EventEmitter {
         // Recorded against both chats, so a message that crossed conversations
         // is visible from the one it came from as well as the one it went to.
         feed.event('crossChat.sent', `${turn.chatKey} -> ${action.chatKey}`);
+        break;
+      }
+
+      case 'page': {
+        // The address comes back as an ordinary result item, so the answer file
+        // keeps one shape. A page has no text to carry — the point is the URL.
+        const published = publishPage(action.slug);
+        await this.answer(action.id, 'page', published.ok
+          ? { ok: true, items: [{ title: action.slug, url: published.url, published: null, text: '' }] }
+          : { ok: false, error: published.error });
         break;
       }
 

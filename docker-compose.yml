@@ -123,6 +123,12 @@ services:
       # entirely and leaves the bearer token as the only way in. Neither value
       # is a secret — the tag is an identifier, and the checking is done against
       # Cloudflare's published keys.
+      # The hostname pages are served on. It must NOT be the panel's: agent-authored
+      # JavaScript served from the panel's origin would be same-origin with the
+      # operator's session, and one fetch('/api/settings') from a page you opened
+      # would carry your cookie. Unset means the agent cannot publish at all,
+      # which is the correct behaviour rather than a degraded one.
+      TULIP_PAGES_HOST: ${TULIP_PAGES_HOST:-}
       TULIP_ACCESS_TEAM_DOMAIN: ${TULIP_ACCESS_TEAM_DOMAIN:-}
       TULIP_ACCESS_AUD: ${TULIP_ACCESS_AUD:-}
     volumes:

@@ -34,6 +34,9 @@ const USAGE = `usage:
                               sound tags are performed: (laughs) (chuckle)
                               (sighs) (breath). Anything else — including square
                               brackets — is read out as words.
+  tulip-wa page <name>        publish out/pages/<name>/ and print its address.
+                              Write index.html there first; CSS and JS beside it
+                              work, and so does browser storage. No network.
   tulip-wa chats              list chats you may message (if enabled)
   tulip-wa send --to <key> <text>
                               message a different chat (if enabled)
@@ -307,6 +310,24 @@ switch (command) {
     const text = rest.join(' ').trim() || readFileSync(0, 'utf8').trim();
     if (text.length === 0) die('tulip-wa voice: need something to say');
     queue({ kind: 'voice', text: text.slice(0, 2000) });
+    break;
+  }
+
+  case 'page': {
+    const slug = (rest[0] ?? '').trim().toLowerCase();
+    if (slug.length === 0) die('tulip-wa page: name the page, e.g. `tulip-wa page party-plan`');
+    const id = queue({ kind: 'page', slug });
+    const result = await awaitResult(id, 15_000);
+    if (result === null) {
+      process.stdout.write('page: no answer from the bridge within 15s. Try again before concluding anything.\n');
+      break;
+    }
+    if (!result.ok) {
+      process.stdout.write(`${result.error ?? 'page: refused'}\n`);
+      break;
+    }
+    const url = result.items[0]?.url ?? '';
+    process.stdout.write(`${url}\n`);
     break;
   }
 

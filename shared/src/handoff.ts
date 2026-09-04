@@ -259,6 +259,21 @@ export const OutboxAction = z.discriminatedUnion('kind', [
     .object({
       id: z.string().uuid(),
       turnId: TurnId,
+      /**
+       * Publish a page the agent has already written under `out/pages/<slug>/`.
+       *
+       * Writing the files is the publishing; this asks the bridge to look at
+       * them and hand back the address. Narrow because the slug lands in a URL,
+       * and it is the only part of this the agent chooses.
+       */
+      kind: z.literal('page'),
+      slug: z.string().min(3).max(48).regex(/^[a-z0-9][a-z0-9-]*$/, 'lowercase letters, digits and dashes'),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
       kind: z.literal('image'),
       /** A description. The bridge generates and sends it; no key reaches the agent. */
       prompt: z.string().min(1).max(1000),
@@ -362,7 +377,7 @@ export const AgentStatus = z
 export const ToolResult = z
   .object({
     actionId: z.string().uuid(),
-    kind: z.enum(['search', 'fetch', 'chats']),
+    kind: z.enum(['search', 'fetch', 'chats', 'page']),
     at: z.string().datetime(),
     ok: z.boolean(),
     /** Present when ok is false. Short, and safe to show a person. */

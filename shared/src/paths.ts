@@ -90,6 +90,13 @@ export const outPaths = {
    */
   files: `${OUT_DIR}/files`,
   file: (name: string) => `${OUT_DIR}/files/${name}`,
+  /**
+   * Static pages the agent has built. Served by the bridge on its own hostname,
+   * never on the panel's — see bridge/src/pages.ts for why that is not a
+   * preference.
+   */
+  pages: `${OUT_DIR}/pages`,
+  page: (slug: string) => `${OUT_DIR}/pages/${slug}`,
   /** The agent's self-report. Advisory; never used for a delivery decision. */
   status: `${OUT_DIR}/status.json`,
 

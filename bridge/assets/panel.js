@@ -72,9 +72,12 @@ async function api(path, options) {
   }
   return body;
 }
-async function act(action, key) {
+async function act(action, key, rawPath) {
   try {
-    var body = await api('/api/action/' + encodeURIComponent(action) + (key ? '?key=' + encodeURIComponent(key) : ''), { method: 'POST' });
+    var path = rawPath !== undefined
+      ? '/api/' + action + rawPath
+      : '/api/action/' + encodeURIComponent(action) + (key ? '?key=' + encodeURIComponent(key) : '');
+    var body = await api(path, { method: 'POST' });
     toast(body.message || 'Done.');
   } catch (err) { toast(err.message, true); return; }
   refresh();
@@ -95,7 +98,7 @@ var ICONS = {
 };
 var PAGES = [
   ['overview', 'Overview'], ['messages', 'Messages'], ['chats', 'Chats'], ['media', 'Media'],
-  ['terminal', 'Terminal'], ['settings', 'Settings'], ['log', 'Log']
+  ['terminal', 'Terminal'], ['pages', 'Pages'], ['settings', 'Settings'], ['log', 'Log']
 ];
 
 function buildNav() {
@@ -694,6 +697,49 @@ function fitTerminal() {
   if (width <= 0) return;
   var size = Math.max(5, Math.min(16, Math.floor(width / TERM_COLS / 0.6)));
   if (term.options.fontSize !== size) term.options.fontSize = size;
+}
+
+/**
+ * What the agent has published.
+ *
+ * The listing is the point of this page rather than a convenience: these are
+ * public, they are on your own domain, and the agent wrote them. Knowing one
+ * exists comes first, and being able to take it down without a shell comes
+ * second.
+ */
+async function renderPages() {
+  var p = head('pages', 'Pages', 'Small web pages the agent has built. Anyone with the link can open one, and it stays until you remove it — the agent has no network, so a page can keep state in the browser and cannot send anything anywhere.'), mine = renderToken;
+  var card = node('div', 'card');
+  p.appendChild(card);
+
+  var data;
+  try { data = await api('/api/pages'); } catch (err) { card.appendChild(node('p', 'empty', err.message)); return; }
+  if (stale(mine)) return;
+
+  if (!data.host) {
+    card.appendChild(node('p', 'empty',
+      'No page hostname is configured, so the agent cannot publish. Pages need their own hostname: served from this one, a page’s JavaScript would share an origin with your session here.'));
+    return;
+  }
+  if (!data.items.length) { card.appendChild(node('p', 'empty', 'Nothing published yet.')); return; }
+
+  data.items.forEach(function (page) {
+    var row = node('div', 'entry');
+    var link = node('a', 'value', page.slug);
+    link.href = page.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    row.appendChild(link);
+    row.appendChild(node('span', 'meta', plural(page.files, 'file') + ' · ' + bytes(page.bytes) + ' · ' + ago(Date.now() - page.at)));
+    var bin = node('button', 'sm danger', 'Delete');
+    bin.type = 'button';
+    bin.addEventListener('click', function () {
+      if (!window.confirm('Delete the page “' + page.slug + '”?\n\nThe link stops working immediately, and nothing keeps a copy.')) return;
+      act('pages/delete', null, '?slug=' + encodeURIComponent(page.slug));
+    });
+    row.appendChild(bin);
+    card.appendChild(row);
+  });
 }
 
 /**
@@ -1680,6 +1726,7 @@ function render() {
   else if (route === 'chats') renderChats(state);
   else if (route === 'media') renderMedia();
   else if (route === 'terminal') renderTerminal();
+  else if (route === 'pages') void renderPages();
   else if (route === 'settings') renderSettings();
   else if (route === 'log') renderLog();
 }

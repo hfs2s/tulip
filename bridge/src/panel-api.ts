@@ -26,6 +26,7 @@ import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
 import { parseConfig, Contact } from './config.js';
+import { deletePage, listPages, pagesHost, type PageSummary } from './pages.js';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import type { Dispatcher } from './dispatcher.js';
@@ -309,6 +310,29 @@ export function deleteMedia(chatKey: string, name: string, direction: string): {
 
   log('media.deleted', { chatKey, direction, name });
   feed.event('media.deleted', `an attachment was deleted from the panel (${direction === 'out' ? 'sent' : 'received'})`);
+  return { ok: true, message: 'Deleted.' };
+}
+
+// ─── Pages ───────────────────────────────────────────────────────────────────
+
+/**
+ * What the agent has published, so an operator can see it and remove it.
+ *
+ * The listing exists because these are public and agent-authored: the first
+ * thing an operator needs is to know one was made, and the second is to be able
+ * to take it down without a shell.
+ */
+export function pagesList(): Json {
+  const host = pagesHost();
+  return {
+    host,
+    items: listPages().map((p: PageSummary) => ({ ...p, url: host === null ? null : `https://${host}/${p.slug}/` })),
+  };
+}
+
+export function pageDelete(slug: string): { ok: boolean; message: string } {
+  if (!deletePage(slug)) return { ok: false, message: 'No such page.' };
+  feed.event('page.deleted', `the page ${slug} was removed`);
   return { ok: true, message: 'Deleted.' };
 }
 
