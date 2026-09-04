@@ -194,6 +194,47 @@
   .tile .none{height:120px;display:grid;place-items:center;color:var(--faint);font-size:12px}
   .tile .meta{padding:8px 10px;font-size:11.5px;color:var(--faint)}
 
+  /* ── Voice notes ────────────────────────────────────────────────────────────
+     Full-width rows rather than tiles. A recording has no thumbnail, so a
+     square in the picture grid is a player floating in empty space — and since
+     they are transcribed now, the words are the part worth reading, which a
+     148px column cannot carry. */
+  .subhead{font:400 13px/1.2 var(--display);letter-spacing:.02em;color:var(--faint);
+           text-transform:uppercase;margin:22px 0 10px}
+  .subhead:first-child{margin-top:0}
+  .voice{background:var(--panel);border:1px solid var(--line-soft);border-radius:12px;
+         padding:12px 14px;margin-bottom:10px;display:grid;gap:10px}
+  .voice audio{width:100%;height:36px;display:block}
+  .voice-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .voice-head .who{font-size:13px;color:var(--ink);min-width:0;overflow-wrap:anywhere}
+  .voice-head .tag{font-size:10.5px;letter-spacing:.02em;padding:3px 7px;
+                   border-radius:var(--r-pill);color:var(--faint);border:1px solid var(--line)}
+  .voice-head .tag.sent{color:var(--accent);border-color:var(--accent)}
+  .voice-head .meta{font-size:11.5px;color:var(--faint)}
+  /* Pushes the bin to the far end, so it is never adjacent to the play control. */
+  .voice-head .bin{margin-left:auto}
+  .voice .said{margin:0;padding:0 0 0 11px;border-left:2px solid var(--line);
+               font-size:13.5px;line-height:1.55;color:var(--dim)}
+  .voice .said.none{color:var(--faint);font-style:italic;border-left-style:dotted}
+
+  /* ── Delete ─────────────────────────────────────────────────────────────────
+     Quiet until wanted. It removes a message somebody sent, with no trash and
+     no copy kept, so it should not sit under the thumb of someone scrolling. */
+  .bin{background:transparent;border:1px solid var(--line);color:var(--faint);
+       border-radius:8px;width:30px;height:30px;line-height:1;padding:0;cursor:pointer;
+       font-size:13px;opacity:.55;transition:opacity .15s,border-color .15s,color .15s}
+  .bin:hover,.bin:focus-visible{opacity:1;color:var(--bad);border-color:var(--bad)}
+  .tile .bin{position:absolute;top:8px;right:8px;z-index:1;background:rgba(8,8,10,.72)}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+  button.danger{border-color:var(--bad);color:var(--bad)}
+  button.danger:hover:not(:disabled){background:var(--bad);color:var(--ground)}
+  button.danger:disabled{opacity:.5;cursor:default}
+
+  @media (hover:none){
+    /* No hover to reveal it, so it stays legible on a phone. */
+    .bin{opacity:1;min-width:40px;min-height:40px}
+  }
+
   .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
   button{font:inherit;cursor:pointer;border-radius:var(--r-pill);padding:9px 18px;
          border:1px solid var(--line);background:var(--raise);color:var(--ink);

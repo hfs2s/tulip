@@ -476,25 +476,115 @@ async function renderMedia() {
   try { data = await api('/api/media/list?n=200'); } catch (err) { card.appendChild(node('p', 'empty', err.message)); return; }
   if (stale(mine)) return;
   if (!data.items.length) { card.appendChild(node('p', 'empty', 'No attachments yet.')); return; }
-  var grid = node('div', 'grid');
-  data.items.forEach(function (m) {
-    var tile = node('div', 'tile');
-    var src = '/api/media?key=' + encodeURIComponent(m.chatKey)
-      + '&name=' + encodeURIComponent(m.name)
-      + '&dir=' + encodeURIComponent(m.direction || 'in');
-    if (m.kind === 'image') { var img = document.createElement('img'); img.src = src; img.alt = ''; img.loading = 'lazy'; tile.appendChild(img); }
-    else if (m.kind === 'video') { var v = document.createElement('video'); v.src = src; v.controls = true; tile.appendChild(v); }
-    else if (m.kind === 'audio') { var a = document.createElement('audio'); a.src = src; a.controls = true; a.style.width = '100%'; tile.appendChild(a); }
-    else tile.appendChild(node('div', 'none', m.kind));
-    // Which way it went is the first thing to know about an attachment: one is
-    // something a stranger sent, the other is something Juan produced and a
-    // stranger received.
-    var sent = m.direction === 'out';
-    tile.appendChild(node('span', 'tag' + (sent ? ' sent' : ''), sent ? 'Juan sent' : 'received'));
-    tile.appendChild(node('div', 'meta', (m.chatName || m.chatKey) + ' · ' + bytes(m.bytes)));
-    grid.appendChild(tile);
+
+  // Audio is not a picture and does not belong in a picture grid. A voice note
+  // has no thumbnail, so a square tile shows a player floating in empty space —
+  // and, now that they are transcribed, the words are the part worth reading.
+  // They get full-width rows; everything with a visual gets the grid.
+  var sound = data.items.filter(function (m) { return m.kind === 'audio'; });
+  var seen = data.items.filter(function (m) { return m.kind !== 'audio'; });
+
+  if (sound.length) {
+    card.appendChild(node('h3', 'subhead', sound.length === 1 ? 'Voice note' : 'Voice notes'));
+    sound.forEach(function (m) { card.appendChild(voiceRow(m)); });
+  }
+  if (seen.length) {
+    if (sound.length) card.appendChild(node('h3', 'subhead', 'Pictures and video'));
+    var grid = node('div', 'grid');
+    seen.forEach(function (m) { grid.appendChild(mediaTile(m)); });
+    card.appendChild(grid);
+  }
+}
+
+function mediaSrc(m) {
+  return '/api/media?key=' + encodeURIComponent(m.chatKey)
+    + '&name=' + encodeURIComponent(m.name)
+    + '&dir=' + encodeURIComponent(m.direction || 'in');
+}
+
+/** Which way it went, which is the first thing to know about an attachment. */
+function directionTag(m) {
+  var sent = m.direction === 'out';
+  return node('span', 'tag' + (sent ? ' sent' : ''), sent ? 'Juan sent' : 'received');
+}
+
+function mediaTile(m) {
+  var tile = node('div', 'tile');
+  var src = mediaSrc(m);
+  if (m.kind === 'image') { var img = document.createElement('img'); img.src = src; img.alt = ''; img.loading = 'lazy'; tile.appendChild(img); }
+  else if (m.kind === 'video') { var v = document.createElement('video'); v.src = src; v.controls = true; tile.appendChild(v); }
+  else tile.appendChild(node('div', 'none', m.kind));
+  tile.appendChild(directionTag(m));
+  tile.appendChild(node('div', 'meta', (m.chatName || m.chatKey) + ' · ' + bytes(m.bytes)));
+  tile.appendChild(binButton(m));
+  return tile;
+}
+
+function voiceRow(m) {
+  var row = node('div', 'voice');
+
+  var player = document.createElement('audio');
+  player.src = mediaSrc(m);
+  player.controls = true;
+  player.preload = 'none';
+  row.appendChild(player);
+
+  var head = node('div', 'voice-head');
+  head.appendChild(node('span', 'who', m.chatName || m.chatKey));
+  head.appendChild(directionTag(m));
+  head.appendChild(node('span', 'meta', bytes(m.bytes)));
+  head.appendChild(binButton(m));
+  row.appendChild(head);
+
+  // The transcript is what makes the row worth having: without it an operator
+  // has to play every recording to find out whether any of them mattered.
+  if (m.transcript) row.appendChild(node('blockquote', 'said', m.transcript));
+  else row.appendChild(node('div', 'said none', 'No transcript — either transcription was off when this arrived, or it failed.'));
+  return row;
+}
+
+/**
+ * Delete, behind a confirm.
+ *
+ * The confirm is not politeness. There is no trash, nothing keeps a copy, and
+ * the thing being removed is a message somebody sent — so a mis-tap is
+ * unrecoverable and the dialog says so in those words.
+ */
+function binButton(m) {
+  var b = node('button', 'bin', '🗑');
+  b.type = 'button';
+  b.title = 'Delete this attachment';
+  b.setAttribute('aria-label', 'Delete this attachment from ' + (m.chatName || m.chatKey));
+  b.addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    openModal('Delete this attachment?', 'It is removed from disk and cannot be recovered.', function (body, modal, dismiss) {
+      body.appendChild(node('p', 'hint', (m.chatName || m.chatKey) + ' · ' + m.kind + ' · ' + bytes(m.bytes)
+        + (m.transcript ? '\n\n“' + m.transcript + '”' : '')));
+      var actions = node('div', 'modal-actions');
+      var cancel = node('button', 'sm', 'Cancel');
+      cancel.type = 'button';
+      cancel.addEventListener('click', dismiss);
+      var go = node('button', 'sm danger', 'Delete');
+      go.type = 'button';
+      go.addEventListener('click', async function () {
+        go.disabled = true;
+        try {
+          var r = await api('/api/media/delete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ key: m.chatKey, name: m.name, dir: m.direction || 'in' })
+          });
+          toast(r.message || 'Deleted.');
+          dismiss();
+          renderMedia();
+        } catch (err) { go.disabled = false; toast(err.message); }
+      });
+      actions.appendChild(cancel);
+      actions.appendChild(go);
+      body.appendChild(actions);
+    });
   });
-  card.appendChild(grid);
+  return b;
 }
 
 function renderTools() {
