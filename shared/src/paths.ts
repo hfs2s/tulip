@@ -80,6 +80,25 @@ export const outPaths = {
   screen: `${OUT_DIR}/screen.json`,
 
   /**
+   * The pane's live byte stream, appended by tmux `pipe-pane`.
+   *
+   * `screen.json` is a *snapshot*: what the pane looked like when the agent
+   * last captured it, with the escape sequences stripped. That is the right
+   * shape for the supervisor's parser and the wrong shape for anything meant to
+   * look like the session — a TUI is a stream of cursor movements, not a
+   * sequence of frames, so a poll of stripped text can only ever be a summary
+   * of one. This file is the stream itself, the bytes the pane actually
+   * emitted, which is what lets a terminal emulator in the browser render
+   * exactly what tmux renders.
+   *
+   * Written only while somebody is watching, and truncated by the agent when it
+   * grows past its cap or when the followed window changes. Truncation is the
+   * signal as well as the cleanup: the bridge notices the file has shrunk below
+   * its read offset and repaints from the top rather than resuming mid-escape.
+   */
+  pane: `${OUT_DIR}/pane.raw`,
+
+  /**
    * Token spend, summarised by the agent from its own Claude Code transcripts.
    *
    * It has to be reported across this boundary rather than read directly: the

@@ -146,7 +146,9 @@ export class Dispatcher extends EventEmitter {
       return;
     }
 
-    const verdict = gate(envelope, config);
+    // `hasMedia` is derived here rather than carried on the envelope: it is a
+    // question the gate asks, not a property of the message.
+    const verdict = gate({ ...envelope, hasMedia: envelope.media.length > 0 }, config);
     if (!verdict.accept) {
       feed.inbound({ ...summary, accepted: false, reason: verdict.reason });
       log('gate.deny', {

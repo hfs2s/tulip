@@ -102,6 +102,42 @@ export async function capture(window: string, lines = 40): Promise<string> {
 }
 
 /**
+ * The last `lines` of a pane *with its escape sequences intact*.
+ *
+ * `capture` strips them, which is correct for the supervisor's parser — it
+ * matches on text and an escape sequence in the middle of a word would break
+ * it — and wrong for anything that has to look like the session. `-e` keeps
+ * colour, attributes and cursor positioning, so a viewer arriving mid-session
+ * can be painted once before the live stream takes over.
+ */
+export async function captureAnsi(window: string, lines = 50): Promise<string> {
+  const result = await tmux(['capture-pane', '-p', '-e', '-t', paneTarget(window), '-S', `-${lines}`]);
+  return result.stdout;
+}
+
+/**
+ * Stream a pane's output to a file, live.
+ *
+ * `-o` is what makes this safe to call on every tick: tmux opens a pipe only if
+ * that pane does not already have one, so repeated calls are free and a pane
+ * that was replaced gets its pipe back without any bookkeeping here.
+ *
+ * The command runs inside this container as a child of the tmux server, and
+ * appends to the outbound volume. Note which direction that is: the bridge
+ * *reads a file the agent wrote*, exactly as it does for actions and status. No
+ * socket is opened, no port is published, and the bridge gains no route to this
+ * pane — which is the property the whole two-container split exists to keep.
+ */
+export async function startPipe(window: string, file: string): Promise<void> {
+  await tmux(['pipe-pane', '-o', '-t', paneTarget(window), `cat >> ${JSON.stringify(file)}`]);
+}
+
+/** Stop streaming. `pipe-pane` with no command closes the pane's pipe. */
+export async function stopPipe(window: string): Promise<void> {
+  await tmux(['pipe-pane', '-t', paneTarget(window)]);
+}
+
+/**
  * Type a line and submit it.
  *
  * `-l` sends the text literally, so quotes, emoji and anything else in the

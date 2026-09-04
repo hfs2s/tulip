@@ -29,6 +29,8 @@ export interface GateInput {
   readonly mentionsMe: boolean;
   readonly isReaction: boolean;
   readonly isPollVote: boolean;
+  /** Whether any attachment actually arrived and can be looked at. */
+  readonly hasMedia: boolean;
 }
 
 export type GateVerdict = { accept: true } | { accept: false; reason: string };
@@ -54,9 +56,17 @@ export function gate(input: GateInput, config: Config): GateVerdict {
   if (input.isReaction) return deny('reaction — recorded, not answered');
   if (input.isPollVote) return deny('poll vote — recorded, not answered');
 
-  // Nothing to answer. Reached when a message carries only media that failed to
-  // download, or a type the parser does not understand.
-  if (input.text.trim().length === 0) return deny('no text content');
+  // Nothing to answer: no words *and* nothing to look at. Reached when a
+  // message carries only media that failed to download, or a type the parser
+  // does not understand.
+  //
+  // This used to test the text alone, which quietly refused every photo and
+  // every voice note sent without a caption — in every chat and every group
+  // mode, since it runs before all of them. `hasContent` in envelope.ts had
+  // always counted media as content and the dispatcher kept those messages on
+  // that basis; the gate then discarded them two lines later. Somebody sending
+  // a picture got silence, which is indistinguishable from being ignored.
+  if (input.text.trim().length === 0 && !input.hasMedia) return deny('nothing to answer');
 
   if (input.isGroup) {
     if (!config.groups.enabled) return deny('groups are disabled');
