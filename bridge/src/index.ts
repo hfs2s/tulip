@@ -141,16 +141,33 @@ async function main(): Promise<void> {
   // Typing follows the turn rather than the send: the wait people notice is the
   // one before the first word, and WhatsApp expires a composing state after
   // about ten seconds, so it has to be refreshed rather than set once.
+  //
+  // But only when we are actually going to write something. Judgement mode
+  // starts a turn for *every* group message and the agent stays quiet for most
+  // of them, so showing "typing…" at turn start meant the room watched Juan
+  // compose a reply to a conversation he was not part of, and then nothing
+  // arrived. That reads as broken, and it is worse than silence: it interrupts
+  // a room to announce a message that never comes.
+  //
+  // A direct message is addressed to us by definition. A group message is only
+  // if somebody mentioned us or replied to us — and there the persona's rule is
+  // to always answer, so the indicator is a promise we keep. Everywhere else the
+  // reply simply appears, which is what a person who was not asked would do.
   let typingFor: string | null = null;
-  dispatcher.on('turnStart', ({ chatKey }: { chatKey: string }) => {
+  dispatcher.on('turnStart', ({ chatKey, addressed }: { chatKey: string; addressed: boolean }) => {
+    if (!addressed) return;
     const jid = chats.jidFor(chatKey);
     if (jid) void wa.typing(jid, true);
     typingFor = chatKey;
   });
   dispatcher.on('turnEnd', ({ chatKey }: { chatKey: string }) => {
+    // Only clear what we set. Sending "paused" for a turn that never showed
+    // typing would push a presence update into a room we deliberately said
+    // nothing in.
+    if (typingFor !== chatKey) return;
     const jid = chats.jidFor(chatKey);
     if (jid) void wa.typing(jid, false);
-    if (typingFor === chatKey) typingFor = null;
+    typingFor = null;
   });
   setInterval(() => {
     if (typingFor === null) return;

@@ -361,7 +361,14 @@ export class Dispatcher extends EventEmitter {
     this.queue.remove(batch);
     feed.delivered(chatKey, batch.length);
     log('turn.start', { chatKey, turnId: turn.turnId, messages: batch.length });
-    this.emit('turnStart', { chatKey, turnId: turn.turnId });
+    // `addressed` decides whether the typing indicator is honest — see the note
+    // on it in index.ts. A direct message is addressed by definition; a group
+    // message only if somebody actually mentioned us or replied to us.
+    this.emit('turnStart', {
+      chatKey,
+      turnId: turn.turnId,
+      addressed: !last.envelope.isGroup || batch.some(({ envelope }) => envelope.mentionsMe),
+    });
 
     await this.awaitTurnStart(turn.turnId);
   }

@@ -48,13 +48,14 @@ function envelope(id: string, chatJid = '15551234567@s.whatsapp.net') {
   };
 }
 
-function build() {
+function build(overrides: Record<string, unknown> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'tulip-d-'));
   roots.push(dir);
   const config = parseConfig({
     audience: { everyone: true },
     // Short debounce so the test is not waiting on a three-second timer.
     delivery: { debounceMs: 0 },
+    ...overrides,
   });
   const chats = new ChatRegistry(join(dir, 'salt'), join(dir, 'chats.json'));
   const dispatcher = new Dispatcher({
@@ -125,6 +126,58 @@ describe('a turn is closed even when nothing else is queued', () => {
     const snap = dispatcher.snapshot();
     expect(snap.inFlight).toBeNull();
     expect(snap.ready).toBe(0);
+  }, 20_000);
+});
+
+/**
+ * Whether the typing indicator is honest.
+ *
+ * Judgement mode starts a turn for every group message and the agent stays quiet
+ * for most of them. Showing "typing…" at turn start meant a room watched Juan
+ * compose a reply to a conversation he was not part of, and then nothing came —
+ * which reads as broken, and interrupts the room to announce a message that
+ * never arrives. `addressed` is what the indicator hangs on.
+ */
+describe('whether a turn was addressed to us', () => {
+  function firstTurnStart(dispatcher) {
+    return new Promise((resolve) => dispatcher.once('turnStart', resolve));
+  }
+
+  async function turnStartFor(mutate, overrides = {}) {
+    const { dispatcher } = build(overrides);
+    dispatcher.on('turnStart', (e) => {
+      busyTurn = e.turnId;
+      setTimeout(() => { busyTurn = null; }, 20);
+    });
+    const started = firstTurnStart(dispatcher);
+    const message = {
+      key: { remoteJid: '15551234567@s.whatsapp.net', fromMe: false, id: 'm1' },
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      pushName: 'Someone',
+      message: { conversation: 'are you here, Maria?' },
+    };
+    mutate(message);
+    await dispatcher.handle(message);
+    void dispatcher.pump();
+    return started;
+  }
+
+  it('is true for a direct message, which is addressed by definition', async () => {
+    const event = await turnStartFor(() => {});
+    expect(event.addressed).toBe(true);
+  }, 20_000);
+
+  it('is false for a group message that did not mention us', async () => {
+    // Judgement mode: the gate lets every group message through and the agent
+    // decides. This is the mode the false indicator showed up in.
+    const event = await turnStartFor(
+      (m) => {
+        m.key.remoteJid = '120363000000000000@g.us';
+        m.key.participant = '15551234567@s.whatsapp.net';
+      },
+      { groups: { enabled: true, replyTo: 'observe' } },
+    );
+    expect(event.addressed).toBe(false);
   }, 20_000);
 });
 
