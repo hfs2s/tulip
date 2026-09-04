@@ -373,6 +373,39 @@ export const ToolResult = z
  * the agent records the last sequence it applied and ignores anything at or
  * below it, so a file read twice does not type twice.
  */
+/**
+ * Token spend over three rolling windows.
+ *
+ * Counted from the agent's own Claude Code transcripts, which is the only place
+ * the numbers exist — the bridge never talks to the model API and has nothing to
+ * meter. Cache reads are kept separate from input because they are billed
+ * differently and lumping them together makes a cached session look far more
+ * expensive than it was.
+ */
+export const UsageWindow = z
+  .object({
+    input: z.number().int().nonnegative(),
+    output: z.number().int().nonnegative(),
+    cacheWrite: z.number().int().nonnegative(),
+    cacheRead: z.number().int().nonnegative(),
+    /** Assistant messages counted, not WhatsApp turns — one turn is several. */
+    replies: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const UsageReport = z
+  .object({
+    at: z.string().datetime(),
+    hour: UsageWindow,
+    day: UsageWindow,
+    week: UsageWindow,
+    /** Busiest models first. Capped: this is a display, not an audit log. */
+    models: z
+      .array(z.object({ name: z.string().max(64), tokens: z.number().int().nonnegative() }).strict())
+      .max(8),
+  })
+  .strict();
+
 export const TerminalRequest = z
   .object({
     /** tmux window to show — `c-<chatKey>`, or null for whichever is active. */
@@ -419,5 +452,7 @@ export type CurrentTurn = z.infer<typeof CurrentTurn>;
 export type OutboxAction = z.infer<typeof OutboxAction>;
 export type AgentStatus = z.infer<typeof AgentStatus>;
 export type ToolResult = z.infer<typeof ToolResult>;
+export type UsageWindow = z.infer<typeof UsageWindow>;
+export type UsageReport = z.infer<typeof UsageReport>;
 export type TerminalRequest = z.infer<typeof TerminalRequest>;
 export type TerminalScreen = z.infer<typeof TerminalScreen>;

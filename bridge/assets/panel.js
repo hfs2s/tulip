@@ -234,6 +234,71 @@ function renderOverview(s) {
   controls.appendChild(hold); controls.appendChild(release);
   card.appendChild(controls);
   p.appendChild(card);
+
+  p.appendChild(usageCard(s.usage));
+}
+
+/** Compact token counts, e.g. 1.2M / 431k / 940. */
+function tokens(n) {
+  if (typeof n !== 'number' || !isFinite(n)) return '—';
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M';
+  if (n >= 1000) return Math.round(n / 1000) + 'k';
+  return String(n);
+}
+
+/**
+ * Token spend over three rolling windows.
+ *
+ * Cache reads are shown apart from input rather than folded in. They are the
+ * bulk of the count on any long session and they are billed differently, so a
+ * single total makes a mostly-cached day look like a runaway one.
+ */
+function usageCard(u) {
+  var card = node('div', 'card');
+  card.appendChild(node('h2', null, 'Token usage'));
+
+  if (!u) {
+    card.appendChild(node('p', 'sub', 'The agent has not reported yet. Counts appear within a minute of it starting.'));
+    return card;
+  }
+
+  card.appendChild(node('p', 'sub', 'Counted from the agent\u2019s own sessions. Rolling windows, not calendar periods.'));
+
+  var table = document.createElement('table');
+  var head = document.createElement('tr');
+  ['', 'Total', 'In', 'Out', 'Cache write', 'Cache read', 'Replies'].forEach(function (h) {
+    var th = document.createElement('th');
+    th.textContent = h;
+    head.appendChild(th);
+  });
+  table.appendChild(head);
+
+  [['Last hour', u.hour], ['Last 24 hours', u.day], ['Last 7 days', u.week]].forEach(function (row) {
+    var w = row[1];
+    var total = w.input + w.output + w.cacheWrite + w.cacheRead;
+    var tr = document.createElement('tr');
+    [row[0], tokens(total), tokens(w.input), tokens(w.output), tokens(w.cacheWrite), tokens(w.cacheRead), String(w.replies)]
+      .forEach(function (v, i) {
+        var td = document.createElement('td');
+        td.textContent = v;
+        if (i === 1) td.className = 'value';
+        else if (i > 1) td.className = 'muted';
+        tr.appendChild(td);
+      });
+    table.appendChild(tr);
+  });
+
+  var wrap = node('div');
+  wrap.style.overflowX = 'auto';
+  wrap.appendChild(table);
+  card.appendChild(wrap);
+
+  if (u.models && u.models.length) {
+    card.appendChild(node('p', 'hint', u.models.map(function (m) {
+      return m.name + ' \u00b7 ' + tokens(m.tokens);
+    }).join('   ')));
+  }
+  return card;
 }
 
 function lineFor(e) {

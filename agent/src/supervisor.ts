@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AgentStatus,
+  UsageReport,
   CurrentTurn,
   InboxBatch,
   TerminalRequest,
@@ -26,12 +27,19 @@ import {
 } from '@tulip/shared';
 import type { CurrentTurn as CurrentTurnType } from '@tulip/shared';
 import { log } from './log.js';
+import { UsageMeter } from './usage.js';
 import { SessionPool, type Session } from './sessions.js';
 import { setTurn } from './workspace.js';
 
 const POLL_MS = 500;
 const STATUS_MS = 2000;
 /** Sessions idle longer than this are closed; their context stays on disk. */
+/**
+ * Token accounting is far cheaper than a turn but not free — it tails files.
+ * Every 30s is plenty for windows measured in hours, and keeps it off the
+ * two-second status path.
+ */
+const USAGE_MS = 30_000;
 const IDLE_REAP_MS = Number(process.env['TULIP_SESSION_IDLE_MS'] ?? 30 * 60 * 1000);
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -46,6 +54,9 @@ const pool = new SessionPool({
   model: process.env['TULIP_MODEL'] || null,
 });
 
+/** Holds its own file offsets, so it must outlive a single report. */
+const meter = new UsageMeter();
+
 let busyTurn: string | null = null;
 let fatal: string | null = null;
 let lastTurnId: string | null = null;
@@ -57,6 +68,27 @@ function readCurrent(): CurrentTurnType | null {
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Publish token spend for the panel.
+ *
+ * Same contract as `publishStatus`: written by the untrusted side, validated by
+ * the bridge, and displayed rather than acted on. Nothing in the delivery path
+ * reads these numbers, so a wrong one costs an operator a wrong figure and
+ * nothing else.
+ */
+function publishUsage(): void {
+  try {
+    const validated = UsageReport.safeParse(meter.report());
+    if (!validated.success) {
+      log('usage.invalid', { issues: validated.error.issues.length });
+      return;
+    }
+    writeJsonAtomic(outPaths.usage, validated.data, 0o644);
+  } catch (err) {
+    log('usage.writeFailed', { err: String((err as Error).message) });
   }
 }
 
@@ -271,6 +303,8 @@ async function main(): Promise<void> {
   publishStatus();
 
   setInterval(publishStatus, STATUS_MS).unref();
+  publishUsage();
+  setInterval(publishUsage, USAGE_MS).unref();
   setInterval(() => {
     void serveTerminal().catch((err: unknown) => log('terminal.error', { err: String((err as Error).message) }));
   }, 1000).unref();

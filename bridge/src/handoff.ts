@@ -14,8 +14,12 @@
  * the timer overrides. Neither is a way to affect another chat.
  */
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { AgentStatus, InboxBatch, CurrentTurn, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
-import type { InboxBatch as InboxBatchType, AgentStatus as AgentStatusType } from '@tulip/shared';
+import { AgentStatus, InboxBatch, CurrentTurn, UsageReport, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
+import type {
+  InboxBatch as InboxBatchType,
+  AgentStatus as AgentStatusType,
+  UsageReport as UsageReportType,
+} from '@tulip/shared';
 import { log } from './log.js';
 
 /** Create the directory structure both containers expect. */
@@ -81,6 +85,32 @@ export function readStatus(): AgentStatusType | null {
   const result = AgentStatus.safeParse(parsed);
   if (!result.success) {
     log('handoff.statusInvalid', { issues: result.error.issues.length });
+    return null;
+  }
+  return result.data;
+}
+
+/**
+ * Token spend, as reported by the agent.
+ *
+ * Validated exactly like the status file and for the same reason: it is written
+ * by the container this design assumes an attacker owns. Nothing reads it but
+ * the panel — no limit, no gate and no delivery decision depends on it — so the
+ * worst a fabricated number can do is show an operator the wrong figure. It is
+ * still schema-checked, because "only displayed" is not a reason to hand
+ * unvalidated JSON to a renderer.
+ */
+export function readUsage(): UsageReportType | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(outPaths.usage, 'utf8'));
+  } catch {
+    return null; // not reported yet
+  }
+
+  const result = UsageReport.safeParse(parsed);
+  if (!result.success) {
+    log('handoff.usageInvalid', { issues: result.error.issues.length });
     return null;
   }
   return result.data;

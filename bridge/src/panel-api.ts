@@ -30,7 +30,7 @@ import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import type { Dispatcher } from './dispatcher.js';
 import { feed, type FeedEntry } from './feed.js';
-import { readStatus } from './handoff.js';
+import { readStatus, readUsage } from './handoff.js';
 import { log } from './log.js';
 import { paths } from './paths.js';
 import type { Limiter } from './ratelimit.js';
@@ -87,6 +87,10 @@ export function snapshot(deps: ApiDeps): Json {
     },
     hold: state.holdInfo(),
     queue,
+    // Null until the agent has reported once. The panel says "not reported yet"
+    // rather than drawing zeroes, because zero spend and no measurement look
+    // identical in a number and mean opposite things.
+    usage: readUsage(),
     today: {
       in: recent.filter((e) => e.kind === 'in').length,
       accepted: recent.filter((e) => e.kind === 'in' && e.accepted === true).length,

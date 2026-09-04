@@ -78,4 +78,16 @@ export const outPaths = {
 
   /** The captured pane, written only while an operator is watching. */
   screen: `${OUT_DIR}/screen.json`,
+
+  /**
+   * Token spend, summarised by the agent from its own Claude Code transcripts.
+   *
+   * It has to be reported across this boundary rather than read directly: the
+   * transcripts live in `CLAUDE_CONFIG_DIR` on a volume the bridge has no mount
+   * for, which is the same disjointness that keeps the agent away from the
+   * WhatsApp credentials. So the agent summarises and the bridge validates —
+   * and, like `status.json`, this is a number written by the untrusted side. It
+   * is displayed, never used for a decision.
+   */
+  usage: `${OUT_DIR}/usage.json`,
 } as const;
