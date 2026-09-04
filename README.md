@@ -166,7 +166,7 @@ Requires Docker with the Compose plugin. `scripts/install-docker.sh` sets that u
 on Debian/Raspberry Pi OS.
 
 ```bash
-git clone https://github.com/echemles/tulip.git
+git clone https://github.com/hfs2s/tulip.git
 cd tulip
 
 cp .env.example .env                 # add ANTHROPIC_API_KEY
