@@ -167,6 +167,21 @@ describe('what is spoken', () => {
     expect(sent[0]?.['text']).toBe('[honestly] I have no idea');
   });
 
+  it('keeps the first two sound tags and drops the rest', async () => {
+    await synthesise('(laughs) yes (sighs) well (chuckle) anyway (breath) so');
+    expect(sent[0]?.['text']).toBe('(laughs) yes (sighs) well anyway so');
+  });
+
+  it('leaves a message alone when it is already within the ceiling', async () => {
+    await synthesise('(laughs) yes (sighs) well');
+    expect(sent[0]?.['text']).toBe('(laughs) yes (sighs) well');
+  });
+
+  it('does not count ordinary parentheses towards the ceiling', async () => {
+    await synthesise('(mostly) fine (really) yes (laughs) good (sighs) done');
+    expect(sent[0]?.['text']).toBe('(mostly) fine (really) yes (laughs) good (sighs) done');
+  });
+
   it('does not invent tags from ordinary parentheses', async () => {
     await synthesise('it was fine (mostly) in the end');
     expect(sent[0]?.['text']).toBe('it was fine (mostly) in the end');

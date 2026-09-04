@@ -55,6 +55,37 @@ const SOUND_TAGS = new Set([
  * because the agent may have meant those words and silently deleting speech is
  * worse than speaking a stray one.
  */
+/** At most this many performed interjections in one recording. */
+const MAX_SOUND_TAGS = 2;
+
+/**
+ * Keep the first few tags and drop the rest.
+ *
+ * The brief asks for restraint and restraint is not a thing a brief can
+ * guarantee — an agent having a good time will reach for a fourth laugh, and by
+ * then the recording is a performance rather than a person. Enforced at the
+ * boundary for the same reason the bracket repair is: the rule holds for a
+ * session resumed from an older brief, and for one that simply got carried
+ * away.
+ *
+ * Only known tags are counted or removed. Ordinary parentheses are speech and
+ * are never touched.
+ */
+function capSoundTags(text: string): string {
+  let kept = 0;
+  return text
+    .replace(/\(([a-z][a-z-]{1,18})\)\s*/gi, (whole, inner: string) => {
+      if (!SOUND_TAGS.has(inner.toLowerCase())) return whole;
+      kept += 1;
+      if (kept <= MAX_SOUND_TAGS) return whole;
+      // The trailing space goes with it, or removing a tag mid-sentence leaves
+      // a gap where one never was.
+      return '';
+    })
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function withSoundTags(text: string): string {
   return text.replace(/\[([a-z][a-z-]{1,18})\]/gi, (whole, inner: string) => {
     const tag = inner.toLowerCase();
@@ -174,7 +205,7 @@ export async function synthesise(text: string, voiceId = ''): Promise<Produced> 
          * told to reach for them, so quietly removing one would be the system
          * disagreeing with its own brief.
          */
-        text: withSoundTags(text).slice(0, 4000),
+        text: capSoundTags(withSoundTags(text)).slice(0, 4000),
         stream: false,
         /**
          * Without this the voice reads Spanish with whatever mouth the model

@@ -104,7 +104,10 @@ are not a tag syntax either — `[laughs]` is read the same way. If you want a
 sound that is not here, you cannot have it. Pick the nearest one or write the
 line differently.
 
-One per message is usually plenty. Two is a performance.
+**Two per message, at most.** One is usually plenty. That is a hard ceiling
+rather than advice — anything past the second is removed before the recording is
+made, so a third laugh is not a livelier voice note, it is a laugh nobody
+hears.
 
 Reach for them. If you are deciding whether a line needs one, it probably does —
 err towards adding rather than leaving it flat. They are performed rather than
