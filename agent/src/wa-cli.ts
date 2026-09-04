@@ -296,6 +296,9 @@ switch (command) {
   }
 
   case 'gif': {
+    if (rest.includes('--to')) {
+      die('tulip-wa gif: --to is not supported. GIFs go to the person you are answering.');
+    }
     // A search phrase, not a URL — you have no internet. The bridge does the
     // searching and the fetching; you only say what you are looking for.
     const idx = rest.indexOf('--caption');
@@ -307,6 +310,9 @@ switch (command) {
   }
 
   case 'image': {
+    if (rest.includes('--to')) {
+      die('tulip-wa image: --to is not supported. Pictures go to the person you are answering.');
+    }
     const idx = rest.indexOf('--caption');
     const caption = idx === -1 ? null : rest.slice(idx + 1).join(' ') || null;
     const prompt = (idx === -1 ? rest : rest.slice(0, idx)).join(' ').trim();
@@ -316,6 +322,18 @@ switch (command) {
   }
 
   case 'voice': {
+    // `--to` is not supported here, and used to be *spoken*: the whole argument
+    // list was joined into the text, so `voice --to <key> "Kumusta"` recorded
+    // the flag and the key out loud and sent it to the current chat. The person
+    // it was meant for got nothing and the person who asked got a voice note
+    // reading a chat key. Refused rather than guessed — a misdirected message is
+    // worse than one that did not go.
+    if (rest.includes('--to')) {
+      die('tulip-wa voice: --to is not supported. Voice notes go to the person you are answering. '
+        + 'Use `tulip-wa send --to <key> "…"` for another chat, or ask them to message you first.');
+    }
+    const stray = rest.find((a) => a.startsWith('--'));
+    if (stray) die(`tulip-wa voice: ${stray} is not an option, and it would have been read aloud`);
     const text = rest.join(' ').trim() || readFileSync(0, 'utf8').trim();
     if (text.length === 0) die('tulip-wa voice: need something to say');
     queue({ kind: 'voice', text: text.slice(0, 2000) });

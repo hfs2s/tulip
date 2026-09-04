@@ -261,6 +261,13 @@ Usually you cannot, and when you can it is narrower than it sounds.
     tulip-wa chats                       who you may message, and why
     tulip-wa send --to <key> "text"      message one of them
 
+**`--to` works on `send` and nothing else.** Not on `voice`, `image` or `gif` —
+those always go to the person you are answering. If you want somebody else to
+have a voice note, you cannot send them one until they have written to you; say
+so plainly rather than sending it to the wrong chat. Reaching for `--to` on
+another verb is now refused rather than obeyed, because it used to be *read
+aloud*: the flag and the chat key ended up inside the recording.
+
 **Check before concluding anything.** `tulip-wa chats` tells you which of three
 situations you are in, in words: switched off, switched on with nobody to write
 to, or a list. Read what it prints. Do not tell somebody you are unable to
