@@ -318,6 +318,33 @@ transient by construction and need no backup.
 
 ---
 
+## Two people, or two agents, on one box
+
+There is one Pi, one `main`, and one set of containers. Most of the damage
+available here is not a bad change but a change that never arrived while
+somebody reported it as shipped.
+
+- **Push a named commit — `git push origin <sha>:main`, never `HEAD:main`.**
+  If somebody else's work is sitting under yours, `HEAD:main` publishes it too,
+  and you will not notice until it is deployed.
+- **`git fetch` and read the log before you commit**, so you know what your work
+  is being stacked on.
+- **Verify the deploy inside the running container**, not from the build log:
+
+  ```bash
+  ssh pi 'cd ~/Repositories/tulip && sudo docker compose exec -T bridge \
+    sh -c "grep -c <something from your change> /app/bridge/dist/<file>.js"'
+  ```
+
+  `Image tulip-bridge Built` is not evidence. A push that silently did not reach
+  the remote produces a pull that fetches nothing, a rebuild that produces an
+  identical image, and an `up -d` that does not even recreate the container —
+  every step reporting success while the old code keeps running. The tell is
+  behaviour that still matches the bug you just fixed; the proof is the compiled
+  output.
+- **Say before you `docker compose build`.** Two builds at once on this hardware
+  is not something to find out about afterwards.
+
 ## Upgrading
 
 ```bash
