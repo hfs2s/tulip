@@ -41,6 +41,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileAtomic } from '@tulip/shared';
 import { feed } from './feed.js';
+import { accessConfig, verifiedEmail } from './access.js';
 import { log } from './log.js';
 import { paths } from './paths.js';
 import {
@@ -209,9 +210,42 @@ export function startPanel(deps: ApiDeps): Server | null {
     if (record.count === MAX_FAILURES) log('panel.bruteForce', { address, note: 'refusing further attempts' });
   };
 
-  const authenticate = (req: IncomingMessage, url: URL): boolean => {
+  // Configured once, at start, so an operator sees in the log whether Access
+  // authentication is on rather than discovering it from whether a stranger got
+  // in. Absent configuration disables it; it never degrades to something weaker.
+  const access = accessConfig();
+  log('panel.access', {
+    note:
+      access === null
+        ? 'Cloudflare Access auth is off — the bearer token is the only way in'
+        : `Cloudflare Access auth is on for ${access.teamDomain}`,
+  });
+
+  /**
+   * Either credential is sufficient, and they answer different questions.
+   *
+   * The token is a bearer secret: it says the holder has the secret, and
+   * nothing about who they are. It stays because loopback and SSH-tunnel access
+   * have no Access in front to ask.
+   *
+   * A verified Access assertion says *which person* Cloudflare authenticated,
+   * which is what makes adding and removing operators a policy change instead
+   * of a shared password. Returns the email so the caller can record it.
+   */
+  const authenticate = async (
+    req: IncomingMessage,
+    url: URL,
+  ): Promise<{ ok: boolean; who: string | null }> => {
     const supplied = url.searchParams.get('t') ?? cookieValue(req.headers.cookie, COOKIE);
-    return supplied !== null && tokenMatches(supplied, token);
+    if (supplied !== null && tokenMatches(supplied, token)) return { ok: true, who: null };
+
+    if (access !== null) {
+      const header = req.headers['cf-access-jwt-assertion'];
+      const assertion = Array.isArray(header) ? header[0] : header;
+      const email = await verifiedEmail(assertion, access);
+      if (email !== null) return { ok: true, who: email };
+    }
+    return { ok: false, who: null };
   };
 
   const server = createServer((req, res) => {
@@ -237,12 +271,24 @@ export function startPanel(deps: ApiDeps): Server | null {
         res.writeHead(429, { ...headers, 'content-type': 'text/plain' }).end('too many attempts\n');
         return;
       }
-      if (!authenticate(req, url)) {
+      const auth = await authenticate(req, url);
+      if (!auth.ok) {
         noteFailure(address);
         res
           .writeHead(401, { ...headers, 'content-type': 'text/plain' })
-          .end(`add ?t=<token> — the token is in ${paths.panelToken} inside the bridge container\n`);
+          .end(
+            access === null
+              ? `add ?t=<token> — the token is in ${paths.panelToken} inside the bridge container\n`
+              : 'sign in through Cloudflare Access, or add ?t=<token> when reaching this over a tunnel\n',
+          );
         return;
+      }
+
+      // Who did it, for anything that changes state. The token cannot answer
+      // that question — it is a shared secret, so every action taken with it is
+      // "the token holder" — which is most of the reason Access auth exists.
+      if (req.method === 'POST') {
+        log('panel.write', { path: url.pathname, who: auth.who ?? 'token holder' });
       }
 
       // Move the token out of the URL as soon as it has been presented, so it

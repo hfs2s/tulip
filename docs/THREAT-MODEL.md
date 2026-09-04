@@ -335,6 +335,18 @@ the control panel.*
 - The control panel binds to **loopback by default**, compares its token with
   `crypto.timingSafeEqual` against a properly parsed cookie, sets a restrictive
   CSP, and rate-limits authentication failures.
+- It optionally accepts a **Cloudflare Access assertion** as a second
+  credential, which is what lets an operator be added without handing out a
+  shared secret and removed without rotating one. Identity comes from the
+  RS256-signed `Cf-Access-Jwt-Assertion` and never from the
+  `Cf-Access-Authenticated-User-Email` header beside it: this panel is published
+  on the host's tailnet address, so a request can reach it without passing
+  through Cloudflare, and trusting that header would be an authentication bypass
+  rather than a shortcut. `aud` is checked against the specific application —
+  without it a token minted for any other app on the same account would be
+  accepted — along with `iss`, `exp` and `nbf`, and `alg` is pinned to RS256 so
+  neither `none` nor an HMAC confusion attack applies. It fails closed: unset
+  configuration disables it, and an unreachable JWKS endpoint denies.
 - It exposes **exactly one** endpoint that writes configuration — `POST
   /api/settings` — and that is the sharpest edge on this surface: holding the
   token is equivalent to holding the deployment, up to and including opening the
@@ -382,7 +394,7 @@ been read carefully.
 | R5 | **DNS through the Docker daemon.** The `127.0.0.1` resolver closes the container's own path out, but the daemon's embedded DNS remains an implementation detail we do not control. | Verified closed in `scripts/verify-containment.sh`, which asserts resolution and egress both fail from inside the agent. Re-run after any Docker upgrade. |
 | R6 | **A compromised agent can exhaust host resources.** | Bounded by `pids_limit`, `cpus` and `mem_limit` — *provided the host kernel exposes those cgroup controllers*. It may not: Raspberry Pi OS ships with the memory controller **disabled**, and Docker discards a limit it cannot enforce with a single warning line during startup. `scripts/preflight.sh` checks for this explicitly, because a resource cap that is written down but not in force is worse than one that was never claimed. Enable it with `cgroup_enable=memory cgroup_memory=1` in `/boot/firmware/cmdline.txt` and reboot. |
 | R8 | **A prepared web page is an un-blockable injection vector.** Search results cannot be rate-limited by sender, because there is no sender. | Accepted as the cost of the agent being able to check facts instead of guessing at them. Bounded by T1 — the container is worth nothing — and by results being labelled as data at the point of use. Remove the tools if the trade stops being worth it: they are two action kinds in `shared/src/handoff.ts` and one module in the bridge. |
-| R7 | **The operator's control panel token is a bearer credential.** Anyone holding it can restart sessions, read message history, and change who the bot answers — including opening it to anyone. | Loopback-bound by default; exposing it is an explicit operator decision documented in `OPERATIONS.md`. |
+| R7 | **The operator's control panel token is a bearer credential.** Anyone holding it can restart sessions, read message history, and change who the bot answers — including opening it to anyone. | Loopback-bound by default; exposing it is an explicit operator decision documented in `OPERATIONS.md`. Configuring Cloudflare Access authentication removes the need to share it at all, which is the mitigation for more than one operator. |
 
 ---
 

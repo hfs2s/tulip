@@ -164,15 +164,32 @@ than an oversight. See THREAT-MODEL §T4.
 - Operators are a separate list and are never widened by "open to anyone".
 
 **To let somebody into the control panel** — this is Cloudflare Access, not
-Tulip. The panel's own token is a bearer credential shared by whoever holds it;
-Access is what identifies a person. Add their address to the allow policy on the
-`tulip (raspberry pi)` application in the Cloudflare Zero Trust dashboard, under
-Access → Applications. The application is pinned to the One-time PIN identity
-provider, so they will sign in with a code emailed to that address and nothing
-else.
+Tulip. Add their address to the allow policy on the `tulip (raspberry pi)`
+application in the Cloudflare Zero Trust dashboard, under Access → Applications.
+The application is pinned to the One-time PIN identity provider, so they sign in
+with a code emailed to that address and nothing else. There is no link to send
+them in advance: the code is requested from the sign-in page by the person
+signing in, and cannot be issued by an administrator.
+
+**That is the whole process, provided `TULIP_ACCESS_*` is set.** With it, the
+panel accepts a person Cloudflare has authenticated as well as the bearer token,
+so nobody has to be given a secret. Removing them is the same change in reverse,
+takes effect immediately, and affects only them.
+
+Without it, the bearer token is the only way in, and handing it to a second
+person means two people share one credential: the log cannot tell them apart,
+and revoking one means rotating for everyone, including whoever is mid-session.
+Prefer configuring Access.
+
+The token is still what gets you in over an SSH tunnel or on loopback, where
+there is no Access in front to ask. `https://<host>/?t=<token>` is a one-click
+sign-in — the panel moves the token straight out of the URL into an `HttpOnly`
+cookie — which is convenient and is *not* a way to add an operator, for the
+reason above.
 
 Adding a panel user gives them everything: reading every message, holding
-delivery, and changing the audience. There is no read-only role.
+delivery, typing into a live conversation, and changing the audience. There is
+no read-only role.
 
 ### Adding a host to the egress allowlist
 

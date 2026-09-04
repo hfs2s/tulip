@@ -91,6 +91,15 @@ services:
       EXA_API_KEY: ${EXA_API_KEY:-}
       EXA_BACKUP_API_KEY: ${EXA_BACKUP_API_KEY:-}
       EXA_BACKUP_API_KEY2: ${EXA_BACKUP_API_KEY2:-}
+      # Cloudflare Access, when the panel is published behind it. Both are
+      # required together: the AUD tag is what binds an assertion to *this*
+      # application, and without it a token minted for any other app on the same
+      # Cloudflare account would be accepted here. Unset disables Access auth
+      # entirely and leaves the bearer token as the only way in. Neither value
+      # is a secret — the tag is an identifier, and the checking is done against
+      # Cloudflare's published keys.
+      TULIP_ACCESS_TEAM_DOMAIN: ${TULIP_ACCESS_TEAM_DOMAIN:-}
+      TULIP_ACCESS_AUD: ${TULIP_ACCESS_AUD:-}
     volumes:
       - state:/state
       - handoff-in:/handoff/in
