@@ -484,15 +484,20 @@ async function renderMedia() {
   var sound = data.items.filter(function (m) { return m.kind === 'audio'; });
   var seen = data.items.filter(function (m) { return m.kind !== 'audio'; });
 
-  if (sound.length) {
-    card.appendChild(node('h3', 'subhead', sound.length === 1 ? 'Voice note' : 'Voice notes'));
-    sound.forEach(function (m) { card.appendChild(voiceRow(m)); });
-  }
+  // Pictures first: they identify themselves at a glance, which is what a
+  // gallery is for. Sound cannot, so it goes underneath as a list you read
+  // rather than a wall you scrub through.
   if (seen.length) {
     if (sound.length) card.appendChild(node('h3', 'subhead', 'Pictures and video'));
     var grid = node('div', 'grid');
     seen.forEach(function (m) { grid.appendChild(mediaTile(m)); });
     card.appendChild(grid);
+  }
+  if (sound.length) {
+    card.appendChild(node('h3', 'subhead', sound.length === 1 ? 'Voice note' : 'Voice notes'));
+    var voices = node('div', 'voicegrid');
+    sound.forEach(function (m) { voices.appendChild(voiceCard(m)); });
+    card.appendChild(voices);
   }
 }
 
@@ -520,27 +525,63 @@ function mediaTile(m) {
   return tile;
 }
 
-function voiceRow(m) {
-  var row = node('div', 'voice');
+/**
+ * One voice note, closed by default.
+ *
+ * A player per recording meant a column of identical transport bars, none of
+ * which said anything until you played it — the slowest possible way to find
+ * out whether any of them mattered. The transcript is the recording, in the
+ * form you can read: the card leads with it, and the audio is what you open
+ * when the words are not enough.
+ *
+ * The `<audio>` is built on first open rather than up front. Two hundred of
+ * them on a page is two hundred media elements the browser has to keep, for
+ * something almost none of which will be played.
+ */
+function voiceCard(m) {
+  var card = node('div', 'voice');
 
-  var player = document.createElement('audio');
-  player.src = mediaSrc(m);
-  player.controls = true;
-  player.preload = 'none';
-  row.appendChild(player);
+  var toggle = node('button', 'voice-open');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
 
   var head = node('div', 'voice-head');
   head.appendChild(node('span', 'who', m.chatName || m.chatKey));
   head.appendChild(directionTag(m));
   head.appendChild(node('span', 'meta', bytes(m.bytes)));
-  head.appendChild(binButton(m));
-  row.appendChild(head);
+  toggle.appendChild(head);
 
-  // The transcript is what makes the row worth having: without it an operator
-  // has to play every recording to find out whether any of them mattered.
-  if (m.transcript) row.appendChild(node('blockquote', 'said', m.transcript));
-  else row.appendChild(node('div', 'said none', 'No transcript — either transcription was off when this arrived, or it failed.'));
-  return row;
+  if (m.transcript) toggle.appendChild(node('blockquote', 'said', m.transcript));
+  else toggle.appendChild(node('div', 'said none', 'No transcript — either transcription was off when this arrived, or it failed.'));
+  card.appendChild(toggle);
+
+  var slot = node('div', 'voice-player');
+  slot.hidden = true;
+  card.appendChild(slot);
+
+  toggle.addEventListener('click', function () {
+    var open = toggle.getAttribute('aria-expanded') === 'true';
+    if (!open && slot.childNodes.length === 0) {
+      var player = document.createElement('audio');
+      player.src = mediaSrc(m);
+      player.controls = true;
+      player.preload = 'metadata';
+      slot.appendChild(player);
+    }
+    toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+    slot.hidden = open;
+    if (!open) {
+      var el = slot.querySelector('audio');
+      if (el) void el.play().catch(function () { /* the operator can press play */ });
+    }
+  });
+
+  // Outside the button: a delete control nested inside a toggle is a mis-tap
+  // waiting to happen, and the browser will not allow a button in a button.
+  var foot = node('div', 'voice-foot');
+  foot.appendChild(binButton(m));
+  card.appendChild(foot);
+  return card;
 }
 
 /**
