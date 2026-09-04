@@ -285,6 +285,11 @@ export function startPanel(deps: ApiDeps): Server | null {
         'content-security-policy':
           "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
           "font-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; " +
+          // The terminal is an iframe onto the proxied ttyd at /pty. Without
+          // this it is refused before it loads: `frame-src` has no default of
+          // its own and falls back to `default-src 'none'`, so the frame stays
+          // empty with no error on the page. Same-origin only.
+          "frame-src 'self'; " +
           "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
         'x-content-type-options': 'nosniff',
         'referrer-policy': 'no-referrer',
