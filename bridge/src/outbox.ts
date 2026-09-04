@@ -627,7 +627,7 @@ export class Outbox extends EventEmitter {
 
       case 'voice': {
         if (!this.deps.config.agent.voice) return this.refuse('voice');
-        const audio = await synthesise(action.text);
+        const audio = await synthesise(action.text, this.deps.config.agent.voiceId);
         if (!audio.ok) {
           // Never drop the message: say it in text rather than stay silent.
           log('outbox.voiceFallback', { reason: audio.error });

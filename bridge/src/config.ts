@@ -252,6 +252,18 @@ const Agent = z
     gifs: z.boolean().default(true),
     images: z.boolean().default(true),
     voice: z.boolean().default(true),
+    /**
+     * Which voice speaks. Empty means the deployment's own default, so an
+     * existing install keeps whatever `MINIMAX_VOICE_ID` gave it.
+     *
+     * Here rather than in the environment because it is a thing an operator
+     * changes and listens to and changes again, and an environment variable
+     * costs a container restart for each attempt. A wrong id fails the whole
+     * request — MiniMax answers "voice id not exist" — so voice notes fall back
+     * to text until it is corrected, which is why the panel says so next to the
+     * box.
+     */
+    voiceId: z.string().max(128).default(''),
   })
   .strict()
   .default({});

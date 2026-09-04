@@ -147,7 +147,7 @@ export async function generateImage(prompt: string): Promise<Produced> {
  * words as text. A voice note that does not arrive should never cost somebody
  * their reply.
  */
-export async function synthesise(text: string): Promise<Produced> {
+export async function synthesise(text: string, voiceId = ''): Promise<Produced> {
   if (key().length === 0) return { ok: false, error: 'no MINIMAX_API_KEY is configured' };
   const group = env('MINIMAX_GROUP_ID');
 
@@ -197,7 +197,12 @@ export async function synthesise(text: string): Promise<Produced> {
          */
         audio_setting: { format: 'opus', sample_rate: 24_000, bitrate: 32_000, channel: 1 },
         voice_setting: {
-          voice_id: env('MINIMAX_VOICE_ID', 'moss_audio_737a299c-734a-11f0-918f-4e0486034804'),
+          // Configuration first, environment second: the panel is where this is
+          // changed now, and an operator who has set one should not have it
+          // quietly overridden by a variable set months ago.
+          voice_id: voiceId.trim().length > 0
+            ? voiceId.trim()
+            : env('MINIMAX_VOICE_ID', 'English_engaging_instructor_vv2'),
           speed: 1,
           vol: 1,
           ...emotion(),

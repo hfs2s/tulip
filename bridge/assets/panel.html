@@ -314,6 +314,9 @@
   .numeric .range{width:100%}
   .numeric .unit{text-align:left}
   .numeric .badge{grid-column:1/-1;justify-self:start;margin-top:2px}
+  .textset{font:inherit;font-family:var(--mono);font-size:12.5px;color:var(--ink);
+           background:var(--raise);border:1px solid var(--line);border-radius:8px;
+           padding:7px 10px;width:280px;max-width:100%}
   .numbox{font:inherit;font-family:var(--mono);font-size:12.5px;color:var(--ink);
           background:var(--raise);border:1px solid var(--line);border-radius:8px;
           padding:6px 8px;width:9ch;text-align:right}
@@ -494,6 +497,7 @@
     .field{grid-template-columns:1fr;gap:10px}
     .field > :last-child{justify-self:start}
     .numeric{width:100%}
+    .textset{width:100%}
     .adder{flex-wrap:wrap}
     .adder input{flex:1 1 100%}
 

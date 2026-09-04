@@ -1291,6 +1291,32 @@ function duration(ms) {
  * boundary while the readout still showed the real number, and the operator's
  * next nudge would write a large reduction they never asked for.
  */
+/**
+ * A free-text setting, saved when you leave the box.
+ *
+ * On `change` rather than on every keystroke: a save per character would be a
+ * write per character, and half of them would be a value that was never a real
+ * setting. Reverts on failure like everything else here, so a rejected value
+ * does not sit in the box looking saved.
+ */
+function textField(value, placeholder, onSave) {
+  var input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'textset';
+  input.value = value || '';
+  input.placeholder = placeholder;
+  input.spellcheck = false;
+  input.autocomplete = 'off';
+  input.addEventListener('change', function () {
+    var next = input.value.trim();
+    if (next === (value || '')) return;
+    var was = value;
+    value = next;
+    onSave(next, function () { value = was; input.value = was || ''; });
+  });
+  return input;
+}
+
 function numberControl(value, min, max, onSave, opts) {
   opts = opts || {};
   var step = opts.step || 1;
@@ -1611,6 +1637,12 @@ async function renderSettings() {
     }));
     field(tools, row[1], row[2] + (keyed ? '' : ' Currently unavailable: no key is configured.'), wrap);
   });
+
+  field(tools, 'Voice',
+    'Which MiniMax voice speaks. Leave empty for this deployment’s default. A name that does not exist fails the whole request — the provider answers “voice id not exist” — and voice notes quietly fall back to text until it is corrected, so change it and then send yourself one.',
+    textField(s.agent && s.agent.voiceId, 'e.g. English_engaging_instructor_vv2', function (v, revert) {
+      saveSettings({ agent: { voiceId: v } }, revert);
+    }));
 
   field(tools, 'Model', 'Which Claude model answers. Read-only here — it is set outside the panel, and changing it needs the container restarted.', node('span', 'value', s.model.name));
   field(tools, 'Provider', 'Whose servers those requests go to. Also read-only, and also set outside the panel.', node('span', 'value', s.model.provider));

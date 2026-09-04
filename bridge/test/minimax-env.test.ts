@@ -120,6 +120,32 @@ describe('the emotion', () => {
   });
 });
 
+describe('which voice speaks', () => {
+  const voiceOf = async (arg?: string): Promise<unknown> => {
+    await synthesise('hola', arg);
+    return (sent[0]?.['voice_setting'] as Record<string, unknown>)['voice_id'];
+  };
+
+  it('is the configured one when there is one', async () => {
+    expect(await voiceOf('English_engaging_instructor_vv2')).toBe('English_engaging_instructor_vv2');
+  });
+
+  it('falls back to the environment when the setting is blank', async () => {
+    process.env['MINIMAX_VOICE_ID'] = 'Spanish_ReliableMan';
+    expect(await voiceOf('')).toBe('Spanish_ReliableMan');
+  });
+
+  it('ignores a setting that is only whitespace, rather than asking for a voice named " "', async () => {
+    process.env['MINIMAX_VOICE_ID'] = 'Spanish_ReliableMan';
+    expect(await voiceOf('   ')).toBe('Spanish_ReliableMan');
+  });
+
+  it('prefers the setting over the environment, because the panel is where it is changed now', async () => {
+    process.env['MINIMAX_VOICE_ID'] = 'Spanish_ReliableMan';
+    expect(await voiceOf('English_engaging_instructor_vv2')).toBe('English_engaging_instructor_vv2');
+  });
+});
+
 describe('what is spoken', () => {
   it('passes sound tags through untouched, because the persona is told to use them', async () => {
     // Round brackets: the provider performs these. Square brackets are not a
@@ -151,6 +177,6 @@ describe('what is spoken', () => {
     expect(sent[0]?.['model']).toBe('speech-2.8-turbo');
     expect(sent[0]?.['language_boost']).toBe('English');
     expect((sent[0]?.['voice_setting'] as Record<string, unknown>)['voice_id'])
-      .toBe('moss_audio_737a299c-734a-11f0-918f-4e0486034804');
+      .toBe('English_engaging_instructor_vv2');
   });
 });
