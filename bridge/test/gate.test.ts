@@ -9,6 +9,7 @@ const message = (over: Partial<GateInput> = {}): GateInput => ({
   mentionsMe: false,
   isReaction: false,
   isPollVote: false,
+  hasMedia: false,
   ...over,
 });
 
@@ -27,11 +28,31 @@ describe('gate — a public deployment', () => {
     expect(gate(message({ isPollVote: true }), config).accept).toBe(false);
   });
 
-  it('refuses a message with no text', () => {
+  it('refuses a message with neither words nor attachments', () => {
     expect(gate(message({ text: '   ' }), config)).toEqual({
       accept: false,
-      reason: 'no text content',
+      reason: 'nothing to answer',
     });
+  });
+
+  /**
+   * A photo or a voice note sent without a caption has no text, and this check
+   * runs before every other branch — so testing the text alone refused all of
+   * them, in every chat and every group mode. `hasContent` in envelope.ts had
+   * always counted media as content and the dispatcher kept those messages on
+   * that basis; the gate discarded them two lines later. The sender got
+   * silence, which from the outside is being ignored.
+   */
+  it('accepts a photo sent with no caption', () => {
+    expect(gate(message({ text: '', hasMedia: true }), config)).toEqual({ accept: true });
+  });
+
+  it('accepts a voice note sent with no caption', () => {
+    expect(gate(message({ text: '   ', hasMedia: true }), config)).toEqual({ accept: true });
+  });
+
+  it('still refuses a reaction that carries media, because a reaction is not a message', () => {
+    expect(gate(message({ text: '', hasMedia: true, isReaction: true }), config).accept).toBe(false);
   });
 
   it('refuses groups, which are off by default even when everyone is on', () => {
@@ -199,5 +220,41 @@ describe('config validation', () => {
   it('rejects out-of-range limits', () => {
     expect(() => parseConfig({ limits: { turnsPerDay: 0 } })).toThrow();
     expect(() => parseConfig({ limits: { maxInboundChars: 10 } })).toThrow();
+  });
+});
+
+/**
+ * Media in groups, where the gate's own mode logic still has to apply.
+ */
+describe('gate — attachments in a group', () => {
+  const observe = parseConfig({
+    audience: { everyone: true },
+    groups: { enabled: true, replyTo: 'observe' },
+  });
+  const mention = parseConfig({
+    audience: { everyone: true },
+    groups: { enabled: true, replyTo: 'mention' },
+  });
+  const trigger = parseConfig({
+    audience: { everyone: true },
+    groups: { enabled: true, replyTo: 'trigger', triggers: ['juan'] },
+  });
+
+  it('reaches the agent in judgement mode', () => {
+    expect(gate(message({ isGroup: true, text: '', hasMedia: true }), observe).accept).toBe(true);
+  });
+
+  it('is answered in mention mode when it actually mentions us', () => {
+    expect(gate(message({ isGroup: true, text: '', hasMedia: true, mentionsMe: true }), mention).accept).toBe(true);
+  });
+
+  it('is not answered in mention mode otherwise', () => {
+    expect(gate(message({ isGroup: true, text: '', hasMedia: true }), mention).accept).toBe(false);
+  });
+
+  it('cannot match a trigger word, having no words — so trigger mode still declines', () => {
+    // Correct rather than unfortunate: trigger mode is opt-in by phrase, and a
+    // captionless photo contains no phrase to opt in with.
+    expect(gate(message({ isGroup: true, text: '', hasMedia: true }), trigger).accept).toBe(false);
   });
 });

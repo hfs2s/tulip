@@ -6,6 +6,10 @@
 <meta name="color-scheme" content="dark">
 <title>Tulip</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<!-- Vendored at build time, same-origin like everything else. Absent in a
+     development tree that has not run the asset build; the Terminal page
+     checks for the emulator and says so rather than rendering a black box. -->
+<link rel="stylesheet" href="/xterm.css">
 <style>
   /* Vendored at image build time. The fallback stacks carry the page on their
      own when the files are absent, which they are in a development tree. */
@@ -274,33 +278,22 @@
   .badge.on{border-color:var(--accent);color:var(--accent)}
   .badge.off{border-color:var(--warn);color:var(--warn)}
 
-  /* Readable by default; `.rawview` restores the literal capture. */
-  .slab{background:#08080a;border:1px solid var(--line-soft);
-        border-radius:12px 12px 0 0;border-bottom:0;
-        padding:16px 18px;font-family:var(--mono);font-size:12.5px;line-height:1.55;
-        overflow:auto;max-height:52vh;color:#d6d6de;cursor:text}
-  .slab.rawview{white-space:pre}
+  /* ── Terminal ───────────────────────────────────────────────────────────────
+     The page *is* the terminal. The heading, the warning bar, the readable/raw
+     toggle, the window picker and the three key buttons are all gone: what an
+     operator wants here is the session, not a console built around it.
 
-  .tline{display:grid;grid-template-columns:18px 1fr;gap:10px;padding:3px 0;align-items:baseline}
-  .tmark{color:var(--faint);text-align:center}
-  .ttext{white-space:pre-wrap;overflow-wrap:anywhere}
-  .tline.prompt .tmark,.tline.prompt .ttext{color:var(--accent)}
-  .tline.typed .ttext{color:#e8d9a0}
-  .tline.result .ttext{color:#e6e6ee}
-  .tline.error .tmark,.tline.error .ttext{color:var(--bad)}
-  .tline.tool .ttext{color:var(--dim)}
-  .tline.status .ttext,.tline.activity .ttext{color:var(--faint)}
-  .tline.working .ttext{color:var(--warn)}
-
-  /* The prompt is part of the terminal, not a form beneath it. */
-  .termprompt{display:flex;align-items:center;gap:10px;background:#08080a;
-              border:1px solid var(--line-soft);border-top:1px solid var(--line);
-              border-radius:0 0 12px 12px;padding:11px 18px}
-  .termprompt .caret{color:var(--accent);font-family:var(--mono);font-size:13px}
-  .termprompt input{flex:1;background:transparent;border:0;padding:0;color:var(--ink);
-                    font-family:var(--mono);font-size:12.5px}
-  .termprompt input:focus{outline:none}
-  .termprompt:focus-within{border-color:var(--accent)}
+     The emulator is pinned at the pane's own 200x50 and the font size is
+     computed to fit, rather than the grid being reflowed to the window. That is
+     not a cosmetic choice — the supervisor reads this pane to decide whether a
+     turn is running, and `agent/src/tmux.ts` pins `window-size manual` exactly
+     so that a browser cannot resize it out from under that parser. */
+  .page-wrap.bare{padding:0;flex:1;min-height:0;display:flex}
+  .page-wrap.bare .page.on{flex:1;min-height:0;display:flex;animation:none;opacity:1;transform:none}
+  .termhost{flex:1;min-width:0;min-height:0;background:#000;overflow:auto;padding:8px 10px}
+  .termhost .xterm{height:100%}
+  .termnote{margin:auto;color:var(--faint);font-family:var(--mono);font-size:13px;
+            text-align:center;padding:24px;line-height:1.7}
   .warnbar{border:1px solid var(--warn);color:var(--warn);border-radius:10px;
            padding:11px 14px;font-size:13px;margin-bottom:16px}
   .logline{font-family:var(--mono);font-size:12px;padding:5px 0;
@@ -415,10 +408,6 @@
     .seg button{min-height:40px}
     .topbar-toggle{width:44px;height:44px}
     .switch{min-height:44px}
-    /* The prompt row is 45px and the input inside it is 20px, so most of a tap
-       aimed at the field landed on padding and did nothing. */
-    .termprompt{min-height:44px}
-
     .brand{display:none}
     /* Restored on mobile. It carries who is answering and whether they are,
        which is the one thing worth seeing on the device you check it from. */
@@ -512,6 +501,7 @@
   <div class="scrim" id="scrim" role="dialog" aria-modal="true"></div>
   <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="/shaders.js"></script>
+  <script src="/xterm.js"></script>
   <script src="/panel.js"></script>
 </body>
 </html>

@@ -33,6 +33,15 @@
  * agent a route to the container holding the WhatsApp credentials. So the
  * terminal is a file exchange over the volumes that already carry everything
  * else — see `panel-api.ts`.
+ *
+ * That constraint costs nothing in fidelity, which is worth saying because it
+ * was assumed to. The terminal renders with the same emulator Iris uses, from
+ * the pane's own bytes; only the transport differs. What it does cost is
+ * liveness measured in a couple of hundred milliseconds rather than none, since
+ * the bytes are polled off a file at both ends instead of pushed down a
+ * socket — and an event stream out to the browser, because a WebSocket here
+ * would mean a second hand-rolled authentication gate on the upgrade path.
+ * Iris has one of those, and it is the sharpest edge in that codebase.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -54,6 +63,7 @@ import {
   settingsView,
   snapshot,
   updateSettings,
+  paneReader,
   terminalKeys,
   terminalScreen,
   terminalWatch,
@@ -61,6 +71,17 @@ import {
 } from './panel-api.js';
 
 const COOKIE = 'tulip_token';
+/**
+ * How often a connected terminal is polled for new pane bytes.
+ *
+ * This is the operator's end of the latency; the agent's tick is the other
+ * half. Both are short because a terminal that lags is a terminal nobody
+ * believes, and neither costs anything when nobody is connected.
+ */
+const PANE_POLL_MS = 120;
+/** How long the agent keeps capturing after one request, and how often we renew. */
+const TERMINAL_WATCH_S = 120;
+const TERMINAL_REFRESH_MS = 30_000;
 /** Failed authentications per address before it is refused outright. */
 const MAX_FAILURES = 10;
 const FAILURE_WINDOW_MS = 60_000;
@@ -325,6 +346,24 @@ export function startPanel(deps: ApiDeps): Server | null {
           serveAsset(res, req, headers, 'image/svg+xml', favicon);
           return;
         }
+        if (url.pathname === '/xterm.js' || url.pathname === '/xterm.css') {
+          const file = asset(url.pathname.slice(1));
+          if (!file) {
+            // Absent in a development tree that has not run the asset build.
+            // The Terminal page checks for the global and says so rather than
+            // rendering an empty black rectangle.
+            res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not bundled\n');
+            return;
+          }
+          serveAsset(
+            res,
+            req,
+            headers,
+            url.pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8',
+            file,
+          );
+          return;
+        }
         if (url.pathname === '/shaders.js') {
           const bundle = asset('shaders.js');
           if (!bundle) {
@@ -394,6 +433,44 @@ export function startPanel(deps: ApiDeps): Server | null {
             .filter((k) => k.text.length > 0)
             .slice(0, 32);
           return send(res, headers, 200, terminalKeys(window, keys));
+        }
+
+        if (url.pathname === '/api/terminal/stream') {
+          res.writeHead(200, {
+            ...headers,
+            'content-type': 'text/event-stream',
+            // `no-transform` and the nginx hint are both load-bearing: the panel
+            // is served through a Cloudflare tunnel, and an intermediary that
+            // buffers an event stream delivers a terminal in lumps a minute
+            // apart, which looks exactly like the agent having hung.
+            'cache-control': 'no-cache, no-transform',
+            'x-accel-buffering': 'no',
+            connection: 'keep-alive',
+          });
+          res.write(': connected\n\n');
+
+          // `null` is "follow whichever chat is active". It is the only thing
+          // the panel asks for — the window picker is gone, so the terminal
+          // follows the conversation rather than the operator chasing it.
+          terminalWatch(null, TERMINAL_WATCH_S);
+          const readPane = paneReader();
+
+          const refresh = setInterval(() => terminalWatch(null, TERMINAL_WATCH_S), TERMINAL_REFRESH_MS);
+          const tick = setInterval(() => {
+            const { reset, bytes } = readPane();
+            // Order matters: the clear has to reach the emulator before the
+            // bytes that assume a clear screen.
+            if (reset) res.write('event: reset\ndata: \n\n');
+            if (bytes.length > 0) res.write(`data: ${bytes.toString('base64')}\n\n`);
+          }, PANE_POLL_MS);
+          const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
+
+          req.on('close', () => {
+            clearInterval(refresh);
+            clearInterval(tick);
+            clearInterval(ping);
+          });
+          return;
         }
 
         if (url.pathname === '/api/stream') {

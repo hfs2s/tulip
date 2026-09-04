@@ -54,9 +54,14 @@ export const inPaths = {
    * holding the WhatsApp credentials — which is the one thing the topology
    * exists to prevent.
    *
-   * What this buys is a pane view and key injection rather than a true PTY. It
-   * is what Iris's terminal was before it grew a websocket, and it is what an
-   * operator actually needs: watch the agent work, and take over when you want.
+   * The request half: which window to show, and which keys to type. The reply
+   * half is `pane.raw` on the outbound volume — the pane's own byte stream,
+   * which is what makes this a terminal rather than a view of one.
+   *
+   * `window` is normally null, meaning "follow whichever chat is active". The
+   * panel has no window picker: with a session per chat there is nothing useful
+   * for an operator to choose between, and the thing worth watching is whatever
+   * is answering someone right now.
    */
   terminal: `${IN_DIR}/terminal.json`,
 } as const;
@@ -78,6 +83,25 @@ export const outPaths = {
 
   /** The captured pane, written only while an operator is watching. */
   screen: `${OUT_DIR}/screen.json`,
+
+  /**
+   * The pane's live byte stream, appended by tmux `pipe-pane`.
+   *
+   * `screen.json` is a *snapshot*: what the pane looked like when the agent
+   * last captured it, with the escape sequences stripped. That is the right
+   * shape for the supervisor's parser and the wrong shape for anything meant to
+   * look like the session — a TUI is a stream of cursor movements, not a
+   * sequence of frames, so a poll of stripped text can only ever be a summary
+   * of one. This file is the stream itself, the bytes the pane actually
+   * emitted, which is what lets a terminal emulator in the browser render
+   * exactly what tmux renders.
+   *
+   * Written only while somebody is watching, and truncated by the agent when it
+   * grows past its cap or when the followed window changes. Truncation is the
+   * signal as well as the cleanup: the bridge notices the file has shrunk below
+   * its read offset and repaints from the top rather than resuming mid-escape.
+   */
+  pane: `${OUT_DIR}/pane.raw`,
 
   /**
    * Token spend, summarised by the agent from its own Claude Code transcripts.

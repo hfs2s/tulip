@@ -201,7 +201,10 @@ the control panel, upgrades, and what to do when something breaks.
 
 ```bash
 npm install
-npm run typecheck     # tsc --noEmit, strict, across all three services
+npm run typecheck     # tsc --build, strict, across all four projects
+                      # NOT `tsc -p . --noEmit`: the root tsconfig is a solution
+                      # file with no `files`, so that command checks nothing and
+                      # exits 0 on a tree full of type errors.
 npm test              # vitest
 npm run check:secrets # fails if a gitignored secret file is staged
 ```

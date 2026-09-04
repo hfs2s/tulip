@@ -103,6 +103,16 @@ services:
       # provider rejects an unknown emotion with a 400 and takes the whole voice
       # note with it, and a typo should cost the warmth, not the reply.
       MINIMAX_VOICE_EMOTION: ${MINIMAX_VOICE_EMOTION:-}
+      # Transcription for inbound voice notes, read by the BRIDGE. The one
+      # capability MiniMax cannot provide — it synthesises speech and does not
+      # recognise it, and every transcription endpoint on that account 404s — so
+      # this is the single deliberate exception to "MiniMax only". Narrow by
+      # construction: one file in, one string out, used for nothing else. The key
+      # never enters the agent's container. Unset simply means voice notes arrive
+      # as audio the agent will say it cannot hear. See bridge/src/transcribe.ts.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_TRANSCRIBE_MODEL: ${OPENAI_TRANSCRIBE_MODEL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       EXA_API_KEY: ${EXA_API_KEY:-}
       EXA_BACKUP_API_KEY: ${EXA_BACKUP_API_KEY:-}
       EXA_BACKUP_API_KEY2: ${EXA_BACKUP_API_KEY2:-}

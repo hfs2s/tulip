@@ -20,7 +20,7 @@
  *     exception: an allow list you cannot read is one you cannot audit, and the
  *     operator reading it is the person who wrote it.
  */
-import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
 import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
@@ -506,9 +506,35 @@ export function updateSettings(deps: ApiDeps, body: unknown): { ok: boolean; mes
  * into an `internal` network, and proxying a shell through the bridge would
  * give the agent a route to the container holding the WhatsApp credentials. So
  * the panel's keystrokes become a request file and the agent's pane comes back
- * as a screen file, over the volumes that already carry everything else.
+ * over the volumes that already carry everything else.
+ *
+ * What comes back is a *stream*, not a series of frames. `screen.json` is still
+ * written and still read by the rest of the panel, but the terminal itself
+ * reads `pane.raw` — the bytes the pane emitted, escape sequences and all,
+ * forwarded to a terminal emulator in the browser. That is the difference
+ * between a summary of the session and the session: a TUI is cursor movements,
+ * and no amount of polling stripped text will reconstruct one.
  */
+/** Every key ever sent. The last entry of `pending` has this index. */
 let keySeq = 0;
+/** How many recent keys travel in each request. The schema's own cap is 32. */
+const KEY_WINDOW = 32;
+/**
+ * A sliding window of recent keys, resent with every write of the request file.
+ *
+ * There is one request file and the bridge rewrites all of it — for a new
+ * keystroke, and every thirty seconds to renew the watch. Sending only the
+ * newest key would mean any keystroke the agent had not yet collected was
+ * overwritten and lost, which at a 250ms tick is most of them once somebody
+ * types at speed.
+ *
+ * So a window is resent instead, and the agent skips what it has already
+ * typed by each key's own index — `keySeq - keys.length + 1` gives the first.
+ * Resending is free, and nothing is lost unless more than `KEY_WINDOW` keys
+ * are sent inside one tick. A paste is one entry rather than one per
+ * character, so that bound is about typing speed, not message length.
+ */
+let pending: Array<{ text: string; literal: boolean }> = [];
 
 export function terminalScreen(): Json {
   try {
@@ -522,7 +548,7 @@ export function terminalScreen(): Json {
 
 /** Ask the agent to keep capturing, and optionally switch window. */
 export function terminalWatch(window: string | null, seconds: number): Json {
-  return writeTerminal(window, seconds, []);
+  return writeTerminal(window, seconds, pending);
 }
 
 /**
@@ -534,9 +560,10 @@ export function terminalWatch(window: string | null, seconds: number): Json {
  * it has already applied.
  */
 export function terminalKeys(window: string | null, keys: Array<{ text: string; literal: boolean }>): Json {
-  keySeq += 1;
+  keySeq += keys.length;
+  pending = [...pending, ...keys].slice(-KEY_WINDOW);
   log('terminal.send', { window, count: keys.length, seq: keySeq });
-  return writeTerminal(window, 120, keys);
+  return writeTerminal(window, 120, pending);
 }
 
 function writeTerminal(window: string | null, seconds: number, keys: Array<{ text: string; literal: boolean }>): Json {
@@ -553,6 +580,71 @@ function writeTerminal(window: string | null, seconds: number, keys: Array<{ tex
   } catch (err) {
     return { ok: false, message: String((err as Error).message) };
   }
+}
+
+/** Read back at most this much per tick, so one catch-up cannot block the loop. */
+const PANE_CHUNK_BYTES = 256 * 1024;
+const NO_BYTES = Buffer.alloc(0);
+
+export interface PaneChunk {
+  /** The stream restarted: clear the screen before writing `bytes`. */
+  reset: boolean;
+  bytes: Buffer;
+}
+
+/**
+ * A cursor over the agent's pane stream.
+ *
+ * Tails `pane.raw` by byte offset, which is all a terminal needs — the bytes
+ * are already in the order the pane emitted them. The one interesting case is
+ * truncation: the agent shortens the file whenever it repaints, either because
+ * the followed window changed or because the cap was reached, and a file now
+ * smaller than the offset we hold is unambiguously a new stream rather than a
+ * gap in an old one.
+ *
+ * Detecting that by size rather than by a marker in the bytes is deliberate.
+ * The pane's contents are chosen by an agent that reads messages from strangers
+ * and can emit any byte sequence at all, so there is no in-band marker it could
+ * not forge. A file length is not something it can write.
+ *
+ * One reader per viewer: the offset is the viewer's position, not the file's.
+ */
+export function paneReader(file: string = outPaths.pane): () => PaneChunk {
+  let offset = 0;
+  return (): PaneChunk => {
+    let size: number;
+    try {
+      size = statSync(file).size;
+    } catch {
+      // Not there. The agent starts the stream when it sees somebody watching,
+      // so this is the ordinary state for the first tick of a connection.
+      offset = 0;
+      return { reset: false, bytes: NO_BYTES };
+    }
+
+    let reset = false;
+    if (size < offset) {
+      offset = 0;
+      reset = true;
+    }
+    if (size === offset) return { reset, bytes: NO_BYTES };
+
+    const want = Math.min(size - offset, PANE_CHUNK_BYTES);
+    const buffer = Buffer.allocUnsafe(want);
+    let fd: number | null = null;
+    let read = 0;
+    try {
+      fd = openSync(file, 'r');
+      read = readSync(fd, buffer, 0, want, offset);
+    } catch {
+      return { reset, bytes: NO_BYTES };
+    } finally {
+      if (fd !== null) closeSync(fd);
+    }
+
+    offset += read;
+    return { reset, bytes: buffer.subarray(0, read) };
+  };
 }
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
