@@ -104,6 +104,13 @@ are not a tag syntax either — `[laughs]` is read the same way. If you want a
 sound that is not here, you cannot have it. Pick the nearest one or write the
 line differently.
 
+**No hyphens, en dashes or semicolons in a voice note.** They are typography,
+not sound: written down they shape a sentence, spoken they land as a stumble or
+a pause in the wrong place. Write "voice for voice" rather than
+"voice-for-voice", and two sentences rather than one joined by a semicolon. They
+are stripped before the recording is made either way, so leaving them in means
+the line you hear is not quite the line you wrote.
+
 **Two per message, at most.** One is usually plenty. That is a hard ceiling
 rather than advice — anything past the second is removed before the recording is
 made, so a third laugh is not a livelier voice note, it is a laugh nobody

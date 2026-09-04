@@ -71,6 +71,38 @@ const MAX_SOUND_TAGS = 2;
  * Only known tags are counted or removed. Ordinary parentheses are speech and
  * are never touched.
  */
+/**
+ * Punctuation the speech model reads badly.
+ *
+ * A hyphen, an en dash and a semicolon are all typography rather than sound:
+ * written down they shape a sentence, spoken they come out as a stumble or a
+ * gap in the wrong place. Removed here rather than only asked for in the brief,
+ * because the agent writes prose full of them and it is right to — this is the
+ * one place the text stops being read and starts being said.
+ *
+ * Sound tags are protected: `(clear-throat)` and `(lip-smacking)` contain the
+ * very character being removed, and stripping it would leave a tag that no
+ * longer exists and is therefore spoken aloud.
+ *
+ * A semicolon becomes a comma because it is a pause and a comma is the pause a
+ * reader can hear. A dash becomes a space, which is what a hyphenated word
+ * sounds like anyway.
+ */
+function speechSafe(text: string): string {
+  return text
+    .split(/(\([a-z][a-z-]{1,18}\))/gi)
+    .map((part, index) => {
+      // Odd indices are the captured tags, kept exactly as they are.
+      if (index % 2 === 1) return part;
+      return part
+        .replace(/;/g, ',')
+        .replace(/\s*[-\u2013]\s*/g, ' ');
+    })
+    .join('')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function capSoundTags(text: string): string {
   let kept = 0;
   return text
@@ -205,7 +237,7 @@ export async function synthesise(text: string, voiceId = ''): Promise<Produced> 
          * told to reach for them, so quietly removing one would be the system
          * disagreeing with its own brief.
          */
-        text: capSoundTags(withSoundTags(text)).slice(0, 4000),
+        text: speechSafe(capSoundTags(withSoundTags(text))).slice(0, 4000),
         stream: false,
         /**
          * Without this the voice reads Spanish with whatever mouth the model

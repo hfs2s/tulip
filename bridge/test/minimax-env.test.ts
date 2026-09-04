@@ -182,6 +182,21 @@ describe('what is spoken', () => {
     expect(sent[0]?.['text']).toBe('(mostly) fine (really) yes (laughs) good (sighs) done');
   });
 
+  it('removes hyphens, en dashes and semicolons, which are read badly', async () => {
+    await synthesise('voice-for-voice; yes – always');
+    expect(sent[0]?.['text']).toBe('voice for voice, yes always');
+  });
+
+  it('does not strip the hyphen inside a sound tag, which would unmake the tag', async () => {
+    await synthesise('(clear-throat) right then');
+    expect(sent[0]?.['text']).toBe('(clear-throat) right then');
+  });
+
+  it('leaves em dashes alone, which the model handles', async () => {
+    await synthesise('yes — of course');
+    expect(sent[0]?.['text']).toBe('yes — of course');
+  });
+
   it('does not invent tags from ordinary parentheses', async () => {
     await synthesise('it was fine (mostly) in the end');
     expect(sent[0]?.['text']).toBe('it was fine (mostly) in the end');
