@@ -338,7 +338,9 @@
      so that a browser cannot resize it out from under that parser. */
   .ptyframe{flex:1;min-height:0;width:100%;border:0;display:block;background:var(--ground)}
   .page-wrap.bare{padding:0;flex:1;min-height:0;display:flex}
-  .page-wrap.bare .page.on{flex:1;min-height:0;display:flex;animation:none;opacity:1;transform:none}
+  .page-wrap.bare .page.on{flex:1;min-height:0;display:flex;flex-direction:column;
+                           animation:none;opacity:1;transform:none}
+  .page-wrap.bare .warnbar{flex:none;margin:0;border-radius:0}
   .termhost{flex:1;min-width:0;min-height:0;background:#000;overflow:auto;padding:8px 10px}
   .termhost .xterm{height:100%}
   .termnote{margin:auto;color:var(--faint);font-family:var(--mono);font-size:13px;

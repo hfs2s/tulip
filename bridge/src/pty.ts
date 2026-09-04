@@ -18,6 +18,7 @@
  * why, rather than hanging — an unreachable terminal should look unreachable.
  */
 import { connect } from 'node:net';
+import { request } from 'node:http';
 import { existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -45,7 +46,16 @@ function upstreamPath(url: string): string {
   return rest.length === 0 ? '/' : rest;
 }
 
-/** Ordinary requests: the page, its JS, its CSS. */
+/**
+ * Ordinary requests: the page, its JS, its CSS.
+ *
+ * `socketPath` rather than hand-written HTTP over a raw socket. The first
+ * attempt did the latter and piped the upstream bytes straight at
+ * `res.socket` — which produced a 200 with the right content-type and a body
+ * that terminated mid-stream, because Node still owned that response and
+ * framed it a second time. Letting the client parse the upstream response and
+ * copying its status and headers across is both correct and shorter.
+ */
 export function proxyRequest(req: IncomingMessage, res: ServerResponse, headers: Record<string, string>): void {
   if (!ptyAvailable()) {
     res
@@ -54,7 +64,26 @@ export function proxyRequest(req: IncomingMessage, res: ServerResponse, headers:
     return;
   }
 
-  const upstream = connect(SOCKET);
+  const forwarded: Record<string, string> = {};
+  for (const [name, value] of Object.entries(req.headers)) {
+    // The cookie is ours, not ttyd's; passing it on would hand the panel token
+    // to a process with no use for it.
+    if (name === 'host' || name === 'connection' || name === 'cookie') continue;
+    if (typeof value === 'string') forwarded[name] = value;
+  }
+
+  const upstream = request(
+    { socketPath: SOCKET, path: upstreamPath(req.url ?? '/'), method: req.method ?? 'GET', headers: forwarded },
+    (answer) => {
+      // The panel's CSP is `default-src 'none'` and would refuse ttyd's own
+      // scripts, so it is deliberately not applied to this subtree. The frame
+      // is same-origin and its content comes from a socket only root can
+      // publish on.
+      const { 'content-security-policy': _csp, ...safe } = headers;
+      res.writeHead(answer.statusCode ?? 502, { ...safe, ...answer.headers });
+      answer.pipe(res);
+    },
+  );
   upstream.on('error', (err: Error) => {
     log('pty.upstreamFailed', { err: err.message });
     if (!res.headersSent) {
@@ -63,23 +92,7 @@ export function proxyRequest(req: IncomingMessage, res: ServerResponse, headers:
       res.end();
     }
   });
-
-  upstream.on('connect', () => {
-    const lines = [
-      `${req.method ?? 'GET'} ${upstreamPath(req.url ?? '/')} HTTP/1.1`,
-      'host: localhost',
-      'connection: close',
-    ];
-    for (const [name, value] of Object.entries(req.headers)) {
-      // The cookie is ours, not ttyd's, and passing it on would hand the panel
-      // token to a process that has no use for it.
-      if (name === 'host' || name === 'connection' || name === 'cookie') continue;
-      if (typeof value === 'string') lines.push(`${name}: ${value}`);
-    }
-    upstream.write(`${lines.join('\r\n')}\r\n\r\n`);
-    req.pipe(upstream);
-    upstream.pipe(res.socket ?? upstream);
-  });
+  req.pipe(upstream);
 }
 
 /**
