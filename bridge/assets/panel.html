@@ -127,13 +127,6 @@
   /* `main` is the scroll container, so the rail simply never moves. */
   main{flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto}
   /* flex:none — without it this shrinks as the page grows and clips the heading. */
-  /* The status strip. Absent when the bot is answering, which is why the page
-     is otherwise nothing but the paper grain and the content on top of it. */
-  .alertbar{flex:none;display:flex;gap:10px;align-items:baseline;
-            padding:12px 40px;border-bottom:1px solid var(--line-soft);
-            background:var(--panel);font-size:13.5px;color:var(--dim)}
-  .alertbar b{color:var(--warn);font-weight:500}
-  .alertbar.stopped b{color:var(--bad)}
 
   .page-wrap{padding:40px 40px 64px;position:relative}
   h2{font:400 21px/1.2 var(--display);letter-spacing:-.02em;margin:0 0 4px}
@@ -414,7 +407,6 @@
     .nav{width:100%;min-height:46px;padding:11px 12px;white-space:nowrap}
     .nav .count{display:inline-block}
 
-    .alertbar{padding:10px 20px}
     .page-wrap{padding:20px 20px 48px}
     .line{grid-template-columns:52px 1fr;gap:10px}
     .line .tag{display:none}
@@ -477,10 +469,6 @@
   </aside>
 
   <main>
-    <!-- Only ever visible when something is wrong. The masthead this replaced
-         spent 38px of every page saying "Answering people.", which is the one
-         state that needs no announcement. -->
-    <div class="alertbar" id="alert" role="status" hidden></div>
     <div class="page-wrap">
       <section class="page" id="p-overview"></section>
       <section class="page" id="p-messages"></section>

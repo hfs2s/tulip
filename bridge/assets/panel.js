@@ -193,47 +193,19 @@ function go(next) {
 }
 
 /**
- * Say what is wrong, and otherwise say nothing.
+ * Reconcile the chrome with the bridge's state.
  *
- * This replaced a masthead that spent 38px of every page announcing "Answering
- * people." — the one state that needs no announcement, and which pushed every
- * page's actual content below the fold to say it. The states that *do* need
- * announcing were in the same box, so they moved here rather than being lost:
- * a strip that is `hidden` while the bot is answering and appears when it is
- * not.
+ * There is no status banner: the page shows the page, and whether the bot is
+ * answering is carried by the dot beside the persona's name in the rail. That
+ * dot distinguishes online, replying, holding, offline and a fatal session, and
+ * names the state in text beside it — so nothing here is only a colour.
  *
- * The rail's status dot carries the same state as a colour. This carries the
- * sentence — which container to restart, how many messages are waiting — and a
- * colour alone cannot.
+ * What a banner used to add was the sentence after the state: which container to
+ * restart, how many messages are queued. That now lives where it is acted on
+ * rather than announced — the Overview page's counters, and the Tools page's
+ * hold and resume — which is a page away rather than in front of every page.
  */
 function verdict(s) {
-  var bar = el('alert'), stopped = true, headline, detail;
-  if (!s.whatsapp.connected) {
-    headline = 'Not answering — WhatsApp is disconnected.';
-    detail = 'The bridge reconnects on its own. If this persists, the number may have been unlinked.';
-  } else if (s.agent.fatal) {
-    headline = 'Not answering — ' + s.agent.fatal + '.';
-    detail = 'Only you can clear this. Messages keep arriving and are recorded meanwhile.';
-  } else if (!s.agent.reporting) {
-    headline = 'Not answering — the agent is silent.';
-    detail = 'Its container may be down or restarting. Nothing is lost; messages queue until it returns.';
-  } else if (s.hold.active) {
-    headline = 'Holding.';
-    detail = s.queue.queued ? plural(s.queue.queued, 'message') + ' waiting. Resume to hand them over.'
-                            : 'Nothing waiting. New messages queue rather than reach the agent.';
-  } else {
-    stopped = false;
-  }
-
-  if (bar) {
-    clear(bar);
-    bar.hidden = !stopped;
-    bar.className = 'alertbar' + (s.hold.active ? '' : ' stopped');
-    if (stopped) {
-      bar.appendChild(node('b', null, headline));
-      bar.appendChild(node('span', null, detail));
-    }
-  }
   el('whoami').textContent = s.whatsapp.name || 'not paired';
   agentStatus(s);
   var badge = el('navChats');
@@ -277,6 +249,9 @@ function agentStatus(s) {
 }
 
 // ── Pages ───────────────────────────────────────────────────────────────────
+/** So a failing poll reports once rather than every few seconds. */
+var lostContact = false;
+
 var renderToken = 0;
 /**
  * Begin a page render, and take a number.
@@ -1498,16 +1473,15 @@ async function refresh() {
   try {
     state = await api('/api/state');
   } catch (err) {
-    var bar = el('alert');
-    if (bar) {
-      clear(bar);
-      bar.hidden = false;
-      bar.className = 'alertbar stopped';
-      bar.appendChild(node('b', null, 'Lost contact with the bridge.'));
-      bar.appendChild(node('span', null, 'Retrying. Nothing is lost meanwhile.'));
+    // The poll runs every few seconds, so this must not shout on every failed
+    // one. The toast is transient and the dot has already gone dark.
+    if (!lostContact) {
+      lostContact = true;
+      toast('Lost contact with the bridge. Retrying — nothing is lost meanwhile.', true);
     }
     return;
   }
+  lostContact = false;
   verdict(state);
   // First successful load paints whatever page is showing; after that only the
   // state-driven pages need repainting on a poll.
