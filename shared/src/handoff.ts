@@ -81,7 +81,17 @@ export const InboundMedia = z
     fileName: z.string().max(256).nullable(),
     seconds: z.number().nonnegative().nullable(),
     isVoiceNote: z.boolean(),
-    /** Why the attachment is missing, when it is. */
+    /**
+     * What was said, for audio. The agent cannot listen to anything, so without
+     * this a voice note is a file it can do nothing with — and somebody who
+     * spoke rather than typed gets an answer that ignores them.
+     *
+     * Null when the attachment is not audio, when transcription is not
+     * configured, or when it failed; `error` carries the reason in the last
+     * case. Defaulted so a batch written before this existed still parses.
+     */
+    transcript: z.string().max(4000).nullable().default(null),
+    /** Why the attachment is missing, or why it could not be transcribed. */
     error: z.string().max(256).nullable(),
   })
   .strict();

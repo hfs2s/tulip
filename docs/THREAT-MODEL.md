@@ -134,6 +134,18 @@ That is the designed outcome, not a failure.
 
 *Having achieved execution, A2 tries to send data out.*
 
+> **What the bridge sends out on the agent's behalf.** The layers below bound
+> what the *agent* can reach, and it can reach nothing. They say nothing about
+> the trusted side, which does leave the box: MiniMax for pictures and speech,
+> Exa for search, Giphy for GIFs, and — since inbound voice notes had to become
+> readable somehow — OpenAI for transcription. That last one is the only place a
+> stranger's own voice leaves this deployment. It carries the audio and nothing
+> else: no phone number, no chat key, no display name, and only for a message
+> that was accepted. It is also the one deliberate exception to "MiniMax is the
+> only approved audio provider", because MiniMax synthesises speech and does not
+> recognise it — every transcription endpoint on that account returns 404, so
+> there is no MiniMax option being passed over.
+
 Three independent layers, in order of how hard they are to bypass:
 
 1. **No route.** `tulip-lan` is `internal: true`. The container's namespace has no

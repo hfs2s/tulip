@@ -174,6 +174,9 @@ async function fetchMedia(
     fileName: asString(found.node['fileName']),
     seconds: typeof found.node['seconds'] === 'number' ? found.node['seconds'] : null,
     isVoiceNote: found.node['ptt'] === true,
+    // Filled in by the dispatcher after the gate accepts, so a message that is
+    // never answered is never paid to transcribe.
+    transcript: null,
   };
 
   // Checked before the download, so an oversized attachment costs a comparison

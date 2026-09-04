@@ -15,9 +15,10 @@
  *     chat is served regardless of what the status file claims.
  */
 import { EventEmitter } from 'node:events';
+import { join } from 'node:path';
 import type { WAMessage } from 'baileys';
 import { inPaths } from '@tulip/shared';
-import type { InboundMessage } from '@tulip/shared';
+import type { InboundMedia, InboundMessage } from '@tulip/shared';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import { feed } from './feed.js';
@@ -25,6 +26,7 @@ import { gate, isOperator } from './gate.js';
 import { publishTurn, readStatus, retireBatch } from './handoff.js';
 import { log, redactNumber } from './log.js';
 import { hasContent, toEnvelope, type Envelope } from './envelope.js';
+import { canTranscribe, transcribe } from './transcribe.js';
 import type { Limiter } from './ratelimit.js';
 import { Queue, type QueuedMessage } from './queue.js';
 import { state } from './state.js';
@@ -32,6 +34,23 @@ import type { TurnRegistry } from './turns.js';
 import type { WhatsApp } from './whatsapp.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Give audio to the agent as words.
+ *
+ * Done here rather than in the parser so nothing is paid to transcribe a
+ * message that was refused — the gate and the limiter have both had their say
+ * by this point. A failure is attached as `error` rather than dropped: "they
+ * sent a voice note and it could not be read" is something the agent can answer
+ * honestly, and silence is not.
+ */
+async function transcribeIfSpeech(media: InboundMedia): Promise<InboundMedia> {
+  if (media.kind !== 'audio' || media.path === null || !canTranscribe()) return media;
+  const result = await transcribe(join(inPaths.root, media.path), media.mimetype, media.seconds);
+  return result.ok
+    ? { ...media, transcript: result.text }
+    : { ...media, transcript: null, error: media.error ?? result.error };
+}
 
 /** How long to wait for the agent to acknowledge a turn before moving on. */
 const TURN_START_TIMEOUT_MS = 30_000;
@@ -340,14 +359,16 @@ export class Dispatcher extends EventEmitter {
     const record = this.deps.chats.get(chatKey);
     const turn = this.deps.turns.open(last.envelope.chatJid, chatKey, now);
 
-    const messages: InboundMessage[] = batch.map(({ envelope }) => ({
-      from: envelope.pushName ?? 'someone',
-      at: new Date(envelope.ts).toISOString(),
-      text: envelope.text,
-      mentionsMe: envelope.mentionsMe,
-      quoted: envelope.quoted,
-      media: [...envelope.media],
-    }));
+    const messages: InboundMessage[] = await Promise.all(
+      batch.map(async ({ envelope }) => ({
+        from: envelope.pushName ?? 'someone',
+        at: new Date(envelope.ts).toISOString(),
+        text: envelope.text,
+        mentionsMe: envelope.mentionsMe,
+        quoted: envelope.quoted,
+        media: await Promise.all(envelope.media.map(transcribeIfSpeech)),
+      })),
+    );
 
     publishTurn({
       turnId: turn.turnId,
