@@ -423,6 +423,8 @@ const SettingsPatch = z
       maxMediaBytes: z.number().int().min(1024).max(100 * 1024 * 1024).optional(),
       maxMediaPerMessage: z.number().int().min(0).max(10).optional(),
       newSendersPerHour: z.number().int().min(1).max(1000).optional(),
+      imagesPerDay: z.number().int().min(0).max(1000).optional(),
+      transcriptionsPerDay: z.number().int().min(0).max(5000).optional(),
       outboundPerTurn: z.number().int().min(1).max(100).optional(),
       outboundPerChatPerHour: z.number().int().min(1).max(1000).optional(),
       turnTimeoutMs: z.number().int().min(30_000).max(3_600_000).optional(),

@@ -38,6 +38,7 @@ import { fetchPage, search, type ExaOutcome } from './exa.js';
 import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
 import { retainOutbound } from './mediaStore.js';
+import { claim } from './spend.js';
 import type { Limiter } from './ratelimit.js';
 import type { TurnRegistry } from './turns.js';
 import type { Config } from './config.js';
@@ -603,6 +604,15 @@ export class Outbox extends EventEmitter {
 
       case 'image': {
         if (!this.deps.config.agent.images) return this.refuse('images');
+        // Claimed before the request, so a slow provider cannot let two through
+        // the same last unit of the day's allowance.
+        if (!claim('images', this.deps.config.limits.imagesPerDay)) {
+          log('outbox.imageCapped', { perDay: this.deps.config.limits.imagesPerDay });
+          feed.event('image.capped', "today's picture allowance is spent");
+          await this.deps.wa.sendText(turn.chatJid, 'I have made as many pictures as I can today — ask me again tomorrow.');
+          feed.outbound(turn.chatKey, 'text', 'picture allowance spent');
+          return;
+        }
         const image = await generateImage(action.prompt);
         if (!image.ok) {
           log('outbox.imageFailed', { reason: image.error });

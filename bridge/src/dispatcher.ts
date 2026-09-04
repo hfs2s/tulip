@@ -28,6 +28,7 @@ import { publishTurn, readStatus, retireBatch } from './handoff.js';
 import { log, redactNumber } from './log.js';
 import { hasContent, toEnvelope, type Envelope } from './envelope.js';
 import { canTranscribe, transcribe } from './transcribe.js';
+import { claim } from './spend.js';
 import type { Limiter } from './ratelimit.js';
 import { Queue, type QueuedMessage } from './queue.js';
 import { state } from './state.js';
@@ -45,8 +46,14 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * sent a voice note and it could not be read" is something the agent can answer
  * honestly, and silence is not.
  */
-async function transcribeIfSpeech(media: InboundMedia): Promise<InboundMedia> {
+async function transcribeIfSpeech(media: InboundMedia, perDay: number): Promise<InboundMedia> {
   if (media.kind !== 'audio' || media.path === null || !canTranscribe()) return media;
+  // The day's allowance, claimed before the upload. Refused rather than
+  // silently skipped: the agent is told why, so it can say so to whoever spoke
+  // instead of answering as though nothing was sent.
+  if (!claim('transcriptions', perDay)) {
+    return { ...media, transcript: null, error: media.error ?? "today's transcription allowance is spent" };
+  }
   const file = join(inPaths.root, media.path);
   const result = await transcribe(file, media.mimetype, media.seconds);
   if (!result.ok) return { ...media, transcript: null, error: media.error ?? result.error };
@@ -405,7 +412,9 @@ export class Dispatcher extends EventEmitter {
         text: envelope.text,
         mentionsMe: envelope.mentionsMe,
         quoted: envelope.quoted,
-        media: await Promise.all(envelope.media.map(transcribeIfSpeech)),
+        media: await Promise.all(
+          envelope.media.map((m) => transcribeIfSpeech(m, this.deps.config.limits.transcriptionsPerDay)),
+        ),
       })),
     );
 

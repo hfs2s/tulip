@@ -127,6 +127,18 @@ const Limits = z
     /** Bounds a compromised agent as much as a chatty one. */
     outboundPerTurn: z.number().int().min(1).max(100).default(8),
     outboundPerChatPerHour: z.number().int().min(1).max(1000).default(60),
+    /**
+     * The two capabilities billed per use, capped across everybody rather than
+     * per sender.
+     *
+     * Every other limit here bounds one person, which is right for a closed
+     * list and wrong for a number open to the internet: the bill is not one
+     * sender being expensive, it is a hundred each being reasonable. A
+     * per-sender cap cannot bound a total, and the total is what arrives as an
+     * invoice.
+     */
+    imagesPerDay: z.number().int().min(0).max(1000).default(40),
+    transcriptionsPerDay: z.number().int().min(0).max(5000).default(200),
     /** A turn that outlives this is abandoned so it cannot hold the queue shut. */
     turnTimeoutMs: z.number().int().min(30_000).max(3_600_000).default(600_000),
   })

@@ -39,6 +39,9 @@ export const paths = {
   /** Structured event log, one file per day. */
   logs: join(STATE_DIR, 'logs'),
 
+  /** Today's count of the capabilities that are billed per use. */
+  spend: join(STATE_DIR, 'spend.json'),
+
   /**
    * Copies of what the agent sent out: generated pictures, voice notes, GIFs.
    *

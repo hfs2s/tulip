@@ -98,8 +98,10 @@ describe('the emotion', () => {
     return (sent[0]?.voice_setting ?? {}) as Record<string, unknown>;
   };
 
-  it('is happy unless somebody says otherwise', async () => {
-    expect((await spoken())['emotion']).toBe('happy');
+  it('is absent unless somebody asks for one', async () => {
+    // A blanket mood applies to every line including the ones that should not
+    // have it; the sound tags carry colour per sentence instead.
+    expect('emotion' in (await spoken())).toBe(false);
   });
 
   it('honours a valid override', async () => {

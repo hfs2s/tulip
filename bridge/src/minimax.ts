@@ -231,13 +231,16 @@ export async function synthesise(text: string): Promise<Produced> {
 /**
  * The emotion to speak with, as a spreadable fragment.
  *
- * Warm by default, because the alternative is a neutral read and this is a
- * person in a conversation rather than an announcement system. Spreadable so an
+ * None by default. `happy` was the first setting and it was too much of one
+ * thing: every line delivered brightly, including the ones that should not be.
+ * The sound tags carry the moments that want colour, which is a per-sentence
+ * decision the agent makes rather than a mood applied to everything it says.
+ * Spreadable so an
  * unset or unrecognised value contributes nothing at all instead of sending
  * `emotion: undefined`, which the provider counts as a parameter and refuses.
  */
 function emotion(): { emotion?: string } {
-  const value = env('MINIMAX_VOICE_EMOTION', 'happy').toLowerCase();
+  const value = env('MINIMAX_VOICE_EMOTION', 'none').toLowerCase();
   if (value === 'none') return {};
   if (!EMOTIONS.has(value)) {
     log('minimax.unknownEmotion', { value, note: 'not one the provider accepts; speaking without it' });
