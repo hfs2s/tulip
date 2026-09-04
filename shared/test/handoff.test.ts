@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CurrentTurn, InboxBatch } from '../src/handoff.js';
+import { CurrentTurn, InboundMessage, InboxBatch } from '../src/handoff.js';
 import { writeFileAtomic, writeJsonAtomic } from '../src/atomic.js';
 
 const TURN = '11111111-2222-4333-8444-555555555555';
@@ -128,5 +128,39 @@ describe('atomic writes', () => {
 
   it('throws, and cleans up, when the target cannot be written', () => {
     expect(() => writeFileAtomic('/proc/definitely-not-writable/x', 'y')).toThrow();
+  });
+});
+
+/**
+ * `mentionsMe` exists for judgement mode, where the agent rather than the gate
+ * decides whether to speak. Without it the agent could not tell "somebody
+ * @mentioned me" from "somebody typed my name", which is the difference between
+ * a question aimed at it and a question aimed at the person sitting next to it.
+ */
+describe('mentionsMe', () => {
+  const message = {
+    from: 'Someone',
+    at: new Date().toISOString(),
+    text: 'are you here, Maria?',
+    quoted: null,
+    media: [],
+  };
+
+  it('is carried through when the bridge sets it', () => {
+    const parsed = InboundMessage.safeParse({ ...message, mentionsMe: true });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.mentionsMe).toBe(true);
+  });
+
+  it('defaults to false on a batch written before the field existed', () => {
+    // The upgrade case: a batch already on disk when the bridge restarts. It
+    // must still parse, and must not claim to have been addressed.
+    const parsed = InboundMessage.safeParse(message);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.mentionsMe).toBe(false);
+  });
+
+  it('is still rejected when it is not a boolean', () => {
+    expect(InboundMessage.safeParse({ ...message, mentionsMe: 'yes' }).success).toBe(false);
   });
 });

@@ -342,6 +342,7 @@ export class Dispatcher extends EventEmitter {
       from: envelope.pushName ?? 'someone',
       at: new Date(envelope.ts).toISOString(),
       text: envelope.text,
+      mentionsMe: envelope.mentionsMe,
       quoted: envelope.quoted,
       media: [...envelope.media],
     }));

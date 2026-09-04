@@ -96,6 +96,26 @@ export const InboundMessage = z
     from: z.string().max(128),
     at: z.string().datetime(),
     text: z.string(),
+    /**
+     * Whether this message actually @-mentioned us, or replied to one of ours.
+     *
+     * Derived by the bridge from WhatsApp's own mention metadata, so unlike
+     * `from` and `text` it is not attacker-controlled — a sender cannot fake
+     * being a mention by typing one.
+     *
+     * It exists because of judgement mode. In `mention` and `trigger` modes the
+     * gate decides and the agent never needed to know; in `observe` the agent
+     * is the one deciding whether to speak, and it was deciding blind on the
+     * single most important signal — "was this addressed to me". A question
+     * that names somebody else looks exactly like a question aimed at you when
+     * all you have is the text.
+     *
+     * Defaulted rather than required, for the batch that is already on disk when
+     * the bridge is upgraded under it. A required field would reject that batch
+     * outright and lose the turn — and `false` is the conservative reading: a
+     * message we cannot prove was addressed to us was not.
+     */
+    mentionsMe: z.boolean().default(false),
     quoted: z
       .object({ text: z.string().max(2000), isMine: z.boolean() })
       .strict()
