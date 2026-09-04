@@ -30,7 +30,8 @@ const USAGE = `usage:
   tulip-wa send <text>|-      reply to the person you are answering ("-" reads stdin)
   tulip-wa file <path> [text] send a file, with an optional caption
   tulip-wa image <prompt>     generate a picture and send it  [--caption "…"]
-  tulip-wa voice <text>       say it aloud as a voice note
+  tulip-wa voice <text>       say it aloud as a voice note; sound tags such as
+                              [laughter], [breath] and [sigh] are performed
   tulip-wa chats              list chats you may message (if enabled)
   tulip-wa send --to <key> <text>
                               message a different chat (if enabled)

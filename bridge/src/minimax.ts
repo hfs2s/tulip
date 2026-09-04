@@ -25,6 +25,14 @@ const MAX_BYTES = 8 * 1024 * 1024;
 export type Produced = { ok: true; data: Buffer } | { ok: false; error: string };
 
 /**
+ * The emotions the provider accepts. Anything else is rejected outright —
+ * `voice_setting emotion` with a 400, which would take the whole voice note
+ * with it — so an unrecognised value is dropped rather than sent. A typo in an
+ * `.env` file should cost the emotion, not the reply.
+ */
+const EMOTIONS = new Set(['happy', 'sad', 'angry', 'fearful', 'disgusted', 'surprised', 'neutral']);
+
+/**
  * An environment variable, treating empty as absent.
  *
  * `??` does not, and that cost this deployment both of these capabilities
@@ -117,7 +125,13 @@ export async function synthesise(text: string): Promise<Produced> {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key()}` },
       body: JSON.stringify({
-        model: env('MINIMAX_VOICE_MODEL', 'speech-2.5-turbo-preview'),
+        model: env('MINIMAX_VOICE_MODEL', 'speech-2.8-turbo'),
+        // Sent as written. The text may carry inline sound tags — `[laughter]`,
+        // `[breath]`, `[sigh]` — which the 2.5 and 2.8 models act on, and which
+        // are most of what makes a voice note sound like a person rather than a
+        // reader. Nothing here strips or normalises them, deliberately: the
+        // persona is told to reach for them, so quietly removing one would be
+        // the system disagreeing with its own brief.
         text: text.slice(0, 4000),
         stream: false,
         /**
@@ -127,7 +141,7 @@ export async function synthesise(text: string): Promise<Produced> {
          * `language_boost` at all — speech-02 and speech-01 reject it outright —
          * so this setting and `MINIMAX_VOICE_MODEL` have to move together.
          */
-        language_boost: env('MINIMAX_LANGUAGE_BOOST', 'Spanish'),
+        language_boost: env('MINIMAX_LANGUAGE_BOOST', 'English'),
         /**
          * Opus in an OGG container is what WhatsApp renders as a push-to-talk
          * bubble rather than a file attachment.
@@ -141,9 +155,10 @@ export async function synthesise(text: string): Promise<Produced> {
          */
         audio_setting: { format: 'opus', sample_rate: 24_000, bitrate: 32_000, channel: 1 },
         voice_setting: {
-          voice_id: env('MINIMAX_VOICE_ID', 'Spanish_ReliableMan'),
+          voice_id: env('MINIMAX_VOICE_ID', 'English_Gentle-voiced_man'),
           speed: 1,
           vol: 1,
+          ...emotion(),
         },
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -169,6 +184,24 @@ export async function synthesise(text: string): Promise<Produced> {
   if (data.length > MAX_BYTES) return { ok: false, error: 'the audio is too large to send' };
   log('minimax.spoke', { bytes: data.length });
   return { ok: true, data };
+}
+
+/**
+ * The emotion to speak with, as a spreadable fragment.
+ *
+ * Warm by default, because the alternative is a neutral read and this is a
+ * person in a conversation rather than an announcement system. Spreadable so an
+ * unset or unrecognised value contributes nothing at all instead of sending
+ * `emotion: undefined`, which the provider counts as a parameter and refuses.
+ */
+function emotion(): { emotion?: string } {
+  const value = env('MINIMAX_VOICE_EMOTION', 'happy').toLowerCase();
+  if (value === 'none') return {};
+  if (!EMOTIONS.has(value)) {
+    log('minimax.unknownEmotion', { value, note: 'not one the provider accepts; speaking without it' });
+    return {};
+  }
+  return { emotion: value };
 }
 
 async function download(url: string): Promise<Produced> {

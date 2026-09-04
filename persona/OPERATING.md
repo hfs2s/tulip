@@ -82,6 +82,20 @@ enough that reading it is a chore, or somebody who is clearly on the move. Most
 of the time text is better, and a bot that answers everything by voice is
 tiring.
 
+**Use sound tags when you speak.** The text of a voice note can carry them
+inline, and they are most of the difference between sounding like a person and
+sounding like something reading aloud:
+
+    tulip-wa voice "[laughter] no, that is not what I meant at all"
+    tulip-wa voice "well [breath] where do I start"
+    tulip-wa voice "[sigh] fine, you were right"
+
+Reach for them. If you are deciding whether a line needs one, it probably does —
+err towards adding rather than leaving it flat. They are spoken as performance,
+not read out as words, and nothing strips them on the way. A laugh, a breath
+before a hard sentence, a sigh before conceding a point: these are the things
+that make a recording sound like it came from someone.
+
 ## Messaging other people
 
 Usually you cannot, and when you can it is narrower than it sounds.

@@ -98,6 +98,11 @@ services:
       # Only the 2.5 speech models accept this; 02 and 01 reject it outright, so
       # move it and MINIMAX_VOICE_MODEL together.
       MINIMAX_LANGUAGE_BOOST: ${MINIMAX_LANGUAGE_BOOST:-}
+      # happy | sad | angry | fearful | disgusted | surprised | neutral, or
+      # `none` to speak flat. Anything else is dropped rather than sent: the
+      # provider rejects an unknown emotion with a 400 and takes the whole voice
+      # note with it, and a typo should cost the warmth, not the reply.
+      MINIMAX_VOICE_EMOTION: ${MINIMAX_VOICE_EMOTION:-}
       EXA_API_KEY: ${EXA_API_KEY:-}
       EXA_BACKUP_API_KEY: ${EXA_BACKUP_API_KEY:-}
       EXA_BACKUP_API_KEY2: ${EXA_BACKUP_API_KEY2:-}

@@ -16,12 +16,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const original = { ...process.env };
 let requested: string[] = [];
+let sent: Array<Record<string, unknown>> = [];
 
 beforeEach(() => {
   requested = [];
+  sent = [];
   process.env['MINIMAX_API_KEY'] = 'test-key';
-  vi.stubGlobal('fetch', async (url: string) => {
+  vi.stubGlobal('fetch', async (url: string, init?: { body?: string }) => {
     requested.push(String(url));
+    try {
+      sent.push(JSON.parse(init?.body ?? '{}') as Record<string, unknown>);
+    } catch {
+      sent.push({});
+    }
     return {
       ok: true,
       json: async () => ({ data: { audio: Buffer.from('x').toString('hex') }, base_resp: { status_msg: 'ok' } }),
@@ -75,5 +82,52 @@ describe('a missing key', () => {
     const result = await synthesise('hola');
     expect(result.ok).toBe(false);
     expect(requested).toHaveLength(0);
+  });
+});
+
+/**
+ * The emotion sent with every voice note.
+ *
+ * The provider validates it and refuses an unknown value with a 400 — which
+ * would take the entire voice note, not just its warmth. So the set is checked
+ * here rather than discovered there.
+ */
+describe('the emotion', () => {
+  const spoken = async (): Promise<Record<string, unknown>> => {
+    await synthesise('hola');
+    return (sent[0]?.voice_setting ?? {}) as Record<string, unknown>;
+  };
+
+  it('is happy unless somebody says otherwise', async () => {
+    expect((await spoken())['emotion']).toBe('happy');
+  });
+
+  it('honours a valid override', async () => {
+    process.env['MINIMAX_VOICE_EMOTION'] = 'surprised';
+    expect((await spoken())['emotion']).toBe('surprised');
+  });
+
+  it('omits the field entirely for `none`, rather than sending an empty one', async () => {
+    process.env['MINIMAX_VOICE_EMOTION'] = 'none';
+    expect('emotion' in (await spoken())).toBe(false);
+  });
+
+  it('drops an unknown value rather than letting the provider refuse the whole note', async () => {
+    process.env['MINIMAX_VOICE_EMOTION'] = 'ecstatic';
+    expect('emotion' in (await spoken())).toBe(false);
+  });
+});
+
+describe('what is spoken', () => {
+  it('passes sound tags through untouched, because the persona is told to use them', async () => {
+    await synthesise('[laughter] no, that is not what I meant');
+    expect(sent[0]?.['text']).toBe('[laughter] no, that is not what I meant');
+  });
+
+  it('uses the model and voice this deployment is configured for', async () => {
+    await synthesise('hola');
+    expect(sent[0]?.['model']).toBe('speech-2.8-turbo');
+    expect(sent[0]?.['language_boost']).toBe('English');
+    expect((sent[0]?.['voice_setting'] as Record<string, unknown>)['voice_id']).toBe('English_Gentle-voiced_man');
   });
 });
