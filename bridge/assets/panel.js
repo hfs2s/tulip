@@ -1654,41 +1654,44 @@ function ready(img) {
  * merely slowing it — a full-column WebGL surface animating behind an operator
  * console is exactly what that setting is asking us not to do.
  */
-var FLOW = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.28;
+var FLOW = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.18;
 var DRIFT = 0;
 
 /**
  * The moving layer.
  *
- * Neuro noise rather than the paper texture, because the paper shader's motion
- * is grain shimmering in place — at any speed low enough not to distract, it is
- * invisible, and at a speed you can see it looks like a fault. This one flows,
- * so it reads as movement at a speed slow enough to ignore.
+ * A mesh gradient rather than a noise field: it moves as slow shapes rather than
+ * as texture, which is what lets it be seen at a speed slow enough to ignore.
+ * The grain that sits over it supplies the fine detail, and `u_grainMixer` and
+ * `u_grainOverlay` add a little of their own so the colour never bands.
  *
- * Colours sit a few percent above the page's own ground with the faintest cool
- * cast, so it reads as depth rather than as a gradient somebody chose. The
- * brightness and contrast are held low for the same reason; `#paper-flow`'s
- * opacity is the knob to reach for if it wants to be fainter still.
+ * Colours sit within a few percent of the page's own ground with the faintest
+ * cool cast, so it reads as depth rather than as a gradient somebody chose.
+ * `#paper-flow`'s opacity is the knob to reach for if it should be fainter.
+ *
+ * The sizing block is not optional and its absence is silent — see the note in
+ * `mountPaper`. Every uniform here is passed explicitly for that reason.
  */
 function mountFlow() {
   if (typeof PaperShaders === 'undefined' || !PaperShaders.ShaderMount) return;
-  if (!PaperShaders.neuroNoiseFragmentShader) return;
+  if (!PaperShaders.meshGradientFragmentShader) return;
   var host = el('paper-flow');
   if (!host) return;
   try {
-    new PaperShaders.ShaderMount(host, PaperShaders.neuroNoiseFragmentShader, {
+    new PaperShaders.ShaderMount(host, PaperShaders.meshGradientFragmentShader, {
       u_colorBack: [0.051, 0.051, 0.059, 1],
-      u_colorMid: [0.098, 0.125, 0.141, 1],
-      u_colorFront: [0.176, 0.243, 0.271, 1],
-      u_brightness: 0.62,
-      u_contrast: 0.55,
-      // Not optional, and their absence is silent. The library computes
-      // `v_objectUV` in a *vertex* prelude from these, so an unsupplied
-      // `u_scale` is zero, the UV collapses to a point, and every pixel samples
-      // the same place — a perfectly uniform field with no error anywhere. It
-      // renders, it animates, and it looks like the shader is broken.
+      u_colors: [
+        [0.086, 0.114, 0.129, 1],
+        [0.063, 0.078, 0.090, 1],
+        [0.051, 0.051, 0.059, 1]
+      ],
+      u_colorsCount: 3,
+      u_distortion: 0.62,
+      u_swirl: 0.42,
+      u_grainMixer: 0.24,
+      u_grainOverlay: 0.12,
       u_fit: 0,
-      u_scale: 0.9,
+      u_scale: 1,
       u_rotation: 0,
       u_originX: 0.5,
       u_originY: 0.5,
@@ -1698,7 +1701,7 @@ function mountFlow() {
       u_worldHeight: 0
     }, undefined, FLOW);
   } catch (err) {
-    console.warn('[tulip] neuro noise did not mount:', err && err.message ? err.message : err);
+    console.warn('[tulip] mesh gradient did not mount:', err && err.message ? err.message : err);
   }
 }
 
