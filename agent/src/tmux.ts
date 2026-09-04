@@ -151,6 +151,18 @@ export async function sendLine(window: string, line: string): Promise<void> {
   await tmux(['send-keys', '-t', paneTarget(window), 'Enter']);
 }
 
+/**
+ * Type text without submitting it.
+ *
+ * `sendLine` appends an Enter, which is right for the supervisor's prompt — a
+ * pointer to a batch file, typed and submitted in one move — and wrong for an
+ * operator at a keyboard, where Enter is a keystroke they make themselves. A
+ * terminal that submitted on every character would be unusable.
+ */
+export async function sendText(window: string, text: string): Promise<void> {
+  await tmux(['send-keys', '-t', paneTarget(window), '-l', text]);
+}
+
 export async function sendKey(window: string, key: string): Promise<void> {
   await tmux(['send-keys', '-t', paneTarget(window), key]);
 }

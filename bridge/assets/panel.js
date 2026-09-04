@@ -9,7 +9,6 @@ var route = 'overview';
 var feedFilter = 'all';
 var chatQuery = '';
 var termWindow = null;
-var termTimer = null;
 var booted = false;
 
 function el(id) { return document.getElementById(id); }
@@ -183,7 +182,11 @@ function go(next) {
     if (b.dataset.route === route) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
   });
-  if (route === 'terminal') startTerminal(); else stopTerminal();
+  // The terminal page has no chrome of its own, so the wrapper's padding goes
+  // too and the emulator fills what is left of the window.
+  var wrap = document.querySelector('.page-wrap');
+  if (wrap) wrap.classList.toggle('bare', route === 'terminal');
+  if (route !== 'terminal') stopTerminal();
   var scroller = document.querySelector('main');
   if (scroller) scroller.scrollTop = 0;
   render();
@@ -523,162 +526,120 @@ function renderTools() {
 }
 
 // ── Terminal ────────────────────────────────────────────────────────────────
-// Two views of one pane. Raw is the literal capture. Readable parses the TUI
-// into what actually happened, and masks the scaffolding — the injected prompt
-// is a pointer to a batch file with a UUID in it, which tells an operator
-// nothing and pushes the part they wanted off the line. Same instinct as the
-// hfs2s waiting screen: show the notes, not the pane.
+// A real terminal emulator over the agent's pane, not a rendering of it.
+//
+// What was here before parsed the pane into semantic lines and repainted every
+// two seconds from a stripped-text snapshot. It was readable, and it was never
+// the session: a TUI is a stream of cursor movements, so a poll of plain text
+// can only ever show a summary of one, always a beat behind and never quite in
+// the state the agent was actually in.
+//
+// Now the agent streams the pane's own bytes and xterm.js renders them, which
+// is what Iris gets from ttyd — with the difference that no socket and no
+// network path exists between the two containers. The bytes travel the same way
+// everything else does, over the handoff volume.
 
-var termView = 'readable';
+var term = null;
+var termStream = null;
+var termFit = null;
 
-/** One entry per meaningful line in the pane. */
-function digestPane(text) {
-  var out = [];
-  var lines = String(text || '').split('\n');
-  for (var i = 0; i < lines.length; i++) {
-    var raw = lines[i];
-    var line = raw.replace(/\s+$/, '');
-    var t = line.trim();
-    if (!t) continue;
+/** The pane's fixed grid. Pinned in agent/src/tmux.ts; never reflowed here. */
+var TERM_COLS = 200;
+var TERM_ROWS = 50;
 
-    // The prompt the supervisor typed. Everything useful in it is the fact that
-    // a message arrived; the batch path is scaffolding.
-    if (t.indexOf('❯') === 0) {
-      var body = t.slice(1).trim();
-      if (!body) continue;
-      var m = body.match(/^New WhatsApp message(s \((\d+)\))?\./);
-      if (m) {
-        out.push({ kind: 'prompt', text: m[2] ? m[2] + ' new messages handed over' : 'New message handed over' });
-      } else {
-        out.push({ kind: 'typed', text: body });
-      }
-      continue;
-    }
+/**
+ * Keystrokes, in tmux's terms.
+ *
+ * xterm hands over what a terminal would send down a pty. tmux wants either
+ * literal text or a key *name*, so the control bytes are translated and
+ * anything printable is passed through as text. Enter is a key rather than a
+ * newline in the text: `send-keys -l` with a newline would type one, where the
+ * TUI is watching for the key.
+ */
+var TERM_KEYS = {
+  '\r': 'Enter', '\n': 'Enter', '\t': 'Tab', '\x7f': 'BSpace', '\x1b': 'Escape',
+  '\x1b[A': 'Up', '\x1b[B': 'Down', '\x1b[C': 'Right', '\x1b[D': 'Left',
+  '\x1b[H': 'Home', '\x1b[F': 'End', '\x1b[5~': 'PageUp', '\x1b[6~': 'PageDown',
+  '\x1b[3~': 'DC'
+};
 
-    // The agent's own summary of the turn.
-    if (t.indexOf('●') === 0) { out.push({ kind: 'result', text: t.slice(1).trim() }); continue; }
-
-    // A tool result or an error.
-    if (t.indexOf('⎿') === 0) {
-      var d = t.replace(/^⎿\s*/, '');
-      out.push({ kind: /error|too low|invalid|expired|limit/i.test(d) ? 'error' : 'tool', text: d });
-      continue;
-    }
-
-    // Timing footer: "✻ Cooked for 21s · done 9:21 PM"
-    if (t.indexOf('✻') === 0) {
-      var f = t.slice(1).trim().match(/for\s+(\S+).*?done\s+(.+)$/i);
-      out.push({ kind: 'status', text: f ? 'took ' + f[1] + ' · ' + f[2] : t.slice(1).trim() });
-      continue;
-    }
-
-    if (/^Thought for /.test(t)) { out.push({ kind: 'activity', text: t }); continue; }
-    if (/esc to interrupt/i.test(t)) { out.push({ kind: 'working', text: 'working…' }); continue; }
-
-    // Box drawing, the footer hint bar, and the banner are chrome.
-    if (/^[─━╌╭╰│┌└▐▝▛▜█▀]/.test(t)) continue;
-    if (/bypass permissions on|for shortcuts|Claude Code v/.test(t)) continue;
+function termKeyFor(data) {
+  if (TERM_KEYS[data]) return { text: TERM_KEYS[data], literal: false };
+  // A lone control character: C-a through C-z, and the handful above them.
+  if (data.length === 1 && data.charCodeAt(0) < 0x20) {
+    var code = data.charCodeAt(0);
+    if (code >= 1 && code <= 26) return { text: 'C-' + String.fromCharCode(96 + code), literal: false };
+    return null;
   }
-  return out;
+  // Everything else is text, including a paste — one entry, not one per
+  // character, so a long paste costs a single slot in the bridge's key window.
+  return { text: data, literal: true };
+}
+
+/**
+ * Size the type to the pane rather than the pane to the window.
+ *
+ * Reflowing would be the usual thing to do and is exactly what must not happen:
+ * the supervisor parses this pane to tell whether a turn is running, so the
+ * grid stays 200x50 and the font shrinks to fit it. The 0.6 is a monospace
+ * advance ratio — close enough for every stack in the font list, and the host
+ * scrolls if a face turns out to be wider.
+ */
+function fitTerminal() {
+  var host = el('termHost');
+  if (!host || !term) return;
+  var width = host.clientWidth - 20;
+  if (width <= 0) return;
+  var size = Math.max(5, Math.min(16, Math.floor(width / TERM_COLS / 0.6)));
+  if (term.options.fontSize !== size) term.options.fontSize = size;
 }
 
 function renderTerminal() {
-  var p = head('terminal', 'Terminal', 'The agent’s live session. A pane view with key injection — not a shell on the host, and not a PTY.');
+  var page = el('p-terminal');
 
-  p.appendChild(node('div', 'warnbar', 'Anything you type goes into a live conversation with a member of the public.'));
+  // `render()` runs on every state refresh. Rebuilding the emulator there would
+  // blank the screen twice a second, so an existing one is left alone.
+  if (term && el('termHost')) { fitTerminal(); return; }
+  clear(page);
 
-  var controls = node('div', 'controls');
-
-  var seg = node('div', 'seg');
-  [['readable', 'Readable'], ['raw', 'Raw']].forEach(function (v) {
-    var b = node('button', null, v[1]);
-    b.type = 'button';
-    b.setAttribute('aria-pressed', termView === v[0] ? 'true' : 'false');
-    b.addEventListener('click', function () { termView = v[0]; renderTerminal(); pollTerminal(); });
-    seg.appendChild(b);
-  });
-  controls.appendChild(seg);
-
-  var select = document.createElement('select');
-  select.id = 'termWindows';
-  select.addEventListener('change', function () { termWindow = select.value || null; pollTerminal(); });
-  controls.appendChild(select);
-
-  ['Enter', 'Escape', 'C-c'].forEach(function (k) {
-    var b = node('button', 'sm', k);
-    b.type = 'button';
-    b.addEventListener('click', function () { sendKeys([{ text: k, literal: false }]); });
-    controls.appendChild(b);
-  });
-  p.appendChild(controls);
-
-  // The transcript, and an inline prompt that is part of it rather than a
-  // separate form. Clicking anywhere in the slab focuses the prompt, so it
-  // behaves like a terminal you type into.
-  var slab = node('div', 'slab');
-  slab.id = 'termSlab';
-  slab.appendChild(node('div', 'muted', 'Waiting for the agent to publish a frame…'));
-  p.appendChild(slab);
-
-  var promptRow = node('div', 'termprompt');
-  // The row is 45px and the field inside it is 20px, so on a phone most taps
-  // aimed at the prompt landed on padding and did nothing.
-  promptRow.addEventListener('click', function () { el('termInput').focus(); });
-  promptRow.appendChild(node('span', 'caret', '❯'));
-  var input = document.createElement('input');
-  input.type = 'text';
-  input.id = 'termInput';
-  input.autocomplete = 'off';
-  input.spellcheck = false;
-  input.placeholder = 'type here and press Enter — this goes straight into the session';
-  input.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Enter') {
-      var text = input.value;
-      if (!text) return;
-      sendKeys([{ text: text, literal: true }]);
-      input.value = '';
-    } else if (ev.key === 'Escape') {
-      sendKeys([{ text: 'Escape', literal: false }]);
-    }
-  });
-  promptRow.appendChild(input);
-  p.appendChild(promptRow);
-
-  slab.addEventListener('click', function (ev) {
-    if (String(window.getSelection())) return; // let people copy text
-    input.focus();
-  });
-}
-
-function paintTerminal(screen) {
-  var slab = el('termSlab');
-  if (!slab) return;
-  var atBottom = slab.scrollTop + slab.clientHeight >= slab.scrollHeight - 40;
-  clear(slab);
-
-  if (termView === 'raw') {
-    slab.classList.add('rawview');
-    slab.appendChild(document.createTextNode(screen.content || '(no session is running)'));
-  } else {
-    slab.classList.remove('rawview');
-    var entries = digestPane(screen.content);
-    if (!entries.length) {
-      slab.appendChild(node('div', 'muted', '(nothing on screen yet)'));
-    } else {
-      entries.forEach(function (e) {
-        var row = node('div', 'tline ' + e.kind);
-        row.appendChild(node('span', 'tmark', e.kind === 'prompt' ? '→'
-          : e.kind === 'typed' ? '⌨'
-          : e.kind === 'result' ? '●'
-          : e.kind === 'error' ? '!'
-          : e.kind === 'tool' ? '⎿'
-          : e.kind === 'working' ? '…' : '·'));
-        row.appendChild(node('span', 'ttext', e.text));
-        slab.appendChild(row);
-      });
-    }
+  if (typeof Terminal !== 'function') {
+    page.appendChild(node('div', 'termnote',
+      'The terminal emulator was not bundled into this build.\nRun the panel asset build and reload.'));
+    return;
   }
-  if (atBottom) slab.scrollTop = slab.scrollHeight;
+
+  var host = node('div', 'termhost');
+  host.id = 'termHost';
+  page.appendChild(host);
+
+  term = new Terminal({
+    cols: TERM_COLS,
+    rows: TERM_ROWS,
+    convertEol: false,
+    cursorBlink: true,
+    scrollback: 0,
+    fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+    fontSize: 12,
+    theme: { background: '#000000', foreground: '#d6d6de', cursor: '#21d2ed' }
+  });
+  term.open(host);
+  fitTerminal();
+
+  // Straight to the agent. There is no local echo: what appears on screen is
+  // what the pane actually did with the keystroke, which is the only honest
+  // thing to show when the round trip crosses a volume.
+  term.onData(function (data) {
+    var key = termKeyFor(data);
+    if (key) sendKeys([key]);
+  });
+
+  if (termFit) window.removeEventListener('resize', termFit);
+  termFit = fitTerminal;
+  window.addEventListener('resize', termFit);
+
+  // Only now, with something to write to. Opening the stream from the route
+  // switch would drop whatever arrived before the first paint.
+  openTerminalStream();
 }
 
 async function sendKeys(keys) {
@@ -688,44 +649,40 @@ async function sendKeys(keys) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ window: termWindow, keys: keys })
     });
-    toast('Sent.');
   } catch (err) { toast(err.message); }
-  setTimeout(pollTerminal, 700);
 }
 
-async function pollTerminal() {
-  if (route !== 'terminal') return;
-  try {
-    await api('/api/terminal/watch', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ window: termWindow })
-    });
-    var screen = await api('/api/terminal');
-    paintTerminal(screen);
+/**
+ * Open the byte stream.
+ *
+ * `reset` arrives when the agent has repainted — a different chat became
+ * active, or the stream file hit its cap — and means the bytes that follow
+ * assume a clean screen. Clearing on it is what stops a repaint being drawn
+ * over the tail of the previous one.
+ */
+function openTerminalStream() {
+  if (termStream || typeof EventSource !== 'function') return;
 
-    var select = el('termWindows');
-    if (select && screen.windows) {
-      var want = screen.windows.join('|');
-      if (select.dataset.have !== want) {
-        select.dataset.have = want;
-        clear(select);
-        screen.windows.forEach(function (w) {
-          var o = document.createElement('option');
-          o.value = w;
-          // A chat key is not a name. Show who it is where we know.
-          var chat = state && state.chats ? state.chats.filter(function (c) { return 'c-' + c.chatKey === w; })[0] : null;
-          o.textContent = chat ? (chat.name || 'someone') + ' · ' + chat.chatKey.slice(0, 6) : w;
-          select.appendChild(o);
-        });
-        if (screen.window) select.value = screen.window;
-      }
-    }
-    if (!termWindow && screen.window) termWindow = screen.window;
-  } catch (err) { /* the agent may be restarting */ }
+  termStream = new EventSource('/api/terminal/stream');
+  termStream.addEventListener('reset', function () {
+    if (term) term.reset();
+  });
+  termStream.onmessage = function (ev) {
+    if (!term || !ev.data) return;
+    // base64 because an event stream is line-oriented and a pane emits every
+    // byte there is, newlines very much included.
+    var raw = atob(ev.data);
+    var bytes = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    term.write(bytes);
+  };
 }
-function startTerminal() { stopTerminal(); pollTerminal(); termTimer = setInterval(pollTerminal, 2000); }
-function stopTerminal() { if (termTimer) clearInterval(termTimer); termTimer = null; }
+
+function stopTerminal() {
+  if (termStream) { termStream.close(); termStream = null; }
+  if (termFit) { window.removeEventListener('resize', termFit); termFit = null; }
+  if (term) { term.dispose(); term = null; }
+}
 
 // ── Settings ────────────────────────────────────────────────────────────────
 

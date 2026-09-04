@@ -82,6 +82,26 @@ for (const [specifier, name] of [
 const licence = fromPackage('@fontsource-variable/onest/LICENSE');
 if (licence) cpSync(licence, join(fonts, 'LICENSE.txt'));
 
+// ── Terminal emulator ────────────────────────────────────────────────────────
+// The panel's Terminal page renders the agent's pane with xterm.js, because the
+// pane is a TUI: cursor movements and escape sequences, not lines of text. The
+// UMD build assigns its exports onto globalThis, so `Terminal` is a global and
+// no module loading is needed — which keeps `script-src 'self'` intact.
+for (const [specifier, name] of [
+  ['@xterm/xterm/lib/xterm.js', 'xterm.js'],
+  ['@xterm/xterm/css/xterm.css', 'xterm.css'],
+  ['@xterm/xterm/LICENSE', 'xterm.LICENSE.txt'],
+]) {
+  const source = fromPackage(specifier);
+  if (!source) {
+    console.warn(`  ! ${name}: @xterm/xterm is not installed, skipping`);
+    continue;
+  }
+  cpSync(source, join(out, name));
+  console.log(`  ✓ ${name} (${statSync(join(out, name)).size} bytes)`);
+  vendored += 1;
+}
+
 // ── Shader bundle ────────────────────────────────────────────────────────────
 // Bundled to a single IIFE exposing one global, because ESM from a directory of
 // modules would mean serving the whole package tree.

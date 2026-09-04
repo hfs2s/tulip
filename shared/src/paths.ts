@@ -54,9 +54,14 @@ export const inPaths = {
    * holding the WhatsApp credentials — which is the one thing the topology
    * exists to prevent.
    *
-   * What this buys is a pane view and key injection rather than a true PTY. It
-   * is what Iris's terminal was before it grew a websocket, and it is what an
-   * operator actually needs: watch the agent work, and take over when you want.
+   * The request half: which window to show, and which keys to type. The reply
+   * half is `pane.raw` on the outbound volume — the pane's own byte stream,
+   * which is what makes this a terminal rather than a view of one.
+   *
+   * `window` is normally null, meaning "follow whichever chat is active". The
+   * panel has no window picker: with a session per chat there is nothing useful
+   * for an operator to choose between, and the thing worth watching is whatever
+   * is answering someone right now.
    */
   terminal: `${IN_DIR}/terminal.json`,
 } as const;
