@@ -1032,68 +1032,145 @@ function fitTerminal() {
 /**
  * Tulip's brief, as the agent receives it.
  *
- * Rendered rather than editable. These files are version-controlled and reach a
- * conversation only when its session next spawns, so an editor here would
- * promise something it cannot deliver — a change that looks saved and takes
- * effect at some unrelated moment, or never, for a chat that has been talking
- * for an hour.
+ * Thirty-three kilobytes of prose across four documents, one of which is twenty
+ * on its own. Printed end to end it is unreadable — not badly styled, actually
+ * unreadable: an operator looking for what Tulip believes about groups has no
+ * way in but a scroll bar.
  *
- * The markdown is rendered by hand and conservatively: headings, bullets, code
- * and bold. This is a document the agent is told to treat as instructions, so
- * the safest possible thing to do with it in a browser is to show it as text
- * with a little structure — never as HTML.
+ * So one part at a time, with its own headings beside it as a way in. The two
+ * questions an operator actually arrives with are "which document says that"
+ * and "what does it say about X", and this answers both without reading.
+ *
+ * Read-only, deliberately: these files reach a conversation when its session
+ * next spawns, so an editor here would promise a change it cannot deliver.
  */
+var personaPart = 0;
+
 async function renderPersona() {
-  var p = head('persona', 'Persona', 'What Tulip has been told to be. Assembled in this order into every chat’s brief when its session starts — so a conversation already running keeps the version it began with.'), mine = renderToken;
+  var p = head('persona', 'Persona', 'What Tulip has been told to be. These four are assembled in order into every chat’s brief when its session starts — so a conversation already running keeps the version it began with.'), mine = renderToken;
 
   var data;
   try { data = await api('/api/persona'); } catch (err) { p.appendChild(node('p', 'empty', err.message)); return; }
   if (stale(mine)) return;
 
-  data.parts.forEach(function (part) {
-    var card = node('div', 'card');
-    card.appendChild(node('h2', null, part.name.replace('.md', '')));
-    if (part.text === null) {
-      card.appendChild(node('p', 'empty', 'Missing from this build.'));
-      p.appendChild(card);
+  var seg = node('div', 'seg');
+  seg.setAttribute('role', 'group');
+  seg.setAttribute('aria-label', 'Which part of the brief');
+  var body = node('div', 'personabody');
+
+  function show(i) {
+    personaPart = i;
+    Array.prototype.forEach.call(seg.children, function (b, n) {
+      b.setAttribute('aria-pressed', n === i ? 'true' : 'false');
+    });
+    clear(body);
+    var part = data.parts[i];
+    if (!part || part.text === null) {
+      body.appendChild(node('p', 'empty', 'Missing from this build.'));
       return;
     }
-    card.appendChild(node('p', 'sub', bytes(part.bytes)));
-    card.appendChild(markdown(part.text));
-    p.appendChild(card);
+    var doc = markdown(part.text);
+
+    // The contents are built from the rendered headings rather than from the
+    // source, so the two can never disagree about what is in the document.
+    var toc = node('nav', 'doctoc');
+    toc.setAttribute('aria-label', 'Contents');
+    var heads = doc.querySelectorAll('h3');
+    if (heads.length > 1) {
+      Array.prototype.forEach.call(heads, function (h, n) {
+        h.id = 'doc-' + i + '-' + n;
+        var a = node('a', null, h.textContent);
+        a.href = '#' + h.id;
+        a.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        toc.appendChild(a);
+      });
+      body.appendChild(toc);
+    }
+    var col = node('div', 'doccol');
+    col.appendChild(node('p', 'docmeta', part.name + ' · ' + bytes(part.bytes)));
+    col.appendChild(doc);
+    body.appendChild(col);
+  }
+
+  data.parts.forEach(function (part, i) {
+    var b = node('button', null, part.name.replace('.md', ''));
+    b.type = 'button';
+    b.addEventListener('click', function () { show(i); });
+    seg.appendChild(b);
   });
+
+  p.appendChild(seg);
+  p.appendChild(body);
+  show(Math.min(personaPart, data.parts.length - 1));
 }
 
 /**
  * Enough markdown to read a brief, and no more.
  *
- * Deliberately not a parser. Every line becomes a text node, so nothing in
- * these files can become an element — they are instructions written for an
- * agent, and the panel renders text written by strangers under a CSP that
- * exists for exactly this reason.
+ * Deliberately not a parser. Every piece of the file becomes a **text node** —
+ * `inline()` builds `<strong>` and `<code>` elements itself and puts the file's
+ * characters inside them, so nothing in these documents can become markup. They
+ * are instructions written to be obeyed by an agent; the panel renders text
+ * written by strangers under a CSP that exists for this reason, and a brief is
+ * not an exception to it.
  */
+function inline(text, into) {
+  // Split on **bold** and `code`, keeping the delimiters so each run can be
+  // wrapped in an element this function created rather than one the file named.
+  var parts = String(text).split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  parts.forEach(function (run) {
+    if (!run) return;
+    if (run.length > 4 && run.slice(0, 2) === '**' && run.slice(-2) === '**') {
+      into.appendChild(node('strong', null, run.slice(2, -2)));
+    } else if (run.length > 2 && run[0] === '`' && run[run.length - 1] === '`') {
+      into.appendChild(node('code', null, run.slice(1, -1)));
+    } else {
+      into.appendChild(document.createTextNode(run));
+    }
+  });
+  return into;
+}
+
 function markdown(src) {
   var out = node('div', 'doc');
   var lines = src.split('\n');
   var block = null;
+  var list = null;
+
+  function endList() { if (list) { out.appendChild(list); list = null; } }
 
   lines.forEach(function (line) {
-    if (line.trim() === '```' || line.trim().indexOf('```') === 0) {
-      if (block) { out.appendChild(block); block = null; }
-      else { block = node('pre'); }
+    var t = line.trim();
+
+    if (t.indexOf('```') === 0) {
+      endList();
+      if (block) { out.appendChild(block); block = null; } else { block = node('pre'); }
       return;
     }
     if (block) { block.appendChild(document.createTextNode(line + '\n')); return; }
-    if (line.trim() === '') return;
-    if (line.indexOf('#### ') === 0) { out.appendChild(node('h5', null, line.slice(5))); return; }
-    if (line.indexOf('### ') === 0) { out.appendChild(node('h4', null, line.slice(4))); return; }
-    if (line.indexOf('## ') === 0) { out.appendChild(node('h3', null, line.slice(3))); return; }
-    if (line.indexOf('# ') === 0) { out.appendChild(node('h3', null, line.slice(2))); return; }
-    if (line.indexOf('    ') === 0) { out.appendChild(node('pre', null, line.trim())); return; }
-    if (/^[-*] /.test(line.trim())) { out.appendChild(node('li', null, line.trim().slice(2))); return; }
-    out.appendChild(node('p', null, line));
+    if (t === '') { endList(); return; }
+    if (/^-{3,}$/.test(t)) { endList(); out.appendChild(node('hr')); return; }
+
+    if (t.indexOf('#### ') === 0) { endList(); out.appendChild(inline(t.slice(5), node('h5'))); return; }
+    if (t.indexOf('### ') === 0) { endList(); out.appendChild(inline(t.slice(4), node('h4'))); return; }
+    if (t.indexOf('## ') === 0) { endList(); out.appendChild(inline(t.slice(3), node('h3'))); return; }
+    if (t.indexOf('# ') === 0) { endList(); out.appendChild(inline(t.slice(2), node('h3'))); return; }
+    if (t.indexOf('> ') === 0) { endList(); out.appendChild(inline(t.slice(2), node('blockquote'))); return; }
+    if (line.indexOf('    ') === 0) { endList(); out.appendChild(node('pre', null, line.trim())); return; }
+
+    if (/^[-*] /.test(t)) {
+      if (!list) list = node('ul');
+      list.appendChild(inline(t.slice(2), node('li')));
+      return;
+    }
+    endList();
+    out.appendChild(inline(t, node('p')));
   });
   if (block) out.appendChild(block);
+  endList();
   return out;
 }
 

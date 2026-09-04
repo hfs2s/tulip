@@ -324,15 +324,52 @@
   .field{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;
          padding:13px 0;border-bottom:1px solid var(--line-soft)}
   /* A <label> when it names a checkbox, so the words are a hit target too. */
-  /* The persona reader. Long prose, so a narrower measure than a settings row. */
-  .doc{max-width:70ch}
-  .doc h3{font:400 17px/1.3 var(--display);margin:22px 0 6px;color:var(--ink)}
-  .doc h4,.doc h5{font:500 14px/1.35 var(--body);margin:16px 0 4px;color:var(--dim)}
-  .doc p{font-size:13.5px;line-height:1.65;color:var(--dim);margin:0 0 10px}
-  .doc li{font-size:13.5px;line-height:1.6;color:var(--dim);margin:3px 0 3px 18px}
-  .doc pre{font-family:var(--mono);font-size:12px;line-height:1.5;color:var(--faint);
+  /* ── The persona reader ─────────────────────────────────────────────────────
+     A brief is prose, and prose has different needs from a settings page: a
+     measure you can read a paragraph in, headings with room around them, and a
+     way in that is not the scroll bar. Contents on the left, one document at a
+     time, chosen with the same segmented control the rest of the panel uses. */
+  .personabody{display:grid;grid-template-columns:220px minmax(0,1fr);gap:36px;margin-top:22px}
+  .doctoc{position:sticky;top:28px;align-self:start;display:flex;flex-direction:column;gap:1px;
+          border-left:1px solid var(--line-soft);padding-left:2px;max-height:calc(100dvh - 90px);overflow-y:auto}
+  .doctoc a{font-size:12.5px;line-height:1.4;color:var(--faint);text-decoration:none;
+            padding:6px 10px;border-left:2px solid transparent;margin-left:-2px}
+  .doctoc a:hover{color:var(--ink);border-left-color:var(--accent)}
+  .doctoc a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+  .doccol{min-width:0}
+  .docmeta{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin:0 0 20px;
+           text-transform:none;letter-spacing:.02em}
+  /* 66ch: long enough for an argument, short enough to find the next line. */
+  .doc{max-width:66ch}
+  .doc h3{font:400 21px/1.25 var(--display);letter-spacing:-.02em;margin:40px 0 10px;color:var(--ink);
+          scroll-margin-top:26px}
+  .doc h3:first-child{margin-top:0}
+  .doc h4{font:500 14.5px/1.35 var(--body);margin:22px 0 6px;color:var(--ink)}
+  .doc h5{font:500 13px/1.35 var(--body);margin:16px 0 4px;color:var(--dim)}
+  .doc p{font-size:14px;line-height:1.68;color:var(--dim);margin:0 0 13px}
+  .doc strong{color:var(--ink);font-weight:500}
+  .doc ul{margin:0 0 13px;padding-left:20px}
+  .doc li{font-size:14px;line-height:1.6;color:var(--dim);margin:5px 0}
+  .doc blockquote{margin:14px 0;padding-left:14px;border-left:2px solid var(--accent-dim);
+                  font-size:14px;line-height:1.65;color:var(--dim)}
+  .doc code{font-family:var(--mono);font-size:12.5px;color:var(--accent);
+            background:var(--accent-dim);border:0;border-radius:5px;padding:1px 5px}
+  .doc pre{font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--faint);
            background:var(--raise);border:1px solid var(--line-soft);border-radius:8px;
-           padding:10px 12px;margin:8px 0;white-space:pre-wrap;overflow-x:auto}
+           padding:11px 13px;margin:10px 0 14px;white-space:pre-wrap;overflow-x:auto}
+  .doc pre code{background:none;color:inherit;padding:0}
+  .doc hr{border:0;border-top:1px solid var(--line-soft);margin:32px 0}
+
+  @media (max-width:900px){
+    .personabody{grid-template-columns:1fr;gap:18px}
+    /* Contents first and scrollable sideways: a 30-item column above the text
+       would push the document itself off the screen entirely. */
+    .doctoc{position:static;flex-direction:row;overflow-x:auto;border-left:0;
+            border-bottom:1px solid var(--line-soft);padding:0 0 8px;max-height:none}
+    .doctoc a{white-space:nowrap;border-left:0;border-bottom:2px solid transparent;margin:0}
+    .doctoc a:hover{border-left-color:transparent;border-bottom-color:var(--accent)}
+  }
 
   .field-name{display:block}
   label.field-name{cursor:pointer}
