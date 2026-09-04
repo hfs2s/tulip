@@ -85,8 +85,19 @@ export async function spawnWindow(
       ]);
   if (!started.ok) return false;
 
-  await tmux(['set-option', '-w', '-t', paneTarget(window), 'window-size', 'manual']);
-  await tmux(['resize-window', '-t', paneTarget(window), '-x', '200', '-y', '50']);
+  // `latest`, not `manual`. The window used to be pinned to 200x50 so that
+  // `capture-pane` produced a predictable width for the panel's old
+  // file-streamed terminal. That terminal is now a real pty attached over ttyd,
+  // and a pinned window is exactly wrong for one: tmux fills everything past
+  // the pinned size with dots, so an operator on a wide screen watched the
+  // session through a 200-column letterbox surrounded by padding.
+  //
+  // `latest` means the window follows whichever client attached most recently,
+  // and `default-size` is what it falls back to with nobody watching — which is
+  // most of the time, and where the TUI still needs room to render.
+  await tmux(['set-option', '-w', '-t', paneTarget(window), 'window-size', 'latest']);
+  await tmux(['set-option', '-t', `=${SESSION}`, 'default-size', '200x50']);
+  await tmux(['resize-window', '-A', '-t', paneTarget(window)]);
   await tmux(['set-option', '-t', `=${SESSION}`, 'history-limit', '20000']);
   return true;
 }

@@ -738,9 +738,6 @@ function renderTerminal() {
   if (el('ptyFrame')) return;
   clear(page);
 
-  page.appendChild(node('div', 'warnbar',
-    'Anything you type goes into a live conversation with a member of the public.'));
-
   var frame = document.createElement('iframe');
   frame.id = 'ptyFrame';
   frame.className = 'ptyframe';
