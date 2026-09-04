@@ -76,6 +76,8 @@ import {
   type ApiDeps,
   pagesList,
   pageDelete,
+  memoryList,
+  memoryForget,
 } from './panel-api.js';
 
 const COOKIE = 'tulip_token';
@@ -478,6 +480,13 @@ export function startPanel(deps: ApiDeps): Server | null {
         }
         // Method guard matters: without it this also swallows the POST and
         // silently returns the current values instead of applying the change.
+        if (url.pathname === '/api/memory' && req.method === 'GET') {
+          return send(res, headers, 200, memoryList());
+        }
+        if (url.pathname === '/api/memory/forget' && req.method === 'POST') {
+          const result = memoryForget(url.searchParams.get('id') ?? '');
+          return send(res, headers, result.ok ? 200 : 404, result);
+        }
         if (url.pathname === '/api/pages' && req.method === 'GET') {
           return send(res, headers, 200, pagesList());
         }

@@ -34,6 +34,9 @@ const USAGE = `usage:
                               sound tags are performed: (laughs) (chuckle)
                               (sighs) (breath). Anything else — including square
                               brackets — is read out as words.
+  tulip-wa remember <text>    remember something for EVERY conversation, not
+                              just this one. Never secrets, never anything
+                              personal about somebody who is not here.
   tulip-wa page-image <page> <name> <prompt>
                               generate a picture into that page and print the
                               filename to reference. Five per page.
@@ -313,6 +316,16 @@ switch (command) {
     const text = rest.join(' ').trim() || readFileSync(0, 'utf8').trim();
     if (text.length === 0) die('tulip-wa voice: need something to say');
     queue({ kind: 'voice', text: text.slice(0, 2000) });
+    break;
+  }
+
+  case 'remember': {
+    const text = rest.join(' ').trim();
+    if (text.length === 0) die('tulip-wa remember: say what to remember');
+    const id = queue({ kind: 'remember', text: text.slice(0, 300) });
+    const result = await awaitResult(id, 15_000);
+    if (result === null) { process.stdout.write('remember: no answer from the bridge within 15s.\n'); break; }
+    process.stdout.write(result.ok ? 'remembered\n' : `${result.error ?? 'remember: refused'}\n`);
     break;
   }
 

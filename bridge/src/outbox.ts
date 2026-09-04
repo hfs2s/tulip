@@ -40,6 +40,7 @@ import { log } from './log.js';
 import { retainOutbound } from './mediaStore.js';
 import { claim } from './spend.js';
 import { imageCount, MAX_IMAGES_PER_PAGE, publishPage, writePageImage } from './pages.js';
+import { remember } from './memory.js';
 import type { Limiter } from './ratelimit.js';
 import type { TurnRegistry } from './turns.js';
 import type { Config } from './config.js';
@@ -567,6 +568,21 @@ export class Outbox extends EventEmitter {
         // Recorded against both chats, so a message that crossed conversations
         // is visible from the one it came from as well as the one it went to.
         feed.event('crossChat.sent', `${turn.chatKey} -> ${action.chatKey}`);
+        break;
+      }
+
+      case 'remember': {
+        const record = this.deps.chats.get(turn.chatKey);
+        const kept = remember(action.text, turn.chatKey, record?.name ?? null);
+        if (kept.ok) {
+          // Loud on purpose. This is the one thing the agent learns that reaches
+          // every other conversation, so an operator who never opens the Memory
+          // page still scrolls past it.
+          feed.event('memory.remembered', action.text.slice(0, 160));
+        }
+        await this.answer(action.id, 'page', kept.ok
+          ? { ok: true, items: [] }
+          : { ok: false, error: kept.error });
         break;
       }
 

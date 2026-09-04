@@ -14,7 +14,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { writeFileAtomic } from '@tulip/shared';
+import { inPaths, writeFileAtomic } from '@tulip/shared';
 
 /** Where per-chat workspaces and the persona live inside the agent container. */
 export const WORKSPACE_ROOT = process.env['TULIP_WORKSPACE'] ?? '/workspace';
@@ -80,11 +80,43 @@ export function ensureWorkspace(chatKey: string): ChatWorkspace {
   const persona = composePersona();
   writeFileSync(
     workspace.claudeMd,
-    `${persona}\n\n---\n\nThis file is regenerated from the persona directory every time a session ` +
-      `starts. Editing it here changes nothing; edit the persona instead.\n`,
+    `${persona}${sharedMemory()}\n\n---\n\nThis file is regenerated from the persona directory every time a ` +
+      `session starts. Editing it here changes nothing; edit the persona instead.\n`,
   );
 
   return workspace;
+}
+
+/**
+ * What has been remembered, folded into every chat's brief.
+ *
+ * The one thing in this file that is *not* per chat. It is read from the
+ * inbound volume, which is read-only here — the agent asks the bridge to
+ * remember and the bridge writes, so a session cannot edit what every other
+ * session will read.
+ *
+ * Absent or unreadable yields nothing at all rather than an empty heading: a
+ * "Remembered" section with no entries invites an agent to fill it.
+ */
+function sharedMemory(): string {
+  try {
+    const raw = readFileSync(inPaths.memory, 'utf8');
+    const notes = (JSON.parse(raw) as { notes?: Array<{ text?: unknown }> }).notes ?? [];
+    const lines = notes
+      .map((n) => (typeof n.text === 'string' ? n.text.trim() : ''))
+      .filter((t) => t.length > 0)
+      .map((t) => `- ${t}`);
+    if (lines.length === 0) return '';
+    return (
+      `\n\n## Remembered\n\n` +
+      `Things you have been asked to remember. They are shared by every ` +
+      `conversation, so treat them as things you know rather than as things ` +
+      `somebody here told you — and never repeat one back in a way that reveals ` +
+      `which chat it came from.\n\n${lines.join('\n')}\n`
+    );
+  } catch {
+    return '';
+  }
 }
 
 /**

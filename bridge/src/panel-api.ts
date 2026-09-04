@@ -27,6 +27,7 @@ import type { ServerResponse } from 'node:http';
 import { TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
 import { parseConfig, Contact } from './config.js';
 import { deletePage, listPages, pagesHost, type PageSummary } from './pages.js';
+import { forget, forgetAll, readMemory } from './memory.js';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import type { Dispatcher } from './dispatcher.js';
@@ -465,6 +466,31 @@ export function pageDelete(slug: string): { ok: boolean; message: string } {
   if (!deletePage(slug)) return { ok: false, message: 'No such page.' };
   feed.event('page.deleted', `the page ${slug} was removed`);
   return { ok: true, message: 'Deleted.' };
+}
+
+// ─── Memory ──────────────────────────────────────────────────────────────────
+
+/**
+ * What the agent has been told to remember, and where each note came from.
+ *
+ * The listing exists because this is the one piece of state that reaches every
+ * conversation. Anyone who can message the number can ask for something to be
+ * remembered, so an operator needs to see what is in there and be able to take
+ * it out.
+ */
+export function memoryList(): Json {
+  return { notes: readMemory() };
+}
+
+export function memoryForget(id: string): { ok: boolean; message: string } {
+  if (id === 'all') {
+    const removed = forgetAll();
+    feed.event('memory.cleared', `${String(removed)} remembered notes were removed`);
+    return { ok: true, message: `Forgot ${String(removed)}.` };
+  }
+  if (!forget(id)) return { ok: false, message: 'No such note.' };
+  feed.event('memory.forgot', 'a remembered note was removed');
+  return { ok: true, message: 'Forgotten.' };
 }
 
 // ─── Log ─────────────────────────────────────────────────────────────────────

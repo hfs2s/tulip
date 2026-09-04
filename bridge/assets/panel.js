@@ -93,6 +93,8 @@ var ICONS = {
   messages: '<path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1z"/>',
   chats: '<path d="M16.2 12.5H18a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H7.6a1 1 0 0 0-1 1v1.4"/><path d="M13 7.8H4.6a1 1 0 0 0-1 1v6.6a1 1 0 0 0 1 1H6v3.1l3.9-3.1H13a1 1 0 0 0 1-1V8.8a1 1 0 0 0-1-1z"/>',
   // A sheet with a corner turned: a page, which is what these are.
+  // A head in profile: what it carries between rooms.
+  memory: '<path d="M15.6 4.2a4.3 4.3 0 0 0-8.2 1.6c0 .7.2 1.4.5 2l-2 3.3h2v3.6a2 2 0 0 0 2 2h1.4v3.1"/><path d="M11.6 8.4a1.9 1.9 0 1 0 3.4 1.2"/>',
   pages: '<path d="M14 3.5H6.5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V8z"/><path d="M14 3.5V8h4.5"/><path d="M8.8 12.5h6.4"/><path d="M8.8 16h4.2"/>',
   chat: '<path d="M20.5 12c0 3.9-3.8 7-8.5 7-1 0-2-.15-2.9-.42L4 20l1.3-3.4C4.2 15.3 3.5 13.7 3.5 12c0-3.9 3.8-7 8.5-7s8.5 3.1 8.5 7z"/><path d="M8.6 10.4h6.8"/><path d="M8.6 13.4h4.4"/>',
   media: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="8.6" cy="9.9" r="1.4"/><path d="M3.5 16.2l4.4-3.9 3.6 3.1 3-2.6 6 4.9"/>',
@@ -103,7 +105,7 @@ var ICONS = {
 };
 var PAGES = [
   ['overview', 'Overview'], ['messages', 'Messages'], ['chats', 'Chats'], ['chat', 'Chat'],
-  ['media', 'Media'], ['terminal', 'Terminal'], ['pages', 'Pages'], ['settings', 'Settings'],
+  ['media', 'Media'], ['terminal', 'Terminal'], ['memory', 'Memory'], ['pages', 'Pages'], ['settings', 'Settings'],
   ['log', 'Log']
 ];
 
@@ -1023,6 +1025,51 @@ function fitTerminal() {
   if (width <= 0) return;
   var size = Math.max(5, Math.min(16, Math.floor(width / TERM_COLS / 0.6)));
   if (term.options.fontSize !== size) term.options.fontSize = size;
+}
+
+/**
+ * What the agent remembers, and where each note came from.
+ *
+ * The one page that shows state crossing conversations. Everything else in
+ * Tulip is sealed per chat; this is the exception, so it is listed rather than
+ * trusted — with the chat that taught each note, because "who told it that" is
+ * the question you will actually have.
+ */
+async function renderMemory() {
+  var p = head('memory', 'Memory', 'Things the agent has been asked to remember. Unlike everything else here, these are shared by every conversation — what it learns in one chat it knows in all of them, including with people it has not met yet.'), mine = renderToken;
+  var card = node('div', 'card');
+  p.appendChild(card);
+
+  var data;
+  try { data = await api('/api/memory'); } catch (err) { card.appendChild(node('p', 'empty', err.message)); return; }
+  if (stale(mine)) return;
+
+  if (!data.notes.length) { card.appendChild(node('p', 'empty', 'Nothing remembered yet.')); return; }
+
+  data.notes.slice().reverse().forEach(function (n) {
+    var row = node('div', 'entry');
+    var left = node('div');
+    left.appendChild(node('div', null, n.text));
+    left.appendChild(node('div', 'hint', 'from ' + (n.chatName || n.chatKey) + ' · ' + ago(Date.now() - Date.parse(n.at))));
+    row.appendChild(left);
+    var bin = node('button', 'sm danger', 'Forget');
+    bin.type = 'button';
+    bin.addEventListener('click', function () {
+      if (!window.confirm('Forget this?\n\n' + n.text)) return;
+      act('memory/forget', null, '?id=' + encodeURIComponent(n.id));
+    });
+    row.appendChild(bin);
+    card.appendChild(row);
+  });
+
+  var all = node('button', 'sm danger', 'Forget everything');
+  all.type = 'button';
+  all.style.marginTop = '16px';
+  all.addEventListener('click', function () {
+    if (!window.confirm('Forget all ' + data.notes.length + ' remembered notes?\n\nNothing keeps a copy.')) return;
+    act('memory/forget', null, '?id=all');
+  });
+  card.appendChild(all);
 }
 
 /**
@@ -2056,6 +2103,7 @@ function render() {
   else if (route === 'media') renderMedia();
   else if (route === 'terminal') renderTerminal();
   else if (route === 'pages') void renderPages();
+  else if (route === 'memory') void renderMemory();
   else if (route === 'settings') renderSettings();
   else if (route === 'log') renderLog();
 }

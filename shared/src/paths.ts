@@ -27,6 +27,16 @@ export const inPaths = {
   /** Which turn is being answered right now. */
   current: `${IN_DIR}/current.json`,
   /** Received attachments, one directory per chat key. */
+  /**
+   * What the agent has been told to remember, shared by every chat.
+   *
+   * On the *inbound* volume, which the agent mounts read-only: it asks the
+   * bridge to remember something and the bridge writes it. Kept out of the
+   * agent's reach on purpose — a file the agent could edit directly is one a
+   * compromised agent could rewrite wholesale, and this is the one piece of
+   * state that reaches every conversation.
+   */
+  memory: `${IN_DIR}/memory.json`,
   media: `${IN_DIR}/media`,
   mediaFor: (chatKey: string) => `${IN_DIR}/media/${chatKey}`,
 

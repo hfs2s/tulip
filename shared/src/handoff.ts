@@ -260,6 +260,22 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       id: z.string().uuid(),
       turnId: TurnId,
       /**
+       * Remember something, for every conversation rather than this one.
+       *
+       * Deliberate rather than automatic: a transcript is not memory, and an
+       * agent that remembers everything remembers the wrong things. The bridge
+       * performs the write so it can be capped, logged and shown to an
+       * operator — the agent cannot reach the file.
+       */
+      kind: z.literal('remember'),
+      text: z.string().min(1).max(300),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
        * Publish a page the agent has already written under `out/pages/<slug>/`.
        *
        * Writing the files is the publishing; this asks the bridge to look at
@@ -392,6 +408,20 @@ export const AgentStatus = z
  * holding. See THREAT-MODEL.md §T6 — this channel is what makes indirect
  * prompt injection a live concern rather than a theoretical one.
  */
+/** One remembered fact, and where it came from. */
+export const MemoryNote = z
+  .object({
+    id: z.string().uuid(),
+    at: z.string().datetime(),
+    text: z.string().max(300),
+    /** The chat that asked for it, so an operator can see who taught it what. */
+    chatKey: ChatKey,
+    chatName: z.string().max(128).nullable(),
+  })
+  .strict();
+
+export const MemoryFile = z.object({ notes: z.array(MemoryNote).max(200) }).strict();
+
 export const ToolResult = z
   .object({
     actionId: z.string().uuid(),
@@ -514,6 +544,8 @@ export type InboxBatch = z.infer<typeof InboxBatch>;
 export type CurrentTurn = z.infer<typeof CurrentTurn>;
 export type OutboxAction = z.infer<typeof OutboxAction>;
 export type AgentStatus = z.infer<typeof AgentStatus>;
+export type MemoryNote = z.infer<typeof MemoryNote>;
+export type MemoryFile = z.infer<typeof MemoryFile>;
 export type ToolResult = z.infer<typeof ToolResult>;
 export type UsageWindow = z.infer<typeof UsageWindow>;
 export type UsageReport = z.infer<typeof UsageReport>;
