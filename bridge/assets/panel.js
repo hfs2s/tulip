@@ -1680,9 +1680,12 @@ function mountFlow() {
   try {
     new PaperShaders.ShaderMount(host, PaperShaders.meshGradientFragmentShader, {
       u_colorBack: [0.051, 0.051, 0.059, 1],
+      // Lifted from "within 3% of the ground", which was accurate to the brief
+      // and invisible on a screen. These are still dark — the brightest is
+      // roughly #26333a — but far enough apart that the shapes read.
       u_colors: [
+        [0.149, 0.200, 0.227, 1],
         [0.086, 0.114, 0.129, 1],
-        [0.063, 0.078, 0.090, 1],
         [0.051, 0.051, 0.059, 1]
       ],
       u_colorsCount: 3,
