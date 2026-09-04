@@ -185,7 +185,6 @@ function go(next) {
   // The terminal page has no chrome of its own, so the wrapper's padding goes
   // too and the emulator fills what is left of the window.
   var wrap = document.querySelector('.page-wrap');
-  if (wrap) wrap.classList.toggle('bare', route === 'terminal');
   if (route !== 'terminal') stopTerminal();
   var scroller = document.querySelector('main');
   if (scroller) scroller.scrollTop = 0;
@@ -698,40 +697,131 @@ function fitTerminal() {
 }
 
 /**
- * The agent's terminal, as a terminal.
+ * The terminal, as a launcher and a modal.
  *
- * An iframe onto ttyd, proxied same-origin at `/pty` by the bridge. Everything
- * that makes a terminal feel like one — the cursor, resize, scrollback, keys
- * arriving in the order they were typed — is ttyd's own client talking to a
- * real pty, rather than this page reconstructing a screen from sampled bytes.
+ * Inline, it was a frame in a column: the tmux status bar competed with the
+ * page's own chrome, and every pixel the panel used was a pixel the session did
+ * not get. A terminal wants the whole window, and this is a page you visit to
+ * look at one thing.
  *
- * Same-origin is what keeps it simple: the panel's cookie authenticates the
- * iframe and its WebSocket, with no second credential to pass through and no
- * cross-origin gate to hand-roll.
- *
- * The frame is created once and kept. Rebuilding it on every state refresh
- * would drop the connection twice a second, and a reconnect loses scrollback.
+ * So the page says what is running and opens it full-bleed. Ported from the
+ * hfs2s workspace terminal, which solved this already; the skin is the only
+ * part that is new.
  */
 function renderTerminal() {
   var page = el('p-terminal');
-  if (el('ptyFrame')) return;
+  if (page.dataset.built === '1') { paintTerminalState(); return; }
   clear(page);
+  page.dataset.built = '1';
+
+  var card = node('div', 'card');
+  card.appendChild(node('h2', null, 'Terminal'));
+  card.appendChild(node('p', 'sub', 'The agent’s live tmux session — the real thing, not a picture of it. Anything typed goes into a conversation with a member of the public.'));
+
+  var row = node('div', 'termlaunch');
+  var open = node('button', 'primary', 'Open terminal');
+  open.type = 'button';
+  open.addEventListener('click', openTerminal);
+  row.appendChild(open);
+  row.appendChild(node('span', 'termstate', ''));
+  card.appendChild(row);
+  page.appendChild(card);
+  paintTerminalState();
+}
+
+/** Whether there is anything to attach to, said plainly rather than implied. */
+function paintTerminalState() {
+  var label = document.querySelector('#p-terminal .termstate');
+  if (!label || !state) return;
+  var n = state.agent.sessions;
+  label.textContent = !state.agent.reporting
+    ? 'The agent is not reporting — the window will be empty.'
+    : n === 0
+      ? 'No chat has a session open right now. A window appears when one gets a message.'
+      : plural(n, 'conversation') + ' open.';
+}
+
+/**
+ * The terminal, full-bleed.
+ *
+ * The controls float over the frame because xterm paints to a canvas: the
+ * browser's own selection, copy and paste have nothing to attach to, so each
+ * button here is a workaround for something that genuinely does not work rather
+ * than a convenience. Same-origin is what makes them possible at all — the
+ * proxy is why this page can reach into the frame and talk to xterm directly.
+ */
+function openTerminal() {
+  var opener = document.activeElement;
+  var stage = node('div', 'termstage');
+  stage.setAttribute('role', 'dialog');
+  stage.setAttribute('aria-modal', 'true');
+  stage.setAttribute('aria-label', 'The agent’s terminal');
 
   var frame = document.createElement('iframe');
   frame.id = 'ptyFrame';
   frame.className = 'ptyframe';
   frame.src = '/pty/';
-  frame.title = 'The agent\u2019s terminal';
+  frame.title = 'The agent’s terminal';
   // ttyd installs its own "are you sure you want to leave" handler, which turns
-  // an ordinary navigation into a browser prompt. It is same-origin, so it can
-  // simply be removed.
+  // closing this into a browser prompt. Same-origin, so it can simply go.
   frame.addEventListener('load', function () {
-    try {
-      var w = frame.contentWindow;
-      if (w) w.onbeforeunload = null;
-    } catch (err) { /* nothing to do */ }
+    try { if (frame.contentWindow) frame.contentWindow.onbeforeunload = null; } catch (err) { /* nothing to do */ }
   });
-  page.appendChild(frame);
+  stage.appendChild(frame);
+
+  /** xterm itself, or null while the frame is still starting. */
+  function term() {
+    try { return frame.contentWindow && frame.contentWindow.term; } catch (err) { return null; }
+  }
+
+  var controls = node('div', 'termcontrols');
+  function control(label, glyph, run) {
+    var b = node('button', null, glyph);
+    b.type = 'button';
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.addEventListener('click', run);
+    controls.appendChild(b);
+    return b;
+  }
+
+  control('Copy the selection', '⧉', async function () {
+    var t = term();
+    var text = t && t.getSelection ? t.getSelection() : '';
+    if (!text) { toast('Select something in the terminal first.'); return; }
+    try { await navigator.clipboard.writeText(text); toast('Copied.'); }
+    catch (err) { toast('The browser would not let me use the clipboard.', true); }
+  });
+
+  control('Paste', '⎘', async function () {
+    var t = term();
+    if (!t || !t.paste) { toast('The terminal is still starting.'); return; }
+    try { t.paste(await navigator.clipboard.readText()); }
+    catch (err) { toast('The browser would not let me read the clipboard.', true); }
+  });
+
+  control('Scroll up', '↑', function () { var t = term(); if (t && t.scrollLines) t.scrollLines(-12); });
+  control('Scroll down', '↓', function () { var t = term(); if (t && t.scrollLines) t.scrollLines(12); });
+  control('Close', '✕', dismiss);
+  stage.appendChild(controls);
+
+  function onKey(ev) {
+    // Escape belongs to the terminal — it is how you leave a mode in the TUI —
+    // so closing is deliberately a modifier away rather than a keystroke the
+    // agent's own interface wants.
+    if (ev.key === 'Escape' && (ev.shiftKey || ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); dismiss(); }
+  }
+  function dismiss() {
+    document.removeEventListener('keydown', onKey, true);
+    stage.remove();
+    document.body.classList.remove('term-open');
+    if (opener && opener.focus) opener.focus();
+  }
+  document.addEventListener('keydown', onKey, true);
+
+  document.body.appendChild(stage);
+  document.body.classList.add('term-open');
+  frame.focus();
 }
 
 async function sendKeys(keys) {

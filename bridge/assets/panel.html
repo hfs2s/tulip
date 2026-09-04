@@ -353,7 +353,29 @@
      not a cosmetic choice — the supervisor reads this pane to decide whether a
      turn is running, and `agent/src/tmux.ts` pins `window-size manual` exactly
      so that a browser cannot resize it out from under that parser. */
-  .ptyframe{flex:1;min-height:0;width:100%;border:0;display:block;background:var(--ground)}
+  /* ── The terminal ───────────────────────────────────────────────────────────
+     Full-bleed and over everything: a terminal wants the whole window, and the
+     panel's chrome around it was competing with tmux's own status line. */
+  .termlaunch{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:16px}
+  .termstate{font-size:12.5px;color:var(--faint)}
+  .termstage{position:fixed;inset:0;z-index:60;background:#0d0d0f;display:flex}
+  .ptyframe{flex:1;min-height:0;width:100%;border:0;display:block;background:#0d0d0f}
+  /* The frame is a canvas, so these float over it rather than sitting in a bar:
+     every one is a workaround for something a canvas cannot do — select, copy,
+     paste, scroll — not a convenience. */
+  .termcontrols{position:absolute;top:12px;right:16px;z-index:61;display:flex;gap:8px}
+  .termcontrols button{width:34px;height:34px;border-radius:var(--r-pill);
+        display:flex;align-items:center;justify-content:center;font-size:14px;
+        background:rgba(13,13,15,.86);border:1px solid var(--line);color:var(--dim);
+        cursor:pointer;backdrop-filter:blur(6px)}
+  .termcontrols button:hover{color:var(--ink);border-color:var(--accent)}
+  .termcontrols button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* Nothing behind the terminal should scroll while it is open. */
+  body.term-open{overflow:hidden}
+  @media (max-width:900px){
+    .termcontrols{top:auto;bottom:14px;right:14px}
+    .termcontrols button{width:46px;height:46px;font-size:17px}
+  }
   .page-wrap.bare{padding:0;flex:1;min-height:0;display:flex}
   .page-wrap.bare .page.on{flex:1;min-height:0;display:flex;flex-direction:column;
                            animation:none;opacity:1;transform:none}
