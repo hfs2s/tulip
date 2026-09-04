@@ -299,10 +299,18 @@ docker run --rm -v tulip_state:/state -v "$PWD":/backup alpine \
   tar czf /backup/tulip-state.tgz -C /state .
 ```
 
-That archive contains the WhatsApp credentials and every message. Treat it
-exactly as you would the phone. Store it encrypted, and never in this
+That archive contains the WhatsApp credentials, every message, **and copies of
+every picture, voice note and GIF the agent sent** for the last fourteen days.
+Treat it exactly as you would the phone. Store it encrypted, and never in this
 repository — `.gitignore` already refuses the obvious names, and
 `npm run check:secrets` fails the build if one is staged.
+
+Those outbound copies live in `/state/media-out`, deliberately not beside the
+inbound media in `handoff-in`: that volume is mounted into the agent read-only,
+and a copy of everything it has ever generated is not something it should be
+able to read back. The store sweeps itself on every write — fourteen days, then
+a 512 MB cap, oldest first — so it cannot fill the disk. Nothing in it is
+load-bearing; deleting the directory costs an audit trail and nothing else.
 
 The `workspace` volume holds conversation context. Losing it costs memory, not
 correctness: each chat starts fresh and carries on. The `handoff-*` volumes are

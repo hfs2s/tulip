@@ -37,6 +37,7 @@ import { findGif, type Rating } from './giphy.js';
 import { fetchPage, search, type ExaOutcome } from './exa.js';
 import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
+import { retainOutbound } from './mediaStore.js';
 import type { Limiter } from './ratelimit.js';
 import type { TurnRegistry } from './turns.js';
 import type { Config } from './config.js';
@@ -496,6 +497,7 @@ export class Outbox extends EventEmitter {
           return;
         }
         await this.deps.wa.sendFile(turn.chatJid, file.data, file.mimetype, action.file, action.caption);
+        retainOutbound(turn.chatKey, 'file', file.data, file.mimetype);
         feed.outbound(turn.chatKey, file.mimetype, action.caption);
         // Sent files are removed: the volume is not storage, and leaving them
         // lets a compromised agent fill the disk one send at a time. Deleting
@@ -518,6 +520,7 @@ export class Outbox extends EventEmitter {
           return;
         }
         await this.deps.wa.sendGif(turn.chatJid, gif.video, action.caption);
+        retainOutbound(turn.chatKey, 'gif', gif.video);
         feed.outbound(turn.chatKey, 'gif', `[gif] ${gif.title}`);
         break;
       }
@@ -607,6 +610,7 @@ export class Outbox extends EventEmitter {
           return;
         }
         await this.deps.wa.sendImage(turn.chatJid, image.data, action.caption);
+        retainOutbound(turn.chatKey, 'image', image.data);
         feed.outbound(turn.chatKey, 'image', action.caption ?? '[image]');
         break;
       }
@@ -622,6 +626,7 @@ export class Outbox extends EventEmitter {
           return;
         }
         await this.deps.wa.sendVoice(turn.chatJid, audio.data);
+        retainOutbound(turn.chatKey, 'voice', audio.data);
         feed.outbound(turn.chatKey, 'voice', action.text);
         break;
       }

@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto';
  * only atomic within a filesystem, and `/tmp` is a separate tmpfs in every one
  * of Tulip's containers.
  */
-export function writeFileAtomic(file: string, contents: string, mode = 0o600): void {
+export function writeFileAtomic(file: string, contents: string | Uint8Array, mode = 0o600): void {
   const dir = dirname(file);
   mkdirSync(dir, { recursive: true });
   const tmp = `${file}.${randomUUID().slice(0, 8)}.tmp`;

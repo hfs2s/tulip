@@ -354,7 +354,15 @@ export function startPanel(deps: ApiDeps): Server | null {
         }
         if (url.pathname === '/api/media/list') return send(res, headers, 200, mediaList(deps, num('n', 120, 500)));
         if (url.pathname === '/api/media') {
-          mediaFile(res, headers, url.searchParams.get('key') ?? '', url.searchParams.get('name') ?? '');
+          mediaFile(
+            res,
+            headers,
+            url.searchParams.get('key') ?? '',
+            url.searchParams.get('name') ?? '',
+            // Defaults to inbound so links written before outbound media
+            // existed keep resolving.
+            url.searchParams.get('dir') ?? 'in',
+          );
           return;
         }
         if (url.pathname === '/api/logs') return send(res, headers, 200, logTail(num('n', 200, 1000)));

@@ -147,49 +147,59 @@ export function chatHistory(deps: ApiDeps, chatKey: string, limit: number): Json
 // ─── Media ───────────────────────────────────────────────────────────────────
 
 /**
- * Everything people have sent, newest first.
+ * Every attachment, both directions, newest first.
  *
  * Read from the filesystem rather than from the feed: the files are the record.
  * A gallery driven off the log would go blank the moment the log rotated.
+ *
+ * The two roots are separate volumes on purpose — inbound lives in the handoff
+ * the agent can read, outbound in the bridge-only state volume, so the agent
+ * cannot read back what it generated. See `mediaStore.ts`.
  */
+const ROOTS = { in: inPaths.media, out: paths.mediaOut } as const;
+
 export function mediaList(deps: ApiDeps, limit: number): Json {
   const items: Array<Record<string, unknown>> = [];
-  let directories: string[] = [];
-  try {
-    directories = readdirSync(inPaths.media, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name);
-  } catch {
-    return { total: 0, items: [] };
-  }
 
-  for (const chatKey of directories) {
-    const record = deps.chats.get(chatKey);
-    let names: string[] = [];
+  for (const [direction, root] of Object.entries(ROOTS)) {
+    let directories: string[] = [];
     try {
-      names = readdirSync(join(inPaths.media, chatKey));
+      directories = readdirSync(root, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
     } catch {
       continue;
     }
-    for (const name of names) {
-      const full = join(inPaths.media, chatKey, name);
-      let stat;
+
+    for (const chatKey of directories) {
+      const record = deps.chats.get(chatKey);
+      let names: string[] = [];
       try {
-        stat = statSync(full);
+        names = readdirSync(join(root, chatKey));
       } catch {
         continue;
       }
-      if (!stat.isFile()) continue;
-      const mime = VIEWABLE[extname(name).toLowerCase()] ?? 'application/octet-stream';
-      items.push({
-        chatKey,
-        chatName: record?.name ?? null,
-        name,
-        mime,
-        kind: mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'file',
-        bytes: stat.size,
-        at: stat.mtimeMs,
-      });
+      for (const name of names) {
+        const full = join(root, chatKey, name);
+        let stat;
+        try {
+          stat = statSync(full);
+        } catch {
+          continue;
+        }
+        if (!stat.isFile()) continue;
+        const mime = VIEWABLE[extname(name).toLowerCase()] ?? 'application/octet-stream';
+        items.push({
+          chatKey,
+          chatName: record?.name ?? null,
+          name,
+          direction,
+          mime,
+          kind: mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'file',
+          bytes: stat.size,
+          at: stat.mtimeMs,
+        });
+      }
     }
   }
 
@@ -206,12 +216,24 @@ export function mediaList(deps: ApiDeps, limit: number): Json {
  * root regardless — the same belt-and-braces the outbox file resolver uses,
  * for the same reason.
  */
-export function mediaFile(res: ServerResponse, headers: Record<string, string>, chatKey: string, name: string): void {
+export function mediaFile(
+  res: ServerResponse,
+  headers: Record<string, string>,
+  chatKey: string,
+  name: string,
+  direction: string,
+): void {
   if (!/^[0-9a-f]{16}$/.test(chatKey) || name !== basename(name) || name.startsWith('.')) {
     res.writeHead(400, { ...headers, 'content-type': 'text/plain' }).end('bad request\n');
     return;
   }
-  const root = resolve(inPaths.media);
+  // Chosen from a fixed pair rather than built from the parameter, so an
+  // unexpected value can only fail to match — it can never name a third root.
+  if (direction !== 'in' && direction !== 'out') {
+    res.writeHead(400, { ...headers, 'content-type': 'text/plain' }).end('bad request\n');
+    return;
+  }
+  const root = resolve(ROOTS[direction]);
   const candidate = resolve(root, chatKey, name);
   if (!candidate.startsWith(root + sep) || !existsSync(candidate)) {
     res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');

@@ -177,6 +177,12 @@
 
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:12px}
   .tile{background:var(--panel);border:1px solid var(--line-soft);border-radius:12px;overflow:hidden}
+  .tile{position:relative}
+  .tile .tag{position:absolute;top:8px;left:8px;z-index:1;
+             font-size:10.5px;letter-spacing:.02em;padding:3px 7px;
+             border-radius:var(--r-pill);background:rgba(8,8,10,.72);
+             color:var(--faint);border:1px solid var(--line)}
+  .tile .tag.sent{color:var(--accent);border-color:var(--accent)}
   .tile img,.tile video{width:100%;height:120px;object-fit:cover;display:block;background:var(--raise)}
   .tile .none{height:120px;display:grid;place-items:center;color:var(--faint);font-size:12px}
   .tile .meta{padding:8px 10px;font-size:11.5px;color:var(--faint)}

@@ -473,7 +473,7 @@ function renderChats(s) {
 }
 
 async function renderMedia() {
-  var p = head('media', 'Media', 'Everything people have sent. Files are served from the bridge and never leave it.'), mine = renderToken;
+  var p = head('media', 'Media', 'Every attachment, both directions — what people sent Juan, and what he sent them. Files are served from the bridge and never leave it. Copies of what Juan sent are kept for 14 days; what people sent stays as long as its conversation does.'), mine = renderToken;
   var card = node('div', 'card');
   p.appendChild(card);
   var data;
@@ -483,11 +483,18 @@ async function renderMedia() {
   var grid = node('div', 'grid');
   data.items.forEach(function (m) {
     var tile = node('div', 'tile');
-    var src = '/api/media?key=' + encodeURIComponent(m.chatKey) + '&name=' + encodeURIComponent(m.name);
+    var src = '/api/media?key=' + encodeURIComponent(m.chatKey)
+      + '&name=' + encodeURIComponent(m.name)
+      + '&dir=' + encodeURIComponent(m.direction || 'in');
     if (m.kind === 'image') { var img = document.createElement('img'); img.src = src; img.alt = ''; img.loading = 'lazy'; tile.appendChild(img); }
     else if (m.kind === 'video') { var v = document.createElement('video'); v.src = src; v.controls = true; tile.appendChild(v); }
     else if (m.kind === 'audio') { var a = document.createElement('audio'); a.src = src; a.controls = true; a.style.width = '100%'; tile.appendChild(a); }
     else tile.appendChild(node('div', 'none', m.kind));
+    // Which way it went is the first thing to know about an attachment: one is
+    // something a stranger sent, the other is something Juan produced and a
+    // stranger received.
+    var sent = m.direction === 'out';
+    tile.appendChild(node('span', 'tag' + (sent ? ' sent' : ''), sent ? 'Juan sent' : 'received'));
     tile.appendChild(node('div', 'meta', (m.chatName || m.chatKey) + ' · ' + bytes(m.bytes)));
     grid.appendChild(tile);
   });

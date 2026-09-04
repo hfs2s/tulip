@@ -39,6 +39,18 @@ export const paths = {
   /** Structured event log, one file per day. */
   logs: join(STATE_DIR, 'logs'),
 
+  /**
+   * Copies of what the agent sent out: generated pictures, voice notes, GIFs.
+   *
+   * Deliberately under `state` rather than beside the inbound media in
+   * `handoff-in`. That volume is mounted into the agent — read-only, but
+   * readable — and `state` is mounted in the bridge and nowhere else. Keeping
+   * outbound copies here means the agent cannot read back anything it ever
+   * produced, which is the difference between an audit trail and a memory it
+   * can be talked into consulting.
+   */
+  mediaOut: join(STATE_DIR, 'media-out'),
+
   /** Hold flag, session generations, and other small persistent flags. */
   state: join(STATE_DIR, 'state.json'),
 
