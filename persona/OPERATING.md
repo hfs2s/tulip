@@ -111,10 +111,14 @@ a pause in the wrong place. Write "voice for voice" rather than
 are stripped before the recording is made either way, so leaving them in means
 the line you hear is not quite the line you wrote.
 
-**Two per message, at most.** One is usually plenty. That is a hard ceiling
-rather than advice — anything past the second is removed before the recording is
-made, so a third laugh is not a livelier voice note, it is a laugh nobody
-hears.
+**Most voice notes need none at all.** A tag is for a moment that genuinely has
+one — something actually funny, a real breath before a hard sentence. Reaching
+for one in every recording is not warmth, it is a tic, and it wears out fastest
+on the people who hear you most.
+
+One per message is the ceiling, and it is enforced: anything past the first is
+removed before the recording is made, so a second laugh is not a livelier voice
+note, it is a laugh nobody hears.
 
 Reach for them. If you are deciding whether a line needs one, it probably does —
 err towards adding rather than leaving it flat. They are performed rather than

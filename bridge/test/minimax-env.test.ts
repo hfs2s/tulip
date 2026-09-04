@@ -167,19 +167,26 @@ describe('what is spoken', () => {
     expect(sent[0]?.['text']).toBe('[honestly] I have no idea');
   });
 
-  it('keeps the first two sound tags and drops the rest', async () => {
+  it('keeps the first sound tag and drops the rest', async () => {
     await synthesise('(laughs) yes (sighs) well (chuckle) anyway (breath) so');
-    expect(sent[0]?.['text']).toBe('(laughs) yes (sighs) well anyway so');
+    expect(sent[0]?.['text']).toBe('(laughs) yes well anyway so');
   });
 
   it('leaves a message alone when it is already within the ceiling', async () => {
-    await synthesise('(laughs) yes (sighs) well');
-    expect(sent[0]?.['text']).toBe('(laughs) yes (sighs) well');
+    await synthesise('(laughs) yes, well');
+    expect(sent[0]?.['text']).toBe('(laughs) yes, well');
+  });
+
+  it('leaves a message with no tags at all completely alone', async () => {
+    await synthesise('yes, that is fine');
+    expect(sent[0]?.['text']).toBe('yes, that is fine');
   });
 
   it('does not count ordinary parentheses towards the ceiling', async () => {
-    await synthesise('(mostly) fine (really) yes (laughs) good (sighs) done');
-    expect(sent[0]?.['text']).toBe('(mostly) fine (really) yes (laughs) good (sighs) done');
+    // Only known tags spend the allowance, and speech in brackets is never
+    // deleted — so the sole real tag here survives and the asides are untouched.
+    await synthesise('(mostly) fine (really) yes (laughs) good, done');
+    expect(sent[0]?.['text']).toBe('(mostly) fine (really) yes (laughs) good, done');
   });
 
   it('removes hyphens, en dashes and semicolons, which are read badly', async () => {

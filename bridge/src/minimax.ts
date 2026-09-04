@@ -55,8 +55,16 @@ const SOUND_TAGS = new Set([
  * because the agent may have meant those words and silently deleting speech is
  * worse than speaking a stray one.
  */
-/** At most this many performed interjections in one recording. */
-const MAX_SOUND_TAGS = 2;
+/**
+ * At most this many performed interjections in one recording.
+ *
+ * One. Two was the first ceiling and it turned out to be a target rather than a
+ * limit — an agent given two will generally use two, and a voice note that
+ * laughs and sighs in four sentences is doing an impression of a person rather
+ * than sounding like one. The brief asks for none most of the time; this is
+ * what holds when it does not.
+ */
+const MAX_SOUND_TAGS = 1;
 
 /**
  * Keep the first few tags and drop the rest.
