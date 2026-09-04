@@ -43,10 +43,17 @@
      Fixed to the viewport rather than sized to the document: a canvas covering
      the full scroll height of a long log page is a large allocation for a
      texture nobody is measuring against the content. */
-  /* The grain belongs to the content column, not the window: it is absolute
-     inside `.page-wrap`, so it stops at the rail's edge and scrolls with the
-     page instead of sitting still behind it. */
-  #paper{position:absolute;inset:0;z-index:0;pointer-events:none}
+  /* The grain belongs to the content column, not the window — but it is fixed to
+     the viewport rather than absolute inside `.page-wrap`, so it stays put while
+     the page scrolls over it.
+     Absolute was the obvious reading of "put it in page-wrap" and it does not
+     work: the canvas is sized to the element's *box*, which in a scrolling flex
+     column is one screenful, so the background simply ended partway down and
+     everything below it was bare ground. Sizing it to the full scroll height
+     would mean a canvas several screens tall, redrawn on every resize, to show
+     one screenful at a time. */
+  #paper{position:fixed;top:0;right:0;bottom:0;left:var(--rail);
+         z-index:0;pointer-events:none}
   /* Two layers, because they do different jobs. `flow` is the neuro field and
      is the only thing moving; `grain` is the paper texture over the top, which
      is what stops a slow gradient reading as a screen artefact. Opacities are
@@ -445,6 +452,10 @@
     /* With the menu open the page behind it must not move: a swipe that starts
        on the scrim was scrolling the document rather than the menu. */
     body.nav-open{overflow:hidden}
+
+    /* The rail is an overlay here rather than a column, so the grain starts at
+       the window's edge and below the bar instead of beside a 236px gutter. */
+    #paper{left:0;top:var(--bar)}
 
     /* Settings rows: a 170px slider, a box and a readout beside a 58ch hint do
        not fit in 360px. Stack them and let the controls have the width. */
