@@ -88,6 +88,16 @@ services:
       MINIMAX_GROUP_ID: ${MINIMAX_GROUP_ID:-}
       MINIMAX_VOICE_ID: ${MINIMAX_VOICE_ID:-}
       MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-}
+      # `${VAR:-}` sets these to the *empty string*, not to unset. Everything
+      # reading them goes through `env()` in minimax.ts, which treats empty as
+      # absent — `??` does not, and that is how an empty MINIMAX_BASE_URL turned
+      # every request into a relative URL and silently disabled pictures and
+      # voice notes for weeks.
+      MINIMAX_VOICE_MODEL: ${MINIMAX_VOICE_MODEL:-}
+      MINIMAX_IMAGE_MODEL: ${MINIMAX_IMAGE_MODEL:-}
+      # Only the 2.5 speech models accept this; 02 and 01 reject it outright, so
+      # move it and MINIMAX_VOICE_MODEL together.
+      MINIMAX_LANGUAGE_BOOST: ${MINIMAX_LANGUAGE_BOOST:-}
       EXA_API_KEY: ${EXA_API_KEY:-}
       EXA_BACKUP_API_KEY: ${EXA_BACKUP_API_KEY:-}
       EXA_BACKUP_API_KEY2: ${EXA_BACKUP_API_KEY2:-}

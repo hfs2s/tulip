@@ -24,8 +24,25 @@ const MAX_BYTES = 8 * 1024 * 1024;
 
 export type Produced = { ok: true; data: Buffer } | { ok: false; error: string };
 
+/**
+ * An environment variable, treating empty as absent.
+ *
+ * `??` does not, and that cost this deployment both of these capabilities
+ * silently for weeks. `docker-compose.yml` passes optional settings through as
+ * `${VAR:-}`, which sets them to the empty string rather than leaving them
+ * unset — so `process.env['MINIMAX_BASE_URL'] ?? 'https://api.minimax.io'`
+ * evaluated to `''`, every request went to the relative URL
+ * `/v1/image_generation`, and `fetch` rejected it with a bare `TypeError`. The
+ * agent reported "I could not make a picture", which is exactly what a provider
+ * outage looks like from the outside.
+ */
+function env(name: string, fallback = ''): string {
+  const value = process.env[name];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback;
+}
+
 function key(): string {
-  return process.env['MINIMAX_API_KEY'] ?? '';
+  return env('MINIMAX_API_KEY');
 }
 
 /**
@@ -34,7 +51,7 @@ function key(): string {
  * rather than constants so a move does not need a code change.
  */
 function base(): string {
-  return process.env['MINIMAX_BASE_URL'] ?? 'https://api.minimax.io';
+  return env('MINIMAX_BASE_URL', 'https://api.minimax.io');
 }
 
 /**
@@ -55,7 +72,7 @@ export async function generateImage(prompt: string): Promise<Produced> {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key()}` },
       body: JSON.stringify({
-        model: process.env['MINIMAX_IMAGE_MODEL'] ?? 'image-01',
+        model: env('MINIMAX_IMAGE_MODEL', 'image-01'),
         prompt: prompt.slice(0, 1000),
         n: 1,
         response_format: 'url',
@@ -92,7 +109,7 @@ export async function generateImage(prompt: string): Promise<Produced> {
  */
 export async function synthesise(text: string): Promise<Produced> {
   if (key().length === 0) return { ok: false, error: 'no MINIMAX_API_KEY is configured' };
-  const group = process.env['MINIMAX_GROUP_ID'] ?? '';
+  const group = env('MINIMAX_GROUP_ID');
 
   let response: Response;
   try {
@@ -100,13 +117,31 @@ export async function synthesise(text: string): Promise<Produced> {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key()}` },
       body: JSON.stringify({
-        model: process.env['MINIMAX_VOICE_MODEL'] ?? 'speech-2.5-turbo-preview',
-        text: text.slice(0, 2000),
+        model: env('MINIMAX_VOICE_MODEL', 'speech-2.5-turbo-preview'),
+        text: text.slice(0, 4000),
         stream: false,
-        // Opus in an OGG container is what WhatsApp wants for a voice note.
+        /**
+         * Without this the voice reads Spanish with whatever mouth the model
+         * defaults to. Iris learned the same lesson in the other direction and
+         * its comment is worth repeating: only the 2.5 models accept
+         * `language_boost` at all — speech-02 and speech-01 reject it outright —
+         * so this setting and `MINIMAX_VOICE_MODEL` have to move together.
+         */
+        language_boost: env('MINIMAX_LANGUAGE_BOOST', 'Spanish'),
+        /**
+         * Opus in an OGG container is what WhatsApp renders as a push-to-talk
+         * bubble rather than a file attachment.
+         *
+         * The sample rate is not a free choice and the provider is strict about
+         * it: 32000 is refused for opus ("sample rate 32000 not supported"), and
+         * 48000 is refused outright. 24000 returns a real `OggS` container,
+         * which is why nothing here transcodes — Iris requests mp3 and runs
+         * ffmpeg to reach the same place, and that would mean putting ffmpeg
+         * inside the container holding the WhatsApp credentials for no gain.
+         */
         audio_setting: { format: 'opus', sample_rate: 24_000, bitrate: 32_000, channel: 1 },
         voice_setting: {
-          voice_id: process.env['MINIMAX_VOICE_ID'] ?? 'Spanish_ReliableMan',
+          voice_id: env('MINIMAX_VOICE_ID', 'Spanish_ReliableMan'),
           speed: 1,
           vol: 1,
         },
