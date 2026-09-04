@@ -137,6 +137,9 @@ function setNav(open) {
   if (scrim) { scrim.classList.toggle('open', open); scrim.hidden = !open; }
   toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   toggle.setAttribute('aria-label', open ? 'Hide pages' : 'Show pages');
+  // Stops the document scrolling under the scrim: a swipe that began on the
+  // backdrop was moving the page rather than the menu.
+  document.body.classList.toggle('nav-open', open);
 }
 
 function navIsOpen() {
@@ -219,15 +222,27 @@ function verdict(s) {
 
 // ── Pages ───────────────────────────────────────────────────────────────────
 var renderToken = 0;
+/**
+ * Begin a page render, and take a number.
+ *
+ * The token used to be stored on the page element and compared back against
+ * the global. That cannot tell two overlapping renders of the *same* page
+ * apart: the second overwrote the first's token on the shared element, both
+ * then compared equal to the global, and both appended their cards. Leaving
+ * Settings and coming straight back — or double-tapping it, which is easy on a
+ * phone — reliably produced three copies of all six cards.
+ *
+ * The caller keeps its own token instead, so only the newest render matches.
+ */
 function head(page, title, sub) {
   var p = clear(el('p-' + page));
   p.appendChild(node('h2', null, title));
   p.appendChild(node('p', 'sub', sub));
-  p.dataset.token = String(++renderToken);
+  ++renderToken;
   return p;
 }
-/** Has another render started since this one began? */
-function stale(p) { return p.dataset.token !== String(renderToken); }
+/** Has another render started since the one holding this token began? */
+function stale(token) { return token !== renderToken; }
 
 function renderOverview(s) {
   var p = head('overview', 'Overview', 'What has happened in the last twenty-four hours.');
@@ -342,7 +357,7 @@ function lineFor(e) {
 }
 
 async function renderMessages() {
-  var p = head('messages', 'Messages', 'Every message that arrives, including the ones turned away. A silently dropped message is indistinguishable from one that never came.');
+  var p = head('messages', 'Messages', 'Every message that arrives, including the ones turned away. A silently dropped message is indistinguishable from one that never came.'), mine = renderToken;
   var controls = node('div', 'controls');
   var seg = node('div', 'seg');
   [['all', 'All'], ['in', 'Received'], ['refused', 'Refused'], ['out', 'Sent']].forEach(function (f) {
@@ -359,7 +374,7 @@ async function renderMessages() {
   p.appendChild(card);
   var rows;
   try { rows = await api('/api/feed?n=250'); } catch (err) { card.appendChild(node('p', 'empty', err.message)); return; }
-  if (stale(p)) return;
+  if (stale(mine)) return;
   var shown = rows.filter(function (e) {
     if (feedFilter === 'all') return true;
     if (feedFilter === 'in') return e.kind === 'in' && e.accepted;
@@ -409,17 +424,26 @@ function renderChats(s) {
     tr.appendChild(td);
     table.appendChild(tr);
   });
-  card.appendChild(table);
+  // The same wrapper the usage table gets. Without it this table is 415px wide
+  // inside a 350px card and every ancestor up to `main` is `overflow-x:
+  // visible`, so the *document* scrolls sideways instead — putting the Block
+  // button 56px past the right edge of a 390px screen, reachable only by
+  // discovering the page scrolls at all, and dragging the sticky bar off with
+  // it on the way.
+  var scroller = node('div');
+  scroller.style.overflowX = 'auto';
+  scroller.appendChild(table);
+  card.appendChild(scroller);
   p.appendChild(card);
 }
 
 async function renderMedia() {
-  var p = head('media', 'Media', 'Everything people have sent. Files are served from the bridge and never leave it.');
+  var p = head('media', 'Media', 'Everything people have sent. Files are served from the bridge and never leave it.'), mine = renderToken;
   var card = node('div', 'card');
   p.appendChild(card);
   var data;
   try { data = await api('/api/media/list?n=200'); } catch (err) { card.appendChild(node('p', 'empty', err.message)); return; }
-  if (stale(p)) return;
+  if (stale(mine)) return;
   if (!data.items.length) { card.appendChild(node('p', 'empty', 'No attachments yet.')); return; }
   var grid = node('div', 'grid');
   data.items.forEach(function (m) {
@@ -555,6 +579,9 @@ function renderTerminal() {
   p.appendChild(slab);
 
   var promptRow = node('div', 'termprompt');
+  // The row is 45px and the field inside it is 20px, so on a phone most taps
+  // aimed at the prompt landed on padding and did nothing.
+  promptRow.addEventListener('click', function () { el('termInput').focus(); });
   promptRow.appendChild(node('span', 'caret', '❯'));
   var input = document.createElement('input');
   input.type = 'text';
@@ -1136,10 +1163,10 @@ function freshSettings(pick) {
 }
 
 async function renderSettings() {
-  var p = head('settings', 'Settings', 'What this deployment does. Changes apply immediately and are written to config.json — every one is recorded in the log and the feed.');
+  var p = head('settings', 'Settings', 'What this deployment does. Changes apply immediately and are written to config.json — every one is recorded in the log and the feed.'), mine = renderToken;
   var s;
   try { s = await api('/api/settings'); } catch (err) { p.appendChild(node('p', 'empty', err.message)); return; }
-  if (stale(p)) return;
+  if (stale(mine)) return;
 
   // ── Audience ──────────────────────────────────────────────────────────────
   var audience = node('div', 'card');
@@ -1356,12 +1383,12 @@ async function renderSettings() {
 }
 
 async function renderLog() {
-  var p = head('log', 'Log', 'The bridge’s structured events for today. Credentials are masked before writing.');
+  var p = head('log', 'Log', 'The bridge’s structured events for today. Credentials are masked before writing.'), mine = renderToken;
   var card = node('div', 'card');
   p.appendChild(card);
   var rows;
   try { rows = await api('/api/logs?n=250'); } catch (err) { card.appendChild(node('p', 'empty', err.message)); return; }
-  if (stale(p)) return;
+  if (stale(mine)) return;
   if (!rows.length) { card.appendChild(node('p', 'empty', 'Nothing logged yet today.')); return; }
   rows.reverse().forEach(function (r) {
     var line = node('div', 'logline');

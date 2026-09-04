@@ -170,7 +170,7 @@
   .search{flex:1;min-width:180px}
 
   .seg{display:inline-flex;background:var(--raise);border:1px solid var(--line);
-       border-radius:var(--r-pill);padding:3px}
+       border-radius:var(--r-pill);padding:3px;gap:2px}
   .seg button{border:0;background:transparent;padding:6px 14px;font-size:13px;color:var(--dim)}
   .seg button[aria-pressed=true]{background:var(--accent-dim);color:var(--accent)}
 
@@ -300,7 +300,13 @@
     body{flex-direction:column;overflow:auto}
     main{overflow:visible}
 
-    .topbar{display:flex;align-items:center;gap:10px;
+    /* flex:none for the same reason .masthead carries it: `body` is a flex
+       column here, so without it the bar is squeezed whenever `main` overflows
+       — measured at 41px on short pages and 58px on tall ones. `--bar` is a
+       constant, and it positions both the dropdown and its scrim, so the two
+       drifted apart by 17px: a seam that leaked page content and swallowed the
+       tap meant to close the menu. */
+    .topbar{display:flex;align-items:center;gap:10px;flex:none;
             position:sticky;top:0;z-index:30;height:var(--bar);
             padding:0 16px;background:var(--panel);
             border-bottom:1px solid var(--line-soft)}
@@ -316,9 +322,28 @@
           transition:opacity .18s ease,transform .18s ease,visibility 0s linear .18s}
     .rail.open{transform:none;opacity:1;visibility:visible;transition-delay:0s}
 
+    /* In landscape the panel is 332px tall against 468px of content, and a
+       scroller with no edge is the exact failure the disclosure replaced — the
+       old horizontal strip "gave no sign the rest existed". These two shadows
+       are painted only while there is something past the edge: the `local`
+       layers scroll away with the content and uncover the `scroll` ones. */
+    .rail{background-image:
+            linear-gradient(var(--panel) 40%, rgba(0,0,0,0)),
+            linear-gradient(rgba(0,0,0,0), var(--panel) 60%),
+            radial-gradient(farthest-side at 50% 0, rgba(0,0,0,.35), rgba(0,0,0,0)),
+            radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,.35), rgba(0,0,0,0));
+          background-position:0 0, 0 100%, 0 0, 0 100%;
+          background-repeat:no-repeat;
+          background-size:100% 26px, 100% 26px, 100% 10px, 100% 10px;
+          background-attachment:local, local, scroll, scroll}
+
     .nav-scrim{display:block;position:fixed;inset:var(--bar) 0 0;z-index:28;
                background:rgba(8,8,10,.55);opacity:0;transition:opacity .18s ease}
     .nav-scrim.open{opacity:1}
+
+    /* With the menu open the page behind it must not move: a swipe that starts
+       on the scrim was scrolling the document rather than the menu. */
+    body.nav-open{overflow:hidden}
 
     /* Settings rows: a 170px slider, a box and a readout beside a 58ch hint do
        not fit in 360px. Stack them and let the controls have the width. */
@@ -328,6 +353,16 @@
     .range{flex:1 1 auto;width:auto;min-width:120px}
     .adder{flex-wrap:wrap}
     .adder input{flex:1 1 100%}
+
+    /* Touch targets. The visual size of each control is unchanged; what grows
+       is the area that answers a finger. 44px is the floor. */
+    button.sm{min-height:44px;padding:5px 14px}
+    .seg button{min-height:40px}
+    .topbar-toggle{width:44px;height:44px}
+    .switch{min-height:44px}
+    /* The prompt row is 45px and the input inside it is 20px, so most of a tap
+       aimed at the field landed on padding and did nothing. */
+    .termprompt{min-height:44px}
 
     .brand{display:none}
     .rail-label{padding:6px 10px 4px}
