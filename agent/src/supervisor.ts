@@ -168,7 +168,11 @@ async function runTurn(current: CurrentTurnType): Promise<void> {
   }
   const batch = parsed.data;
 
-  const generation = Number(process.env['TULIP_GENERATION'] ?? 0);
+  // From the turn the bridge just published, not from the environment. The
+  // environment variable is kept as a floor so a whole deployment can still be
+  // rolled forward at once, but the per-chat counter is what `!reset` moves and
+  // it has to be the one that decides.
+  const generation = Math.max(current.generation, Number(process.env['TULIP_GENERATION'] ?? 0));
   const session = await pool.acquire(batch.chatKey, generation);
   if (session === null) {
     log('turn.noSession', { chatKey: batch.chatKey });

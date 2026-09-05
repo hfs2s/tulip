@@ -464,7 +464,10 @@ export class Dispatcher extends EventEmitter {
       gifs: this.deps.config.agent.gifs,
       search: this.deps.config.agent.search,
       crossChat: this.deps.config.agent.crossChat,
-    });
+    },
+    // What `!reset` moves. Read per turn rather than held, so a reset taken
+    // while a chat is idle applies to its very next message.
+    state.generation(chatKey));
 
     this.inFlight = { turnId: turn.turnId, chatKey, startedAt: now };
     this.deps.limiter.spendTurn(chatKey, now);

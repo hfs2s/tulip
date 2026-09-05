@@ -37,7 +37,11 @@ export function ensureHandoffDirs(): void {
  * pointer to a file that is not there yet. Both writes are atomic, so it can
  * never read half of either.
  */
-export function publishTurn(batch: InboxBatchType, can?: CurrentTurnType['can']): void {
+export function publishTurn(
+  batch: InboxBatchType,
+  can?: CurrentTurnType['can'],
+  generation = 0,
+): void {
   const validated = InboxBatch.parse(batch);
   writeJsonAtomic(inPaths.batch(validated.turnId), validated, 0o644);
 
@@ -48,6 +52,7 @@ export function publishTurn(batch: InboxBatchType, can?: CurrentTurnType['can'])
     isGroup: validated.isGroup,
     batch: `batches/${validated.turnId}.json`,
     startedAt: new Date().toISOString(),
+    generation,
     // Omitted rather than guessed when the caller does not say: every field
     // defaults to on, and the bridge refuses for real regardless.
     ...(can === undefined ? {} : { can }),

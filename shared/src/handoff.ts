@@ -195,6 +195,20 @@ export const CurrentTurn = z
     batch: z.string().regex(/^batches\/[0-9a-f-]{36}\.json$/),
     startedAt: z.string().datetime(),
     /**
+     * This chat's context generation, bumped by `!reset`.
+     *
+     * The agent's session id is derived from the chat key *and* this number, so
+     * raising it starts a fresh Claude Code session — new context, and a
+     * `CLAUDE.md` regenerated from the current persona files.
+     *
+     * It has to travel here. It used to be read from an environment variable in
+     * the agent, which meant the bridge's per-chat counter reached nothing:
+     * `!reset` reported a new generation, changed a number on the bridge's disk,
+     * and the agent carried on with the same session. The command worked in
+     * every respect except the one it was for.
+     */
+    generation: z.number().int().nonnegative().default(0),
+    /**
      * Which capabilities are switched on for this turn.
      *
      * Advisory, and deliberately so: the bridge refuses a switched-off action
