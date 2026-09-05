@@ -29,6 +29,19 @@ export interface Turn {
   readonly chatJid: string;
   readonly chatKey: string;
   readonly openedAt: number;
+  /**
+   * Whether this turn is an operator talking to Tulip directly.
+   *
+   * Established here, at the trusted boundary, from the envelope the dispatcher
+   * parsed — never re-derived later from a chat record, and never anything the
+   * agent can influence. Actions that must come from an operator read this and
+   * nothing else.
+   *
+   * A group is never an operator turn even when an operator is in it: the point
+   * of the flag is that one identified person chose to do this, and a room with
+   * strangers in it cannot carry that.
+   */
+  readonly fromOperator: boolean;
   /** Sends already performed for this turn, against `limits.outboundPerTurn`. */
   sends: number;
   closedAt: number | null;
@@ -58,12 +71,13 @@ export class TurnRegistry {
   ) {}
 
   /** Begin a turn for a chat and return its unguessable id. */
-  open(chatJid: string, chatKey: string, now: number): Turn {
+  open(chatJid: string, chatKey: string, now: number, fromOperator = false): Turn {
     const turn: Turn = {
       turnId: randomUUID(),
       chatJid,
       chatKey,
       openedAt: now,
+      fromOperator,
       sends: 0,
       closedAt: null,
     };

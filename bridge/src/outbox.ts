@@ -40,6 +40,7 @@ import { log } from './log.js';
 import { retainOutbound } from './mediaStore.js';
 import { claim } from './spend.js';
 import { imageCount, MAX_IMAGES_PER_PAGE, publishPage, scaffoldPage, usesKit, writePageImage } from './pages.js';
+import { addContact } from './contacts.js';
 import { remember } from './memory.js';
 import type { Limiter } from './ratelimit.js';
 import type { Turn, TurnRegistry } from './turns.js';
@@ -430,7 +431,11 @@ export class Outbox extends EventEmitter {
     }
   }
 
-  private async answer(actionId: string, kind: 'search' | 'fetch' | 'chats' | 'page', outcome: ExaOutcome): Promise<void> {
+  private async answer(
+    actionId: string,
+    kind: 'search' | 'fetch' | 'chats' | 'page' | 'contact',
+    outcome: ExaOutcome,
+  ): Promise<void> {
     const result = ToolResult.safeParse({
       actionId,
       kind,
@@ -486,10 +491,42 @@ export class Outbox extends EventEmitter {
   }
 
   /**
+   * Resolve a chat the agent named, or refuse.
+   *
+   * Three checks, in this order, and all three are the point: the operator's
+   * switch is on, the key is one this bridge actually issued, and the chat is
+   * not blocked. A forged key fails the second — `jidFor` is a lookup, not a
+   * derivation, so an invented one has no destination at all.
+   *
+   * Shared by every verb that can name a destination so there is exactly one
+   * copy of the rule. When `sendTo` owned its own copy, adding a second
+   * cross-chat verb meant remembering to write the checks again.
+   */
+  private crossChatTarget(chatKey: string): { jid: string; key: string } | null {
+    if (!this.deps.config.agent.crossChat) {
+      log('outbox.crossChatRefused', { note: 'agent.crossChat is off' });
+      feed.event('crossChat.refused', 'the agent tried to message another chat');
+      return null;
+    }
+    const jid = this.deps.chats.jidFor(chatKey);
+    if (jid === null) {
+      log('outbox.unknownChat', { chatKey });
+      return null; // a key the bridge never issued resolves to nothing
+    }
+    if (this.deps.chats.isBlocked(chatKey)) {
+      log('outbox.blockedChat', { chatKey });
+      return null;
+    }
+    return { jid, key: chatKey };
+  }
+
+  /**
    * Perform one validated action.
    *
-   * Note what is *not* read from `action`: the destination. It comes from the
-   * turn registry, which the agent cannot write to.
+   * Note what is *not* read from `action`: a phone number, or a jid. A
+   * destination is either the turn's own chat — resolved through a registry the
+   * agent cannot write — or a `chatKey` this bridge issued and an operator has
+   * allowed. Those are the only two things it can be.
    */
   private async perform(action: OutboxActionType): Promise<void> {
     const now = Date.now();
@@ -500,11 +537,27 @@ export class Outbox extends EventEmitter {
     }
     const { turn } = resolution;
 
+    // Where this one goes. `chatKey` is absent on most kinds and null by
+    // default on the media verbs, and both mean the same thing: the chat whose
+    // turn this is. Resolved once, here, so no verb below can accidentally send
+    // to the turn's chat while reporting it went somewhere else.
+    let dest = { jid: turn.chatJid, key: turn.chatKey, crossed: false };
+    if ('chatKey' in action && action.chatKey !== null) {
+      const target = this.crossChatTarget(action.chatKey);
+      if (target === null) return; // refused and logged
+      dest = { jid: target.jid, key: target.key, crossed: true };
+    }
+
     // Typing is cosmetic and uncounted; everything else spends allowance.
+    //
+    // Charged to the *destination*, which is the chat being written into. It
+    // used to be charged to the turn's chat, so a cross-chat send spent the
+    // sender's budget and the recipient had no ceiling of their own — one
+    // conversation could be used to flood another.
     if (action.kind !== 'typing') {
-      const allowance = this.deps.limiter.admitOutbound(turn.chatKey, now);
+      const allowance = this.deps.limiter.admitOutbound(dest.key, now);
       if (!allowance.ok) {
-        log('outbox.throttled', { chatKey: turn.chatKey, reason: allowance.reason });
+        log('outbox.throttled', { chatKey: dest.key, reason: allowance.reason });
         return;
       }
       this.deps.turns.countSend(action.turnId);
@@ -523,9 +576,9 @@ export class Outbox extends EventEmitter {
           feed.event('outbox.fileRefused', `${action.file}: ${file.reason}`);
           return;
         }
-        await this.deps.wa.sendFile(turn.chatJid, file.data, file.mimetype, action.file, action.caption);
-        retainOutbound(turn.chatKey, 'file', file.data, file.mimetype);
-        feed.outbound(turn.chatKey, file.mimetype, action.caption);
+        await this.deps.wa.sendFile(dest.jid, file.data, file.mimetype, action.file, action.caption);
+        retainOutbound(dest.key, 'file', file.data, file.mimetype);
+        feed.outbound(dest.key, file.mimetype, action.caption);
         // Sent files are removed: the volume is not storage, and leaving them
         // lets a compromised agent fill the disk one send at a time. Deleting
         // by name is safe in a way that *reading* by name is not — if the agent
@@ -546,9 +599,9 @@ export class Outbox extends EventEmitter {
           feed.event('gif.failed', `${action.query}: ${gif.reason}`);
           return;
         }
-        await this.deps.wa.sendGif(turn.chatJid, gif.video, action.caption);
-        retainOutbound(turn.chatKey, 'gif', gif.video);
-        feed.outbound(turn.chatKey, 'gif', `[gif] ${gif.title}`);
+        await this.deps.wa.sendGif(dest.jid, gif.video, action.caption);
+        retainOutbound(dest.key, 'gif', gif.video);
+        feed.outbound(dest.key, 'gif', `[gif] ${gif.title}`);
         break;
       }
       // Tool requests. These do not send anybody a message, so they are not
@@ -570,28 +623,12 @@ export class Outbox extends EventEmitter {
         await this.answer(action.id, 'fetch', await fetchPage(action.url));
         break;
       }
-      // The one action that names a destination, and the only one gated on an
-      // operator switch. Off by default; see THREAT-MODEL.md T4.
+      // Text to a named chat. Its destination was resolved above, like every
+      // other verb's; what is left here is just the send. Gated on
+      // `agent.crossChat`; off by default. See THREAT-MODEL.md T4.
       case 'sendTo': {
-        if (!this.deps.config.agent.crossChat) {
-          log('outbox.crossChatRefused', { note: 'agent.crossChat is off' });
-          feed.event('crossChat.refused', 'the agent tried to message another chat');
-          return;
-        }
-        const jid = this.deps.chats.jidFor(action.chatKey);
-        if (jid === null) {
-          log('outbox.unknownChat', { chatKey: action.chatKey });
-          return; // a key the bridge never issued resolves to nothing
-        }
-        if (this.deps.chats.isBlocked(action.chatKey)) {
-          log('outbox.blockedChat', { chatKey: action.chatKey });
-          return;
-        }
-        await this.deps.wa.sendText(jid, action.text);
-        feed.outbound(action.chatKey, 'text', action.text);
-        // Recorded against both chats, so a message that crossed conversations
-        // is visible from the one it came from as well as the one it went to.
-        feed.event('crossChat.sent', `${turn.chatKey} -> ${action.chatKey}`);
+        await this.deps.wa.sendText(dest.jid, action.text);
+        feed.outbound(dest.key, 'text', action.text);
         break;
       }
 
@@ -715,6 +752,62 @@ export class Outbox extends EventEmitter {
         break;
       }
 
+      /**
+       * Issue a chat key for a number an operator gave the agent.
+       *
+       * The whole control is the first line. Not a switch an operator can leave
+       * on and forget, and not a check on who the agent *says* asked — the turn
+       * itself has to be an operator writing directly, which the dispatcher
+       * decided from the envelope before the agent saw anything.
+       *
+       * So the worst a stranger can do by asking for this is get a refusal. A
+       * stranger who takes over the agent entirely gets the same refusal, from
+       * every turn they can reach.
+       */
+      case 'contact': {
+        if (!turn.fromOperator) {
+          log('outbox.contactRefused', { chatKey: turn.chatKey, note: 'not an operator turn' });
+          feed.event('contact.refused', 'a number was offered from a chat that is not an operator');
+          await this.answer(action.id, 'contact', {
+            ok: false,
+            error:
+              'Only an operator can add somebody, and only by writing to you directly. ' +
+              'Ask them to send you the number themselves, or to add it in the panel.',
+          });
+          break;
+        }
+        const added = addContact({ config: this.deps.config, chats: this.deps.chats }, action.number, action.label);
+        if (!added.ok) {
+          log('outbox.contactFailed', { reason: added.error });
+          await this.answer(action.id, 'contact', { ok: false, error: added.error });
+          break;
+        }
+        log('contacts.issued', { chatKey: added.chatKey, already: added.already });
+        // Recorded for the operator, without the number: the feed is read in
+        // the panel and shown beside message text, and a phone number written
+        // into it is a phone number in a screenshot.
+        feed.event(
+          'contact.added',
+          added.already
+            ? `${action.label} was already a contact`
+            : `${action.label} can now be messaged`,
+        );
+        await this.answer(action.id, 'contact', {
+          ok: true,
+          items: [
+            {
+              title: action.label,
+              url: added.chatKey,
+              published: null,
+              // The same word `chats` uses for a listed destination, so the
+              // agent reads one vocabulary rather than two.
+              text: 'contact',
+            },
+          ],
+        });
+        break;
+      }
+
       case 'image': {
         if (!this.deps.config.agent.images) return this.refuse('images');
         // Claimed before the request, so a slow provider cannot let two through
@@ -722,8 +815,8 @@ export class Outbox extends EventEmitter {
         if (!claim('images', this.deps.config.limits.imagesPerDay)) {
           log('outbox.imageCapped', { perDay: this.deps.config.limits.imagesPerDay });
           feed.event('image.capped', "today's picture allowance is spent");
-          await this.deps.wa.sendText(turn.chatJid, 'I have made as many pictures as I can today — ask me again tomorrow.');
-          feed.outbound(turn.chatKey, 'text', 'picture allowance spent');
+          await this.deps.wa.sendText(dest.jid, 'I have made as many pictures as I can today — ask me again tomorrow.');
+          feed.outbound(dest.key, 'text', 'picture allowance spent');
           return;
         }
         const image = await generateImage(action.prompt);
@@ -732,25 +825,42 @@ export class Outbox extends EventEmitter {
           feed.event('image.failed', image.error);
           return;
         }
-        await this.deps.wa.sendImage(turn.chatJid, image.data, action.caption);
-        retainOutbound(turn.chatKey, 'image', image.data);
-        feed.outbound(turn.chatKey, 'image', action.caption ?? '[image]');
+        await this.deps.wa.sendImage(dest.jid, image.data, action.caption);
+        retainOutbound(dest.key, 'image', image.data);
+        feed.outbound(dest.key, 'image', action.caption ?? '[image]');
         break;
       }
 
       case 'voice': {
         if (!this.deps.config.agent.voice) return this.refuse('voice');
+        // Metered like pictures, and for the same reason: synthesis is billed
+        // per call. This was unmetered while voice could only ever answer the
+        // person in front of it, which bounded it by the conversation; a voice
+        // note that can be aimed at another chat has no such bound.
+        //
+        // Claimed before the request, so a slow provider cannot let two through
+        // the same last unit of the day's allowance.
+        if (!claim('voice', this.deps.config.limits.voicePerDay)) {
+          log('outbox.voiceCapped', { perDay: this.deps.config.limits.voicePerDay });
+          feed.event('voice.capped', "today's voice allowance is spent");
+          // Said in text rather than swallowed. The daily cap is our problem,
+          // not the listener's, and silence is the one outcome that reads as a
+          // fault on their end.
+          await this.deps.wa.sendText(dest.jid, action.text);
+          feed.outbound(dest.key, 'text', action.text);
+          break;
+        }
         const audio = await synthesise(action.text, this.deps.config.agent.voiceId);
         if (!audio.ok) {
           // Never drop the message: say it in text rather than stay silent.
           log('outbox.voiceFallback', { reason: audio.error });
-          await this.deps.wa.sendText(turn.chatJid, action.text);
-          feed.outbound(turn.chatKey, 'text', action.text);
+          await this.deps.wa.sendText(dest.jid, action.text);
+          feed.outbound(dest.key, 'text', action.text);
           return;
         }
-        await this.deps.wa.sendVoice(turn.chatJid, audio.data);
-        retainOutbound(turn.chatKey, 'voice', audio.data);
-        feed.outbound(turn.chatKey, 'voice', action.text);
+        await this.deps.wa.sendVoice(dest.jid, audio.data);
+        retainOutbound(dest.key, 'voice', audio.data);
+        feed.outbound(dest.key, 'voice', action.text);
         break;
       }
 
@@ -770,7 +880,16 @@ export class Outbox extends EventEmitter {
       }
     }
 
-    this.emit('sent', { chatKey: turn.chatKey, kind: action.kind });
-    log('outbox.sent', { chatKey: turn.chatKey, kind: action.kind });
+    // `dest.key`, not `turn.chatKey`: the panel, the feed and the log should
+    // all name the conversation this landed in.
+    if (dest.crossed) {
+      // Recorded against both chats, so a message that crossed conversations
+      // is visible from the one it came from as well as the one it went to.
+      // Emitted here rather than in each verb, so it can only be written on a
+      // path that actually reached `sendX` — a refusal returns before this.
+      feed.event('crossChat.sent', `${turn.chatKey} -> ${dest.key} (${action.kind})`);
+    }
+    this.emit('sent', { chatKey: dest.key, kind: action.kind });
+    log('outbox.sent', { chatKey: dest.key, kind: action.kind, crossed: dest.crossed });
   }
 }

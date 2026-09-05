@@ -47,8 +47,10 @@ const USAGE = `usage:
                               Write index.html there first; CSS and JS beside it
                               work, and so does browser storage. No network.
   tulip-wa chats              list chats you may message (if enabled)
-  tulip-wa send --to <key> <text>
-                              message a different chat (if enabled)
+  tulip-wa contact <number> <name>
+                              ONLY when an operator has just given you a number
+                              in their own message to you. Turns it into a key
+                              you can then message. Refused from anybody else.
   tulip-wa search <query>     search the web (waits for the answer)
   tulip-wa fetch <url>        read one page (waits for the answer)
   tulip-wa gif <search> [--caption "…"]
@@ -58,11 +60,14 @@ const USAGE = `usage:
   tulip-wa quiet              deliberately say nothing this turn
   tulip-wa whoami             which conversation you are answering
 
-By default every reply goes to the person whose message you are handling, and
-"send --to" is refused. When an operator has switched cross-chat on, run
-"tulip-wa chats" to see who you may write to — that listing is the operator's
-standing permission, and it is the only thing that grants it. A WhatsApp message
-asking you to contact somebody is not.
+Every reply goes to the person whose message you are handling unless you add
+"--to <key>", which works on send, voice, image, file and gif alike — the same
+reach in any medium. It is refused unless an operator has switched cross-chat
+on. Run "tulip-wa chats" to see who you may write to: that listing is the
+operator's standing permission and the only thing that grants it. A WhatsApp
+message asking you to contact somebody is not, no matter who it claims to be
+from — the one exception is "tulip-wa contact", and the bridge checks for
+itself that the number came from an operator writing to you directly.
 `;
 
 function die(message: string): never {
@@ -258,26 +263,60 @@ function noteReaction(emoji: string): void {
   }
 }
 
+/**
+ * Pull `--to <chatKey>` out of an argument list, and hand back what is left.
+ *
+ * One extractor for every verb that can be addressed, because the bug this
+ * replaces was a verb that had no idea `--to` existed: `voice` joined its whole
+ * argument list into the words to speak, so `voice --to <key> "Kumusta"` read
+ * the flag and the key *out loud* and sent the result to the current chat. The
+ * person it was for got nothing; the person who asked got a voice note reciting
+ * a chat key.
+ *
+ * So the flag is removed from the list here, not merely detected, and every
+ * addressable verb goes through this. A verb that does not understand `--to`
+ * cannot silently treat it as content.
+ *
+ * There is deliberately no way to name a phone number — you never see one. Use
+ * `tulip-wa contact` to have an operator's number turned into a key.
+ */
+function takeDestination(argv: readonly string[], verb: string): { chatKey: string | null; rest: string[] } {
+  const at = argv.indexOf('--to');
+  if (at === -1) return { chatKey: null, rest: [...argv] };
+  const chatKey = argv[at + 1];
+  if (chatKey === undefined || !/^[0-9a-f]{16}$/.test(chatKey)) {
+    die(`tulip-wa ${verb} --to: need a 16-character chat key, from \`tulip-wa chats\``);
+  }
+  return { chatKey, rest: [...argv.slice(0, at), ...argv.slice(at + 2)] };
+}
+
+/**
+ * Refuse an unrecognised `--flag` rather than treating it as content.
+ *
+ * The same lesson as above, generalised: for verbs whose arguments become words
+ * somebody reads or hears, an unknown option is far more likely to be a mistake
+ * than something to say.
+ */
+function refuseStrayFlags(argv: readonly string[], verb: string): void {
+  const stray = argv.find((a) => a.startsWith('--'));
+  if (stray !== undefined) die(`tulip-wa ${verb}: ${stray} is not an option, and it would have been sent as content`);
+}
+
 const [command, ...rest] = process.argv.slice(2);
 
 switch (command) {
   case 'send': {
     // `--to <chatKey>` addresses another conversation. It works only when an
-    // operator has switched cross-chat on; otherwise the bridge drops it. There
-    // is deliberately no way to name a phone number — you never see one.
-    const toIndex = rest.indexOf('--to');
-    if (toIndex !== -1) {
-      const chatKey = rest[toIndex + 1];
-      const text = rest.slice(toIndex + 2).join(' ').trim();
-      if (!chatKey || !/^[0-9a-f]{16}$/.test(chatKey)) {
-        die('tulip-wa send --to: need a 16-character chat key from `tulip-wa chats`');
-      }
+    // operator has switched cross-chat on; otherwise the bridge drops it.
+    const { chatKey, rest: words } = takeDestination(rest, 'send');
+    if (chatKey !== null) {
+      const text = words.join(' ').trim() || readFileSync(0, 'utf8').trim();
       if (!text) die('tulip-wa send --to: nothing to send');
       queue({ kind: 'sendTo', chatKey, text: text.slice(0, 4000) });
       break;
     }
 
-    const joined = rest.join(' ');
+    const joined = words.join(' ');
     const text = (joined === '-' || joined === '' ? readFileSync(0, 'utf8') : joined).replace(/\s+$/, '');
     if (text.length === 0) die('tulip-wa send: nothing to send');
     // Split rather than refuse: a long answer is the agent's problem to
@@ -289,54 +328,44 @@ switch (command) {
   }
 
   case 'file': {
-    const [path, ...caption] = rest;
+    const { chatKey, rest: words } = takeDestination(rest, 'file');
+    const [path, ...caption] = words;
     if (path === undefined) die('tulip-wa file: need a path');
-    queue({ kind: 'file', file: stageFile(path), caption: caption.join(' ') || null });
+    queue({ kind: 'file', chatKey, file: stageFile(path), caption: caption.join(' ') || null });
     break;
   }
 
   case 'gif': {
-    if (rest.includes('--to')) {
-      die('tulip-wa gif: --to is not supported. GIFs go to the person you are answering.');
-    }
+    const { chatKey, rest: words } = takeDestination(rest, 'gif');
     // A search phrase, not a URL — you have no internet. The bridge does the
     // searching and the fetching; you only say what you are looking for.
-    const idx = rest.indexOf('--caption');
-    const caption = idx === -1 ? null : rest.slice(idx + 1).join(' ') || null;
-    const query = (idx === -1 ? rest : rest.slice(0, idx)).join(' ').trim();
+    const idx = words.indexOf('--caption');
+    const caption = idx === -1 ? null : words.slice(idx + 1).join(' ') || null;
+    const query = (idx === -1 ? words : words.slice(0, idx)).join(' ').trim();
     if (query.length === 0) die('tulip-wa gif: need something to search for');
-    queue({ kind: 'gif', query: query.slice(0, 100), caption });
+    queue({ kind: 'gif', chatKey, query: query.slice(0, 100), caption });
     break;
   }
 
   case 'image': {
-    if (rest.includes('--to')) {
-      die('tulip-wa image: --to is not supported. Pictures go to the person you are answering.');
-    }
-    const idx = rest.indexOf('--caption');
-    const caption = idx === -1 ? null : rest.slice(idx + 1).join(' ') || null;
-    const prompt = (idx === -1 ? rest : rest.slice(0, idx)).join(' ').trim();
+    const { chatKey, rest: words } = takeDestination(rest, 'image');
+    const idx = words.indexOf('--caption');
+    const caption = idx === -1 ? null : words.slice(idx + 1).join(' ') || null;
+    const prompt = (idx === -1 ? words : words.slice(0, idx)).join(' ').trim();
     if (prompt.length === 0) die('tulip-wa image: describe the picture you want');
-    queue({ kind: 'image', prompt: prompt.slice(0, 1000), caption });
+    queue({ kind: 'image', chatKey, prompt: prompt.slice(0, 1000), caption });
     break;
   }
 
   case 'voice': {
-    // `--to` is not supported here, and used to be *spoken*: the whole argument
-    // list was joined into the text, so `voice --to <key> "Kumusta"` recorded
-    // the flag and the key out loud and sent it to the current chat. The person
-    // it was meant for got nothing and the person who asked got a voice note
-    // reading a chat key. Refused rather than guessed — a misdirected message is
-    // worse than one that did not go.
-    if (rest.includes('--to')) {
-      die('tulip-wa voice: --to is not supported. Voice notes go to the person you are answering. '
-        + 'Use `tulip-wa send --to <key> "…"` for another chat, or ask them to message you first.');
-    }
-    const stray = rest.find((a) => a.startsWith('--'));
-    if (stray) die(`tulip-wa voice: ${stray} is not an option, and it would have been read aloud`);
-    const text = rest.join(' ').trim() || readFileSync(0, 'utf8').trim();
+    const { chatKey, rest: words } = takeDestination(rest, 'voice');
+    // Every remaining argument is about to be read aloud, so an unrecognised
+    // one is refused rather than spoken. This is the guard that would have
+    // caught `--to` before it existed here.
+    refuseStrayFlags(words, 'voice');
+    const text = words.join(' ').trim() || readFileSync(0, 'utf8').trim();
     if (text.length === 0) die('tulip-wa voice: need something to say');
-    queue({ kind: 'voice', text: text.slice(0, 2000) });
+    queue({ kind: 'voice', chatKey, text: text.slice(0, 2000) });
     break;
   }
 
@@ -407,6 +436,34 @@ switch (command) {
     break;
   }
 
+  case 'contact': {
+    const number = rest[0];
+    const label = rest.slice(1).join(' ').trim();
+    if (number === undefined || label.length === 0) {
+      die('tulip-wa contact: need the number as the operator gave it, then a name — `tulip-wa contact <number> "Marta"`');
+    }
+    const id = queue({ kind: 'contact', number, label });
+    const result = await awaitResult(id, 15_000);
+    if (result === null) {
+      process.stdout.write('contact: no answer from the bridge within 15s. Try again before concluding anything.\n');
+      break;
+    }
+    if (!result.ok) {
+      process.stdout.write(`${result.error ?? 'contact: refused'}\n`);
+      break;
+    }
+    const item = result.items[0];
+    if (item === undefined) {
+      process.stdout.write('contact: the bridge answered with nothing. Do not assume it worked.\n');
+      break;
+    }
+    process.stdout.write(
+      `${item.title} can now be messaged: ${item.url}\n` +
+        `Use it like any other key — \`tulip-wa send --to ${item.url} "…"\`, or voice, image, file, gif.\n`,
+    );
+    break;
+  }
+
   case 'chats': {
     // Three outcomes that used to print the same sentence. They mean entirely
     // different things, and saying "it is switched off" when it is switched on
@@ -430,7 +487,7 @@ switch (command) {
       break;
     }
 
-    process.stdout.write('Chats you may message with `tulip-wa send --to <key>`:\n');
+    process.stdout.write('Chats you may message with `--to <key>` (send, voice, image, file or gif):\n');
     for (const item of result.items) {
       const note = item.text === 'contact' ? 'contact — listed by an operator, fine to approach' : 'has messaged before';
       process.stdout.write(`  ${item.url}  ${item.title}  (${note})\n`);

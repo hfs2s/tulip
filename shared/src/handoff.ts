@@ -10,15 +10,22 @@
  * Two rules govern every schema below. Both exist because the agent is assumed
  * to be executing an attacker's code:
  *
- *   1. **The agent never names a destination.** Outbound actions identify a
- *      `turnId`; the bridge holds the only turn → chat mapping and resolves it
- *      itself. A compromised agent has no way to express "send this to someone
- *      else" — the words for it do not exist. See THREAT-MODEL.md §T4.
+ *   1. **The agent addresses chats the bridge issued keys for, or nothing.**
+ *      Outbound actions default to `turnId`, which the bridge resolves through
+ *      a map the agent cannot write. `sendTo` and the four media verbs may name
+ *      a `chatKey` instead — but only a key the bridge minted, only with
+ *      `agent.crossChat` on, and never a phone number or a jid. The address
+ *      space is issued, not chosen. See THREAT-MODEL.md §T4.
  *
- *   2. **The agent never sees a phone number.** Chats are identified by an
+ *   2. **The agent never learns a phone number.** Chats are identified by an
  *      opaque `chatKey` derived from a salt the agent cannot read. Personal
  *      identifiers stay in the bridge, so a successful exfiltration yields
  *      display names at worst.
+ *
+ *      `contact` runs the other way and is worth reading as the exception that
+ *      proves the rule: it takes a number the *operator* typed and returns a
+ *      key. Nothing flows outward, and it is refused on any turn that is not an
+ *      operator's.
  *
  * Schemas are `.strict()` throughout: an unknown field is a parse error, not a
  * silently ignored one. A tolerant parser is how an attacker smuggles a field
@@ -37,6 +44,27 @@ import { z } from 'zod';
  * windows and workspace directories.
  */
 export const ChatKey = z.string().regex(/^[0-9a-f]{16}$/, 'chatKey must be 16 lowercase hex characters');
+
+/**
+ * An optional destination for an outbound action, for the media verbs.
+ *
+ * `null` — the default, and the shape every action had before this existed —
+ * means "the chat whose turn this is", resolved from `turnId` through a map the
+ * agent cannot write. A key means the same thing `sendTo` means: a chat the
+ * bridge itself issued a key for, gated on `agent.crossChat`, refused if the
+ * chat is blocked or unknown.
+ *
+ * Nullable-with-a-default rather than a new `voiceTo`/`imageTo` kind, for two
+ * reasons. Actions already written to the outbox still parse, so a deploy
+ * cannot strand a queued action mid-flight; and the vocabulary for naming a
+ * destination stays in one place, which is the thing a reviewer needs to be
+ * able to find. `mentionsMe` above was added the same way.
+ *
+ * This widens the *medium*, not the address space. Text could already reach any
+ * of these chats through `sendTo`; audio, pictures and files could not, for no
+ * reason anybody defended. There is still no way to name a phone number here.
+ */
+const Destination = ChatKey.nullable().default(null);
 
 /** Identifies one delivery of one batch. Opaque to the agent; a UUID in practice. */
 export const TurnId = z.string().uuid();
@@ -179,11 +207,12 @@ export const CurrentTurn = z
  * the same reason.
  *
  * A recipient is the one exception, and it is worth stating precisely because
- * it used to be on that list. Every action but `sendTo` derives its destination
- * from `turnId`, which the bridge resolves through a map the agent cannot
- * write. `sendTo` names a chat — but only by a key the bridge itself issued,
- * only when an operator has switched `agent.crossChat` on, and it still cannot
- * *read* the chat it names. See THREAT-MODEL.md §T4.
+ * it used to be on that list. Actions default to `turnId`, which the bridge
+ * resolves through a map the agent cannot write. `sendTo`, `file`, `gif`,
+ * `image` and `voice` may name a chat instead — but only by a key the bridge
+ * itself issued, only when an operator has switched `agent.crossChat` on, and
+ * none of them can *read* the chat it names. Reach is the same for all five;
+ * they differ only in medium. See THREAT-MODEL.md §T4.
  */
 export const OutboxAction = z.discriminatedUnion('kind', [
   z
@@ -204,6 +233,8 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       id: z.string().uuid(),
       turnId: TurnId,
       kind: z.literal('file'),
+      /** Where it goes; see `Destination`. Null is this turn's own chat. */
+      chatKey: Destination,
       file: OutFileName,
       caption: z.string().max(1024).nullable(),
     })
@@ -213,6 +244,8 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       id: z.string().uuid(),
       turnId: TurnId,
       kind: z.literal('gif'),
+      /** Where it goes; see `Destination`. Null is this turn's own chat. */
+      chatKey: Destination,
       /**
        * A search phrase, never a URL.
        *
@@ -253,6 +286,42 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       turnId: TurnId,
       /** List the chats the agent may message. Also gated on `agent.crossChat`. */
       kind: z.literal('chats'),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
+       * Ask the bridge to issue a chat key for a phone number.
+       *
+       * This is the one place a number appears in the agent's vocabulary, and
+       * it is deliberately the *inverse* of rule 2 rather than an exception to
+       * it: the agent does not learn a number here, it hands one back. The
+       * number came from the operator, in the operator's own message, which the
+       * agent could already read.
+       *
+       * The control is provenance, and it is checked on the bridge side, not
+       * here: this is refused unless the turn it belongs to is an operator's
+       * turn. `isOperator()` matches on the sender's jid, which is assigned by
+       * WhatsApp and cannot be changed by a sender picking a display name — so
+       * a stranger cannot reach this by claiming to be Les. That is the whole
+       * reason the capability is safe to have: the number is always chosen by
+       * somebody who could have added it in the panel themselves.
+       *
+       * What it does NOT do: send anything. It mints a key and hands it back.
+       * Messaging the result is a separate action, subject to every limit and
+       * every switch that governs the rest.
+       */
+      kind: z.literal('contact'),
+      /**
+       * E.164-ish, with or without the leading `+`. Digits only otherwise: no
+       * jid suffix, no `@s.whatsapp.net`, no group id. The bridge builds the
+       * jid itself, so the agent cannot address a domain of its choosing.
+       */
+      number: z.string().regex(/^\+?[1-9][0-9]{6,17}$/, 'a phone number in international form'),
+      /** What to call them in the panel and in the chat list. */
+      label: z.string().min(1).max(60),
     })
     .strict(),
   z
@@ -325,6 +394,8 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       id: z.string().uuid(),
       turnId: TurnId,
       kind: z.literal('image'),
+      /** Where it goes; see `Destination`. Null is this turn's own chat. */
+      chatKey: Destination,
       /** A description. The bridge generates and sends it; no key reaches the agent. */
       prompt: z.string().min(1).max(1000),
       caption: z.string().max(1024).nullable(),
@@ -335,6 +406,8 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       id: z.string().uuid(),
       turnId: TurnId,
       kind: z.literal('voice'),
+      /** Where it goes; see `Destination`. Null is this turn's own chat. */
+      chatKey: Destination,
       /** Spoken aloud and sent as a WhatsApp voice note. */
       text: z.string().min(1).max(2000),
     })
@@ -441,7 +514,7 @@ export const MemoryFile = z.object({ notes: z.array(MemoryNote).max(200) }).stri
 export const ToolResult = z
   .object({
     actionId: z.string().uuid(),
-    kind: z.enum(['search', 'fetch', 'chats', 'page']),
+    kind: z.enum(['search', 'fetch', 'chats', 'page', 'contact']),
     at: z.string().datetime(),
     ok: z.boolean(),
     /** Present when ok is false. Short, and safe to show a person. */

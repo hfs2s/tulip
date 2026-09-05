@@ -271,17 +271,25 @@ Two independent controls:
   discarded.
 
 **Destination pinning has one deliberate exception, and this section used to
-deny it existed.** `agent.crossChat` — default off — enables a `sendTo` action
-that names a chat. An operator asked for it, because without it the agent could
-never introduce itself to anybody or pass on a message it was asked to pass on.
-What that costs, precisely:
+deny it existed.** `agent.crossChat` — default off — lets an action name a chat.
+An operator asked for it, because without it the agent could never introduce
+itself to anybody or pass on a message it was asked to pass on. It began as
+`sendTo`, text only; `voice`, `image`, `file` and `gif` may now name the same
+destinations. That was a widening of *medium*, not of reach — the address space
+is identical, the switch is the same one, and the audit is the same — and the
+asymmetry was an accident of what got built first rather than a control:
+anything sayable in 4096 characters of text could already be sent.
+
+What the exception costs, precisely:
 
 | | Pinning only (default) | With `agent.crossChat` |
 |---|---|---|
 | Can address | the chat whose turn it is answering | that, plus any chat key the bridge has issued |
+| In which media | all of them | all of them |
 | Can name a phone number | no | **still no** — keys are opaque and deployment-local |
 | Can read another conversation | no | **still no** — sessions are per chat |
 | Recorded | outbound in the chat's feed | that, plus a `crossChat.sent` event naming both chats |
+| Rate limit charged to | the chat being written into | the chat being written into |
 
 The load-bearing observation is that the two controls are independent, and only
 the weaker one moved. Session isolation is what makes exfiltration pointless:
@@ -295,11 +303,39 @@ that have written in. The list is deliberately **not** the audience list:
 adding an outbound destination never grants anyone inbound access, so a contact
 cannot become a sender as a side effect.
 
+**The agent may now add to that list, and the control is provenance rather than
+permission.** A `contact` action turns a phone number into a key — the one place
+a number appears in the agent's vocabulary, and it runs *inward*: the number is
+one an operator typed in their own message, which the agent could already read.
+The bridge refuses it on any turn that is not an operator writing directly, and
+"directly" excludes a group, because a room with strangers in it cannot carry
+one identified person's intent. The check is on the turn, which the dispatcher
+decided from the envelope before the agent saw anything, so it is not reachable
+by an agent that has been taken over: an attacker in any chat they can reach
+gets a refusal from all of them.
+
+What this does *not* do is let the agent choose a destination. It lets an
+operator choose one without opening the panel. Somebody who could add a contact
+by hand adds it by asking instead; nobody else can.
+
 **Residual:** with the switch on, an injection that survives the persona can
-message an operator-listed contact. It is bounded by the outbound rate limits,
-it is logged on both sides, and the content is limited to one conversation the
+message an operator-listed contact — in any medium, which mostly means it can
+now be annoying in more formats. It is bounded by the outbound rate limits, it
+is logged on both sides, and the content is limited to one conversation the
 attacker already controls. If that trade is not worth it for a deployment,
 `crossChat: false` restores destination pinning completely and is the default.
+
+Two limits were tightened alongside the widening, because both were sized for a
+verb that could only answer the person in front of it:
+
+- The outbound rate bucket is charged to the **destination**, not to the turn's
+  own chat. Previously a cross-chat send spent the sender's allowance and the
+  recipient had no ceiling of their own, so one conversation could be used to
+  flood another.
+- Speech is metered (`limits.voicePerDay`), as pictures already were. Synthesis
+  is billed per call, and an unmetered billed capability that can be aimed at
+  another chat is a cost-denial path rather than a nuisance. Exceeding the cap
+  sends the words as text rather than sending nothing.
 
 The bridge separately originates messages to operators on its own — watchdog
 alerts and control-command replies — but that is the bridge addressing a

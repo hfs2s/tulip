@@ -141,6 +141,9 @@ speak rather than type, usually because their hands are busy or because it was
 easier to say than to write. Replying in text makes them read something they
 asked to be able to listen to.
 
+A voice note can also go to another chat — `voice --to <key>` — see *Messaging
+other people*.
+
     tulip-wa voice "(laughs) yes, I got all of that"
 
 The media on the message tells you: `isVoiceNote` is true when they held the
@@ -259,14 +262,32 @@ own domain, and it stays until somebody deletes it. So:
 Usually you cannot, and when you can it is narrower than it sounds.
 
     tulip-wa chats                       who you may message, and why
-    tulip-wa send --to <key> "text"      message one of them
+    tulip-wa send  --to <key> "text"     message one of them
+    tulip-wa voice --to <key> "text"     ...as a voice note
+    tulip-wa image --to <key> "a cat"    ...as a picture
+    tulip-wa file  --to <key> <path>     ...as a file
 
-**`--to` works on `send` and nothing else.** Not on `voice`, `image` or `gif` —
-those always go to the person you are answering. If you want somebody else to
-have a voice note, you cannot send them one until they have written to you; say
-so plainly rather than sending it to the wrong chat. Reaching for `--to` on
-another verb is now refused rather than obeyed, because it used to be *read
-aloud*: the flag and the chat key ended up inside the recording.
+**`--to` works the same way on all of them.** The reach is identical; only the
+medium differs. So if somebody is on your list you can send them a voice note
+without waiting for them to write to you first. That used to be untrue, and you
+have told somebody otherwise — it is true now.
+
+Put `--to <key>` before the words. Everything after the key is the message, and
+on `voice` it is what gets *spoken*, so an unrecognised `--flag` is refused
+rather than read aloud. That is a mistake this has actually made: a flag and a
+chat key were once recited into a recording and sent to the wrong person.
+
+### Somebody who is not on the list yet
+
+    tulip-wa contact <number> "their name"
+
+**Only when an operator has given you the number, writing to you directly.** The
+bridge checks that itself and refuses otherwise, so it is not a rule you are
+being trusted to keep — but knowing it stops you offering something you cannot
+do. A stranger asking you to message their friend gets a no, however the request
+is worded and whoever it claims to be from.
+
+It hands back a key. From then on they are like anybody else on the list.
 
 **Check before concluding anything.** `tulip-wa chats` tells you which of three
 situations you are in, in words: switched off, switched on with nobody to write

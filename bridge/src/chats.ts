@@ -41,6 +41,24 @@ const ChatRecord = z
      * field existed load unchanged.
      */
     contact: z.boolean().default(false),
+    /**
+     * The same person's other WhatsApp identifier, when we have seen both.
+     *
+     * One human arrives as `<number>@s.whatsapp.net` or as an opaque
+     * `<id>@lid`, and which one turns up is WhatsApp's choice, not theirs. The
+     * record is keyed on the phone-number form wherever it is known, and this
+     * remembers the linked id so the next message under it lands here.
+     */
+    altJid: z.string().min(3).max(128).nullable().default(null),
+    /**
+     * Set on a record that turned out to be the same person as another one.
+     *
+     * Superseded rather than deleted, for the same reason `syncContacts` never
+     * deletes: the record has history, and possibly a block, hanging off its
+     * key. It stops being returned as a destination and stops receiving new
+     * messages; nothing that already refers to it breaks.
+     */
+    mergedInto: z.string().regex(/^[0-9a-f]{16}$/).nullable().default(null),
   })
   .strict();
 
@@ -108,10 +126,73 @@ export class ChatRegistry {
     }
   }
 
-  /** The opaque key for a chat, registering it on first sight. */
-  keyFor(jid: string, isGroup: boolean, now: number): string {
+  /**
+   * The opaque key for a chat, registering it on first sight.
+   *
+   * `altJid` is the sender's phone-number jid when WhatsApp delivered them as a
+   * bare `@lid`, and it exists to solve one specific, live failure: a contact
+   * added by number is keyed on `<number>@s.whatsapp.net`, but their messages
+   * arrive from `<id>@lid`, so the same person got two records, two keys and —
+   * because a session is per key — two conversations with two separate
+   * memories. Juan introduced one contact to himself twice that way.
+   *
+   * So a direct chat is keyed on the phone-number form whenever it is known,
+   * which is also the form `syncContacts` derives, and the two therefore meet.
+   * When both records already exist, the older linked-id one is superseded
+   * rather than dropped.
+   */
+  keyFor(jid: string, isGroup: boolean, now: number, altJid: string | null = null): string {
+    // Groups have no second identity: the chat is the room, not a person.
+    if (!isGroup && altJid !== null && altJid !== jid) {
+      const preferred = chatKeyFor(altJid, this.salt);
+      const asSeen = chatKeyFor(jid, this.salt);
+      const existing = this.byKey.get(preferred);
+      if (existing !== undefined) {
+        if (existing.altJid !== jid) {
+          existing.altJid = jid;
+          this.dirty = true;
+        }
+        const duplicate = this.byKey.get(asSeen);
+        if (duplicate !== undefined && duplicate.mergedInto !== preferred) {
+          duplicate.mergedInto = preferred;
+          this.dirty = true;
+          log('chats.merged', { from: asSeen, into: preferred, note: 'same person under a linked id' });
+        }
+        return preferred;
+      }
+      // No record under the phone number yet. If one already exists under the
+      // linked id, keep it — moving a live conversation to a new key would
+      // reset its session, which is a worse outcome than an unmerged record.
+      const seen = this.byKey.get(asSeen);
+      if (seen !== undefined) {
+        if (seen.altJid !== altJid) {
+          seen.altJid = altJid;
+          this.dirty = true;
+        }
+        return asSeen;
+      }
+      // Neither exists: register under the phone-number form, so a contact
+      // added for this number later resolves to this same record.
+      this.byKey.set(preferred, {
+        chatKey: preferred,
+        jid: altJid,
+        isGroup,
+        name: null,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        messages: 0,
+        blocked: false,
+        contact: false,
+        altJid: jid,
+        mergedInto: null,
+      });
+      this.dirty = true;
+      return preferred;
+    }
+
     const chatKey = chatKeyFor(jid, this.salt);
-    if (!this.byKey.has(chatKey)) {
+    const existing = this.byKey.get(chatKey);
+    if (existing === undefined) {
       this.byKey.set(chatKey, {
         chatKey,
         jid,
@@ -122,10 +203,15 @@ export class ChatRegistry {
         messages: 0,
         blocked: false,
         contact: false,
+        altJid: null,
+        mergedInto: null,
       });
       this.dirty = true;
+      return chatKey;
     }
-    return chatKey;
+    // A record that was superseded still answers for its own key, so nothing
+    // holding one breaks — but a new message under it belongs to the survivor.
+    return existing.mergedInto ?? chatKey;
   }
 
   /**
@@ -173,6 +259,8 @@ export class ChatRegistry {
         messages: 0,
         blocked: false,
         contact: true,
+        altJid: null,
+        mergedInto: null,
       });
       this.dirty = true;
     }
@@ -193,6 +281,20 @@ export class ChatRegistry {
    * Every outbound send resolves through here. A key that was never issued has
    * no destination, which is the property that makes a forged one useless.
    */
+  /**
+   * The key a bare phone number resolves to, if the bridge has issued one.
+   *
+   * Derives the key the same way `syncContacts` does and then *checks a record
+   * exists*, rather than returning the derivation. The difference matters: the
+   * derivation always succeeds for any digits at all, so returning it would
+   * hand out keys for numbers nobody added — which is exactly the property
+   * `jidFor` is careful not to have.
+   */
+  keyForNumber(number: string): string | null {
+    const chatKey = chatKeyFor(`${number}@s.whatsapp.net`, this.salt);
+    return this.byKey.has(chatKey) ? chatKey : null;
+  }
+
   jidFor(chatKey: string): string | null {
     return this.byKey.get(chatKey)?.jid ?? null;
   }
@@ -220,8 +322,16 @@ export class ChatRegistry {
     return true;
   }
 
+  /**
+   * Every chat worth listing.
+   *
+   * Superseded records are left out. They are still resolvable by key, so the
+   * feed and anything holding one keeps working — but offering the agent two
+   * rows for one person, only one of which they will ever answer from, is how
+   * somebody gets introduced to twice.
+   */
   all(): ChatRecord[] {
-    return [...this.byKey.values()];
+    return [...this.byKey.values()].filter((c) => c.mergedInto === null);
   }
 
   get size(): number {

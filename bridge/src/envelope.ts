@@ -26,6 +26,15 @@ export interface Envelope {
   readonly groupName: string | null;
   /** Every identifier this sender arrived under, for allowlist matching. */
   readonly senderIds: readonly string[];
+  /**
+   * The sender's phone-number jid, when WhatsApp supplied one alongside a
+   * `@lid`. Null in a group, and null when only the linked id arrived.
+   *
+   * Carried separately as well as folded into `senderIds`, because the chat
+   * registry needs to know *which* identifier is the phone-number form — it
+   * keys a direct chat on that one so a person cannot end up with two records.
+   */
+  readonly senderPn: string | null;
   readonly pushName: string | null;
   readonly text: string;
   readonly mentionsMe: boolean;
@@ -209,6 +218,24 @@ async function fetchMedia(
 }
 
 /**
+ * The sender's phone-number jid, if WhatsApp supplied one, for a direct chat.
+ *
+ * Split out of `toEnvelope` because the chat registry needs it *before* an
+ * envelope exists: parsing needs a chat key (media is filed under one) and the
+ * key now needs to know the sender's phone-number form, so one of the two has
+ * to be readable from the raw message on its own. This is the cheap half.
+ *
+ * Null for a group — the chat there is the room, not a person — and null when
+ * only a linked id arrived, which is the case this cannot repair.
+ */
+export function senderPnOf(message: WAMessage): string | null {
+  const chatJid = bare(message.key.remoteJid) ?? 'unknown@s.whatsapp.net';
+  if (isGroup(chatJid)) return null;
+  const raw = (message.key as { senderPn?: unknown }).senderPn;
+  return typeof raw === 'string' ? bare(raw) : null;
+}
+
+/**
  * Parse one Baileys message. Never throws: a message that cannot be understood
  * still produces an envelope, so it is recorded rather than lost.
  */
@@ -283,6 +310,7 @@ export async function toEnvelope(
     isGroup: group,
     groupName,
     senderIds: identities(senderJid, senderPn),
+    senderPn: group ? null : senderPn,
     pushName: message.pushName ?? null,
     text,
     mentionsMe,

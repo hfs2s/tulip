@@ -26,7 +26,7 @@ import { feed } from './feed.js';
 import { gate, isOperator } from './gate.js';
 import { publishTurn, readStatus, retireBatch } from './handoff.js';
 import { log, redactNumber } from './log.js';
-import { hasContent, toEnvelope, type Envelope } from './envelope.js';
+import { hasContent, senderPnOf, toEnvelope, type Envelope } from './envelope.js';
 import { canTranscribe, transcribe } from './transcribe.js';
 import { claim } from './spend.js';
 import type { Limiter } from './ratelimit.js';
@@ -143,7 +143,9 @@ export class Dispatcher extends EventEmitter {
 
     const chatJid = message.key.remoteJid ?? '';
     const isGroupChat = chatJid.endsWith('@g.us');
-    const chatKey = chats.keyFor(chatJid.split(':')[0] ?? chatJid, isGroupChat, now);
+    // Read from the raw message rather than the envelope, which does not exist
+    // yet: parsing needs the chat key in order to file attachments under it.
+    const chatKey = chats.keyFor(chatJid.split(':')[0] ?? chatJid, isGroupChat, now, senderPnOf(message));
 
     const envelope = await toEnvelope(message, wa as never, {
       chatKey,
@@ -403,7 +405,15 @@ export class Dispatcher extends EventEmitter {
     if (!last) return;
 
     const record = this.deps.chats.get(chatKey);
-    const turn = this.deps.turns.open(last.envelope.chatJid, chatKey, now);
+
+    // Whether the turn carries operator authority, decided here because this is
+    // where the envelopes are and the outbox only sees a turn id. `every`
+    // rather than checking the last message: a batch is one chat's messages, so
+    // in practice they agree, and if they ever did not the answer should be no.
+    const fromOperator = batch.every(
+      ({ envelope }) => !envelope.isGroup && isOperator(this.deps.config, envelope.senderIds),
+    );
+    const turn = this.deps.turns.open(last.envelope.chatJid, chatKey, now, fromOperator);
 
     const messages: InboundMessage[] = await Promise.all(
       batch.map(async ({ envelope }) => ({
