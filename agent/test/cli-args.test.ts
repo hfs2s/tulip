@@ -23,10 +23,19 @@ describe('takeLanguage', () => {
     expect(ok<string>(r) && r.rest).toEqual(['vale,', 'ahora']);
   });
 
-  it('leaves a command without the flag completely alone', () => {
+  /**
+   * Required, not defaulted. One setting for the whole deployment is wrong for
+   * somebody the moment two conversations are in two languages, and wrong
+   * silently: the voice note arrives, it just sounds foreign.
+   */
+  it('refuses a voice note that does not say which language it is in', () => {
     const r = takeLanguage(['hola', 'que', 'tal'], 'voice');
-    expect(ok<string>(r) && r.value).toBe('');
-    expect(ok<string>(r) && r.rest).toEqual(['hola', 'que', 'tal']);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.message).toContain('--language is required');
+    // The error carries the reason and where to look, because it is the only
+    // thing the agent will read at the moment it needs to know.
+    expect(!r.ok && r.message).toContain('Malay');
+    expect(!r.ok && r.message).toContain('tulip-wa languages');
   });
 
   it('lifts it from the middle, not just the front', () => {
@@ -36,15 +45,50 @@ describe('takeLanguage', () => {
     expect(ok<string>(r) && r.rest).toEqual(['sige', 'na']);
   });
 
-  it('refuses a language the provider does not know', () => {
-    const r = takeLanguage(['--language', 'Spanglish', 'hola'], 'voice');
+  it('refuses a language that is not one and has no near-name', () => {
+    const r = takeLanguage(['--language', 'Klingon', 'hola'], 'voice');
     expect(r.ok).toBe(false);
+    expect(!r.ok && r.message).toContain('tulip-wa languages');
   });
 
-  it('refuses a miscapitalised one, and says how it is spelled', () => {
-    const r = takeLanguage(['--language', 'spanish', 'hola'], 'voice');
-    expect(r.ok).toBe(false);
-    expect(!r.ok && r.message).toContain('Spanish');
+  it('takes it however it is capitalised', () => {
+    // "filipino" and "Filipino" are the same intention, and refusing one of
+    // them teaches nothing — the provider's exact spelling is returned either
+    // way, because that is what has to go on the wire.
+    for (const typed of ['spanish', 'SPANISH', 'Spanish']) {
+      const r = takeLanguage(['--language', typed, 'hola'], 'voice');
+      expect(ok<string>(r) && r.value, typed).toBe('Spanish');
+    }
+  });
+
+  /**
+   * The failure this exists for. Juan is learning Bisaya, so "Bisaya" and
+   * "Cebuano" are the words in front of him — and the provider knows neither,
+   * refusing the request outright rather than degrading. Filipino is the
+   * nearest mouth it has, and far nearer than English.
+   */
+  it('translates the name the agent would actually reach for', () => {
+    for (const [typed, expected] of [
+      ['Bisaya', 'Filipino'],
+      ['Cebuano', 'Filipino'],
+      ['Tagalog', 'Filipino'],
+      ['Valencian', 'Catalan'],
+      ['Castilian', 'Spanish'],
+      ['Cantonese', 'Chinese,Yue'],
+      ['Farsi', 'Persian'],
+    ] as const) {
+      const r = takeLanguage(['--language', typed, 'kumusta'], 'voice');
+      expect(ok<string>(r) && r.value, typed).toBe(expected);
+    }
+  });
+
+  it('never renames something the provider already accepts', () => {
+    // An exact member wins before an alias is consulted, so no entry in the
+    // alias table can shadow a real language by sharing its name.
+    for (const real of ['Malay', 'Indonesian', 'Filipino', 'Catalan', 'Chinese,Yue', 'auto']) {
+      const r = takeLanguage(['--language', real, 'x'], 'voice');
+      expect(ok<string>(r) && r.value, real).toBe(real);
+    }
   });
 
   it('refuses the flag with nothing after it', () => {

@@ -104,23 +104,33 @@ are not a tag syntax either — `[laughs]` is read the same way. If you want a
 sound that is not here, you cannot have it. Pick the nearest one or write the
 line differently.
 
-**Say which language you are speaking.** The words are yours, but the *accent*
-they are read with is a separate setting, and by default it is whatever the
-operator picked — so a Spanish sentence can come out pronounced by an English
-mouth. Pass the language whenever you are not speaking the default:
+**You must say which language you are speaking.** `--language` is required on
+every voice note. The words are yours, but the *accent* they are read with is a
+separate thing, and nothing can work it out for you: you are the only one who
+knows what you just wrote.
 
     tulip-wa voice --language Spanish  "vale, te lo mando en un momento"
     tulip-wa voice --language Filipino "sige, gagawin ko na"
     tulip-wa voice --language Catalan  "d'acord, ara t'ho envio"
 
-Put the flag before the words; everything after it is spoken. Leave it off and
-you get the operator's setting, which is the right thing when you are speaking
-the language they set it to. `--language auto` lets the provider guess, which is
-worth reaching for when a sentence genuinely mixes two.
+Put the flag before the words; everything after it is spoken.
 
-The spelling is exact and capitalised — `Spanish`, not `spanish` or `español`. A
-name that is not on the provider's list is refused when you type it, with the
-list in the error, so you cannot discover the mistake later.
+    tulip-wa languages
+
+lists every value, and the near-names that map onto one. Run it rather than
+guessing — a name the provider does not know does not degrade, it fails the
+whole voice note, and what arrives is text with no sign of why.
+
+**Say the language you are actually writing, even if it is not on the list.**
+Bisaya, Cebuano, Valencian, Castilian, Farsi and a dozen others are understood
+and translated to the nearest voice the provider has. Cebuano is read with the
+Filipino mouth — not because they are the same language, but because Filipino
+has the vowels and the stress about right, and English has neither.
+
+**Do not reach for `auto`.** It exists, and it is wrong for you specifically: it
+hears Filipino and Bisaya as Malay or Indonesian, which sounds plausible and is
+not you. Use it only for a sentence that genuinely mixes two languages and you
+cannot pick one.
 
 **No hyphens, en dashes or semicolons in a voice note.** They are typography,
 not sound: written down they shape a sentence, spoken they land as a stumble or

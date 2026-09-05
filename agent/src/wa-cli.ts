@@ -21,6 +21,7 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { takeDestination as liftDestination, takeLanguage as liftLanguage, strayFlag } from './cli-args.js';
+import { LANGUAGE_ALIASES, LANGUAGE_BOOSTS } from '@tulip/shared';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -31,7 +32,9 @@ const USAGE = `usage:
   tulip-wa send <text>|-      reply to the person you are answering ("-" reads stdin)
   tulip-wa file <path> [text] send a file, with an optional caption
   tulip-wa image <prompt>     generate a picture and send it  [--caption "…"]
-  tulip-wa voice <text>       say it aloud as a voice note. Four round-bracket
+  tulip-wa voice --language <L> <text>
+                              say it aloud as a voice note. --language is
+                              REQUIRED: say which language you wrote in. Four round-bracket
                               sound tags are performed: (laughs) (chuckle)
                               (sighs) (breath). Anything else — including square
                               brackets — is read out as words.
@@ -47,6 +50,7 @@ const USAGE = `usage:
   tulip-wa page <name>        publish out/pages/<name>/ and print its address.
                               Write index.html there first; CSS and JS beside it
                               work, and so does browser storage. No network.
+  tulip-wa languages          what --language accepts, and the near-names it maps
   tulip-wa chats              list chats you may message (if enabled)
   tulip-wa contact <number> <name>
                               ONLY when an operator has just given you a number
@@ -474,6 +478,37 @@ switch (command) {
     process.stdout.write(
       `${item.title} can now be messaged: ${item.url}\n` +
         `Use it like any other key — \`tulip-wa send --to ${item.url} "…"\`, or voice, image, file, gif.\n`,
+    );
+    break;
+  }
+
+  /**
+   * What `--language` will accept.
+   *
+   * Printed rather than remembered. The flag is required, the provider refuses
+   * anything it does not recognise outright, and a refused voice note arrives
+   * as text with no clue why — so the list has to be one command away at the
+   * moment of writing, not a thing to have read once.
+   */
+  case 'languages': {
+    var canonical = LANGUAGE_BOOSTS.filter((l) => l !== 'auto');
+    process.stdout.write(
+      'Languages for `--language` on a voice note. Spelling is exact:\n\n  '
+      + canonical.join(', ')
+      + '\n\n  auto — let the provider decide. It hears Filipino and Bisaya as Malay,\n'
+      + '         so do not use it for those.\n\n'
+      + 'These names are understood too, and map onto the value beside them:\n\n',
+    );
+    const grouped = new Map<string, string[]>();
+    for (const [alias, real] of Object.entries(LANGUAGE_ALIASES)) {
+      grouped.set(real, [...(grouped.get(real) ?? []), alias]);
+    }
+    for (const [real, aliases] of [...grouped].sort((a, b) => a[0].localeCompare(b[0]))) {
+      process.stdout.write(`  ${real.padEnd(12)} ${aliases.join(', ')}\n`);
+    }
+    process.stdout.write(
+      '\nCebuano, Bisaya and the rest are read with the Filipino mouth: the provider\n'
+      + 'has no voice of their own, and Filipino is far closer than English.\n',
     );
     break;
   }
