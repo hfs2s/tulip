@@ -1196,15 +1196,76 @@ function dayLabel(ts) {
   return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+/**
+ * One line in the thread.
+ *
+ * Juan does not get a bubble, and that is the whole difference between this
+ * reading as a conversation and reading as a log. A bubble on both sides is two
+ * machines exchanging packets; plain prose on the left, with a mark beside it,
+ * is somebody talking. It is also the practical shape: he writes paragraphs and
+ * lists, and a paragraph inside a chat bubble is a paragraph nobody finishes.
+ *
+ * So the left lane is the agent and the right lane is the humans — the person
+ * he is answering in a filled bubble, and an operator's typed line unfilled,
+ * because that one was never received by anybody.
+ */
 function msgNode(item, side, run) {
-  var msg = node('div', 'msg ' + side + (run ? ' run' : ''));
-  msg.appendChild(node('div', 'body', item.text));
-  msg.appendChild(node('span', 'at', hhmm(item.ts)));
-  return msg;
+  if (side !== 'juan') {
+    var msg = node('div', 'msg ' + side + (run ? ' run' : ''));
+    msg.appendChild(node('div', 'body', item.text));
+    msg.appendChild(node('span', 'at', hhmm(item.ts)));
+    return msg;
+  }
+
+  var said = node('div', 'said' + (run ? ' run' : ''));
+  var av = node('span', 'av', 'J');
+  av.setAttribute('aria-hidden', 'true');
+  said.appendChild(av);
+  var txt = node('div', 'txt');
+  prose(String(item.text || ''), txt);
+  txt.appendChild(node('span', 'at', hhmm(item.ts)));
+  said.appendChild(txt);
+  return said;
+}
+
+/**
+ * The agent's own words, as paragraphs rather than as one run-on line.
+ *
+ * He writes lists constantly, and HTML collapses the newlines that were doing
+ * the separating — so without this a reply arrives as a single sentence with
+ * dashes in the middle of it. Built with `inline()` throughout, so nothing here
+ * ever becomes markup: every value in this thread was typed by a stranger.
+ */
+function prose(text, into) {
+  var para = null;
+  var list = null;
+  function endList() { if (list) { into.appendChild(list); list = null; } }
+  function endPara() { if (para) { into.appendChild(para); para = null; } }
+
+  text.split('\n').forEach(function (raw) {
+    var line = raw.trim();
+    if (!line) { endPara(); endList(); return; }
+    var bullet = /^[-*•]\s+(.*)$/.exec(line);
+    if (bullet) {
+      endPara();
+      if (!list) list = node('ul');
+      inline(bullet[1], list.appendChild(node('li')));
+      return;
+    }
+    endList();
+    if (!para) para = node('p');
+    else para.appendChild(document.createTextNode(' '));
+    inline(line, para);
+  });
+  endPara();
+  endList();
+  return into;
 }
 
 function nameNode(name, lane) {
-  return node('span', 'said-by' + (lane === 'them' ? '' : ' mine') + (lane === 'op' ? ' op' : ''), name);
+  // Juan's mark is beside his words, so a name above them would say it twice.
+  if (lane === 'juan') return document.createDocumentFragment();
+  return node('span', 'said-by mine' + (lane === 'op' ? ' op' : ''), name);
 }
 
 function paintThread(view) {
@@ -1390,18 +1451,114 @@ function composer() {
   });
   row.appendChild(box);
 
-  var send = node('button', 'primary', 'Send');
+  var mic = micButton(box);
+  if (mic) row.appendChild(mic);
+
+  // An arrow rather than the word "Send". The button sits inside the field it
+  // belongs to, where a word would have to be read to be understood and a
+  // direction does not.
+  var send = node('button', 'sendbtn', '↑');
   send.type = 'button';
   send.id = 'chatSend';
+  send.title = 'Send';
+  send.setAttribute('aria-label', 'Send');
   send.addEventListener('click', function () { confirmSend(box); });
   row.appendChild(send);
   cap.appendChild(row);
 
+  var under = node('div', 'under');
+  var keys = node('span');
+  keys.appendChild(node('kbd', null, 'Enter'));
+  keys.appendChild(document.createTextNode(' to send · '));
+  keys.appendChild(node('kbd', null, 'Shift'));
+  keys.appendChild(document.createTextNode('+'));
+  keys.appendChild(node('kbd', null, 'Enter'));
+  keys.appendChild(document.createTextNode(' for a new line'));
+  under.appendChild(keys);
+  under.appendChild(node('span', 'sp'));
   var count = node('span', 'count', '');
   count.id = 'chatCount';
   count.setAttribute('aria-live', 'polite');
-  cap.appendChild(count);
+  under.appendChild(count);
+  cap.appendChild(under);
   return wrap;
+}
+
+/**
+ * Speak instead of typing.
+ *
+ * The browser's own Web Speech API — no dependency, no route, and no audio
+ * leaves this machine. Strictly additive: where the browser cannot transcribe
+ * (Firefox, and anything not on a secure origin) this returns null and no
+ * button is rendered at all, because a control that cannot work is worse than
+ * one that is missing.
+ *
+ * Written here against Tulip's own tokens rather than vendoring hfs2s's
+ * `dictate.js`: that file injects a stylesheet built on a different palette,
+ * so the button would arrive in another product's colours.
+ */
+function micButton(box) {
+  var Ctor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  if (!Ctor || window.isSecureContext === false) return null;
+
+  var b = node('button', 'micbtn');
+  b.type = 'button';
+  b.title = 'Dictate';
+  b.setAttribute('aria-label', 'Dictate');
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.7');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  ['M12 3.5a2.6 2.6 0 0 1 2.6 2.6v5.4a2.6 2.6 0 1 1-5.2 0V6.1A2.6 2.6 0 0 1 12 3.5z',
+    'M5.5 11a6.5 6.5 0 0 0 13 0', 'M12 17.5V21'].forEach(function (d) {
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  });
+  b.appendChild(svg);
+
+  var live = null;
+  var mark = box.value.length;
+
+  b.addEventListener('click', function () {
+    if (live) { live.stop(); return; }
+    var rec = new Ctor();
+    rec.lang = navigator.language || 'en-GB';
+    rec.continuous = true;
+    rec.interimResults = true;
+    // Where the caret was when recording began, so speech is inserted rather
+    // than appended over whatever was already typed.
+    mark = box.value.length;
+    var settled = '';
+    rec.onresult = function (ev) {
+      var interim = '';
+      for (var i = ev.resultIndex; i < ev.results.length; i++) {
+        var chunk = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) settled += chunk;
+        else interim += chunk;
+      }
+      var head = box.value.slice(0, mark);
+      var joiner = head && !/\s$/.test(head) ? ' ' : '';
+      box.value = (head + joiner + settled + interim).slice(0, 2000);
+      growBox(box);
+      paintCount(box);
+    };
+    rec.onerror = function (ev) {
+      if (ev.error !== 'aborted' && ev.error !== 'no-speech') {
+        toast(ev.error === 'not-allowed'
+          ? 'The browser would not give me the microphone.'
+          : 'Dictation stopped: ' + ev.error, true);
+      }
+    };
+    rec.onend = function () { live = null; b.classList.remove('on'); box.focus(); };
+    live = rec;
+    b.classList.add('on');
+    try { rec.start(); } catch (err) { live = null; b.classList.remove('on'); }
+  });
+  return b;
 }
 
 function growBox(box) {
@@ -1450,7 +1607,10 @@ function paintComposer(view) {
   line.textContent = says;
   var can = !!view && view.reporting && view.live && !blocked;
   send.disabled = !can;
-  send.textContent = can ? 'Send to ' + firstName(name) : 'Send';
+  // The arrow does not change; who it reaches is said above the box, where
+  // there is room for a name and for the reason it is refused.
+  send.title = can ? 'Send to ' + firstName(name) : 'Nothing to type into';
+  send.setAttribute('aria-label', send.title);
 }
 
 /** Enough of a name to address, short enough to sit on a button. */

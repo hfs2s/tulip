@@ -36,11 +36,18 @@ chown "$OWNER_UID":"$OWNER_UID" "$SOCKET_DIR"
 chmod 700 "$SOCKET_DIR"
 rm -f "$SOCKET"
 
-# `-W` is writable: this is meant to be typed into. That is the point of it and
-# also the reason for every permission above.
+# Read-only, deliberately. This pane is for *reading* the session when something
+# has gone wrong — a stack trace, a wedged turn, what the agent actually ran. It
+# is not where an operator talks to a conversation any more; the Chat page is,
+# and it types one reviewed line through `sendToChat` rather than handing
+# somebody a raw keyboard pointed at a stranger's chat.
+#
+# Dropping `--writable` is the whole control. With it, a keystroke in a browser
+# tab went straight into a live tmux session carrying every open conversation,
+# with no confirmation and no record of who typed it — and a mistyped one landed
+# in whichever chat happened to be focused.
 exec ttyd \
   --interface "$SOCKET" \
-  --writable \
   --ping-interval 30 \
   --client-option 'fontSize=13' \
   --client-option 'theme={"background":"#0d0d0f","foreground":"#fafafa","cursor":"#21d2ed"}' \

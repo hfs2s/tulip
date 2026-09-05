@@ -548,20 +548,45 @@
        border:1px solid var(--line-soft);background:var(--raise)}
   .msg .body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px;line-height:1.55}
   .msg .at{display:block;margin-top:3px;text-align:right;font-size:10.5px;color:var(--faint)}
-  .msg.them{align-self:flex-start;border-bottom-left-radius:5px}
-  .msg.juan{align-self:flex-end;border-bottom-right-radius:5px;
+  /* The humans are on the right: the person Juan is answering, filled, and an
+     operator's typed line unfilled — because that one was never received by
+     anybody, and a message that did not arrive must not look like one that
+     did. */
+  .msg.them{align-self:flex-end;border-bottom-right-radius:5px;
             background:var(--accent-dim);border-color:rgba(33,210,237,.3)}
-  /* Unfilled and amber: a line an operator typed at Juan's prompt. Nobody on
-     WhatsApp received it, and whether they ever hear anything about it is
-     Juan's decision rather than this panel's. */
   .msg.op{align-self:flex-end;border-bottom-right-radius:5px;
-          background:transparent;border-color:rgba(240,180,41,.45)}
+          background:transparent;border-style:dashed;border-color:rgba(240,180,41,.45)}
   .msg.op .at{color:var(--warn)}
+
+  /* ── Juan ──────────────────────────────────────────────────────────────────
+     The left lane, and no bubble. A bubble on both sides reads as two machines
+     exchanging packets; prose on the left with a mark beside it reads as
+     somebody talking. It is also the practical shape — he writes paragraphs and
+     lists, and a paragraph inside a chat bubble is one nobody finishes. */
+  .said{align-self:stretch;display:flex;gap:11px;align-items:flex-start;
+        max-width:min(70ch,94%)}
+  .av{width:25px;height:25px;flex:0 0 25px;margin-top:1px;border-radius:8px;
+      background:var(--raise);border:1px solid var(--line);color:var(--accent);
+      font-size:11.5px;font-weight:600;display:flex;align-items:center;
+      justify-content:center;user-select:none}
+  .said .txt{min-width:0;font-size:13.5px;line-height:1.6;color:var(--ink);
+             overflow-wrap:anywhere}
+  .said .txt p{margin:0 0 9px}
+  .said .txt p:last-of-type{margin-bottom:0}
+  .said .txt ul{margin:0 0 9px;padding-left:19px;list-style:disc}
+  .said .txt li{margin:0 0 4px}
+  .said .txt code{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
+                  font-size:.87em;background:var(--raise);border:1px solid var(--line-soft);
+                  border-radius:5px;padding:1px 5px}
+  .said .txt .at{display:block;margin-top:5px;text-align:left;
+                 font-size:10.5px;color:var(--faint)}
+  /* A second paragraph from the same voice sits closer than a change of voice. */
+  .said.run{margin-top:-4px}
+
   /* The name above a run, not on every bubble. Repeating it on each one is what
      makes a thread read as a table of rows rather than as somebody talking. */
-  .said-by{align-self:flex-start;margin:6px 0 -5px;padding:0 2px;
+  .said-by{align-self:flex-end;margin:6px 0 -5px;padding:0 2px;
            font-size:11px;color:var(--faint)}
-  .said-by.mine{align-self:flex-end}
   .said-by.op{color:var(--warn)}
   /* Consecutive lines from the same side, close together in time. */
   .msg.run{margin-top:-6px}
@@ -683,21 +708,51 @@
   .composer .why.bad .dot{background:var(--bad)}
   /* flex-end, so the button stays on the field's bottom edge as the box grows
      rather than drifting up the middle of it. */
-  .composer .row{display:flex;align-items:flex-end;gap:10px}
+  /* One box, with the controls inside it — the field and its buttons are one
+     object rather than a field with a button parked beside it. The border and
+     the focus ring belong to the box, so the whole thing lights up together. */
+  .composer .row{display:flex;align-items:flex-end;gap:8px;
+    background:var(--raise);border:1px solid var(--line);border-radius:14px;
+    padding:6px 6px 6px 15px;transition:border-color .16s ease}
+  .composer .row:focus-within{border-color:var(--accent)}
   .composer textarea{flex:1;min-width:0;display:block;resize:none;overflow-y:auto;
-    height:42px;min-height:42px;max-height:168px;
-    font:inherit;font-size:13.5px;line-height:1.5;color:var(--ink);
-    background:var(--raise);border:1px solid var(--line);border-radius:12px;padding:10px 13px}
+    min-height:24px;max-height:190px;padding:9px 0;
+    font:inherit;font-size:13.5px;line-height:1.55;color:var(--ink);
+    background:transparent;border:0}
   .composer textarea::placeholder{color:var(--faint)}
-  .composer textarea:focus{outline:none;border-color:var(--accent)}
-  .composer textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .composer textarea:disabled{opacity:.5;cursor:not-allowed}
-  .composer .row button{flex:0 0 auto;height:42px;padding:0 18px}
-  .composer .count{display:block;margin-top:6px;text-align:right;
-                   font-size:11px;color:var(--faint)}
-  /* It is empty for all but the last three hundred characters, and an empty
-     block still spends its own top margin on the composer's height. */
-  .composer .count:empty{display:none}
+  .composer textarea:focus{outline:none}
+  .composer textarea:disabled{opacity:.55;cursor:not-allowed}
+
+  /* Both buttons sit on the box's bottom edge so they stay put as the field
+     grows; the 1px is what puts a 34px circle's centre on a 36px one's. */
+  .composer .micbtn{flex:0 0 34px;width:34px;height:34px;padding:0;align-self:flex-end;
+    margin-bottom:1px;border-radius:var(--r-pill);display:flex;align-items:center;
+    justify-content:center;background:transparent;border:1px solid var(--line);
+    color:var(--dim);cursor:pointer;transition:border-color .16s ease,color .16s ease}
+  .composer .micbtn svg{width:16px;height:16px}
+  .composer .micbtn:hover:not(:disabled){color:var(--ink);border-color:var(--line-strong,var(--accent))}
+  .composer .micbtn:disabled{opacity:.45;cursor:not-allowed}
+  /* Recording is the one state that has to be unmistakable, because the room
+     can hear you and the screen is the only thing that says so. */
+  .composer .micbtn.on{border-color:var(--bad);color:var(--bad)}
+  .composer .micbtn.on svg{animation:micpulse 1.4s ease-in-out infinite}
+  @keyframes micpulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+  .composer .sendbtn{flex:0 0 36px;width:36px;height:36px;padding:0;align-self:flex-end;
+    border-radius:var(--r-pill);display:flex;align-items:center;justify-content:center;
+    font-size:16px;line-height:1;border:1px solid transparent;
+    background:var(--accent);color:#04252b;cursor:pointer;
+    transition:opacity .16s ease}
+  .composer .sendbtn:disabled{opacity:.32;cursor:not-allowed}
+  .composer .sendbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* What you can press, where you look for it. */
+  .composer .under{display:flex;align-items:center;gap:9px;margin-top:8px;
+    font-size:11.5px;color:var(--faint)}
+  .composer .under .sp{flex:1}
+  .composer .under kbd{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
+    font-size:10.5px;border:1px solid var(--line);border-radius:5px;
+    padding:1px 5px;background:var(--raise);color:var(--dim)}
   .composer .count.near{color:var(--warn)}
 
   @media (max-width:900px){
