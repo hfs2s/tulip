@@ -193,6 +193,30 @@ export const CurrentTurn = z
     /** Path to the batch, relative to the inbound mount. */
     batch: z.string().regex(/^batches\/[0-9a-f-]{36}\.json$/),
     startedAt: z.string().datetime(),
+    /**
+     * Which capabilities are switched on for this turn.
+     *
+     * Advisory, and deliberately so: the bridge refuses a switched-off action
+     * whatever this says, because it is written into a file the agent reads and
+     * a compromised agent could ignore it entirely. It is here to stop the
+     * *honest* failure, which is the common one — the agent plans a reply
+     * around a GIF, sends the action, and gets nothing back, because a refusal
+     * on the bridge side is invisible from inside the container.
+     *
+     * Each field defaults to `true` so a `current.json` written by an older
+     * bridge still parses. That is the safe direction: the agent tries, and the
+     * bridge — which reads the real config — refuses.
+     */
+    can: z
+      .object({
+        voice: z.boolean().default(true),
+        images: z.boolean().default(true),
+        gifs: z.boolean().default(true),
+        search: z.boolean().default(true),
+        crossChat: z.boolean().default(true),
+      })
+      .strict()
+      .default({}),
   })
   .strict();
 

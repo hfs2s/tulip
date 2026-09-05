@@ -72,7 +72,11 @@ async function main(): Promise<void> {
     },
     paths.senders,
   );
-  const turns = new TurnRegistry(config.limits.turnTimeoutMs, config.limits.outboundPerTurn);
+  const turns = new TurnRegistry(
+    config.limits.turnTimeoutMs,
+    config.limits.outboundPerTurn,
+    config.limits.toolsPerTurn,
+  );
   const wa = new WhatsApp();
 
   // `dispatcher` is referenced by things constructed before it, so it is passed

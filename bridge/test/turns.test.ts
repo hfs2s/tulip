@@ -107,7 +107,9 @@ describe('TurnRegistry — expiry', () => {
   });
 
   it('evicts oldest-first when over capacity', () => {
-    const turns = new TurnRegistry(TTL, MAX_SENDS, 10);
+    // (ttl, maxSends, maxTools, capacity) — capacity moved along one when
+    // tools got a budget of their own.
+    const turns = new TurnRegistry(TTL, MAX_SENDS, 24, 10);
     const first = turns.open('first@s.whatsapp.net', 'aaaaaaaaaaaaaaaa', T0);
     for (let i = 0; i < 20; i++) turns.open(`${i}@s.whatsapp.net`, 'aaaaaaaaaaaaaaaa', T0);
     expect(turns.size).toBe(10);

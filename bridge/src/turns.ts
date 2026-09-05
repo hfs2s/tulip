@@ -44,12 +44,36 @@ export interface Turn {
   readonly fromOperator: boolean;
   /** Sends already performed for this turn, against `limits.outboundPerTurn`. */
   sends: number;
+  /**
+   * Tool requests performed for this turn, against `limits.toolsPerTurn`.
+   *
+   * Counted separately from `sends` because the two bound different things and
+   * sharing one number made both wrong. A search, a page publish and a memory
+   * write deliver nothing to anybody, so spending the reply allowance on them
+   * meant the workflow the persona actually recommends — a page with five
+   * pictures — cost exactly the eight sends a turn is allowed, and the reply
+   * carrying the link was refused as "send limit reached".
+   *
+   * They still need a ceiling of their own: they leave the deployment or spend
+   * money, and nothing else bounds a loop of them. The comment in `outbox.ts`
+   * claimed for a long time that they were "rate-limited by turn instead",
+   * which was not true of any code — this is that limit, written.
+   */
+  tools: number;
   closedAt: number | null;
 }
 
 export type Resolution =
   | { ok: true; turn: Turn }
-  | { ok: false; reason: 'unknown' | 'expired' | 'send limit reached' };
+  | { ok: false; reason: 'unknown' | 'expired' | 'send limit reached' | 'tool limit reached' };
+
+/**
+ * Which of a turn's two budgets an action spends.
+ *
+ * `send` reaches a person; `tool` leaves the deployment or spends money but
+ * delivers nothing; `free` does neither.
+ */
+export type Cost = 'send' | 'tool' | 'free';
 
 /**
  * Bounded, expiring store of open turns.
@@ -66,6 +90,8 @@ export class TurnRegistry {
     private readonly ttlMs: number,
     /** Sends permitted per turn. */
     private readonly maxSends: number,
+    /** Tool requests permitted per turn, counted separately from sends. */
+    private readonly maxTools: number = 24,
     /** Turns retained before the oldest is evicted. */
     private readonly capacity = 512,
   ) {}
@@ -79,6 +105,7 @@ export class TurnRegistry {
       openedAt: now,
       fromOperator,
       sends: 0,
+      tools: 0,
       closedAt: null,
     };
     this.turns.set(turn.turnId, turn);
@@ -99,12 +126,17 @@ export class TurnRegistry {
    * looked up rather than parsed, and a miss is a refusal with no detail. The
    * caller sends only to `turn.chatJid`, never to anything in the action.
    */
-  resolve(turnId: unknown, now: number): Resolution {
+  resolve(turnId: unknown, now: number, cost: Cost = 'send'): Resolution {
     if (typeof turnId !== 'string') return { ok: false, reason: 'unknown' };
     const turn = this.turns.get(turnId);
     if (!turn) return { ok: false, reason: 'unknown' };
     if (now - turn.openedAt > this.ttlMs) return { ok: false, reason: 'expired' };
-    if (turn.sends >= this.maxSends) return { ok: false, reason: 'send limit reached' };
+    // Which budget applies is a property of the action, so the caller says.
+    // `free` is for actions that deliver nothing and cost nothing — the typing
+    // indicator — which must stay resolvable after either budget is spent, or
+    // the indicator sticks on for the rest of the turn.
+    if (cost === 'send' && turn.sends >= this.maxSends) return { ok: false, reason: 'send limit reached' };
+    if (cost === 'tool' && turn.tools >= this.maxTools) return { ok: false, reason: 'tool limit reached' };
     return { ok: true, turn };
   }
 
@@ -112,6 +144,12 @@ export class TurnRegistry {
   countSend(turnId: string): void {
     const turn = this.turns.get(turnId);
     if (turn) turn.sends += 1;
+  }
+
+  /** Count a performed tool request against this turn's separate allowance. */
+  countTool(turnId: string): void {
+    const turn = this.turns.get(turnId);
+    if (turn) turn.tools += 1;
   }
 
   /** The turn currently open for a chat, if any. Used by the typing indicator. */

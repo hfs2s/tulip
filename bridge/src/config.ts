@@ -126,6 +126,16 @@ const Limits = z
     newSendersPerHour: z.number().int().min(1).max(1000).default(30),
     /** Bounds a compromised agent as much as a chatty one. */
     outboundPerTurn: z.number().int().min(1).max(100).default(8),
+    /**
+     * Tool requests permitted per turn — searches, page writes, memory notes.
+     *
+     * Separate from `outboundPerTurn` because they bound different things.
+     * These reach nobody, so they must not spend the allowance for replies: the
+     * five-picture page the persona recommends used to cost all eight sends
+     * before the message carrying the link was written. They still need a
+     * ceiling, because nothing else stops a loop of them.
+     */
+    toolsPerTurn: z.number().int().min(1).max(200).default(24),
     outboundPerChatPerHour: z.number().int().min(1).max(1000).default(60),
     /**
      * The three capabilities billed per use, capped across everybody rather

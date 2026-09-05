@@ -93,6 +93,7 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0
 
 interface Harness {
   outbox: { drain: () => Promise<void> };
+  remembered: () => number;
   chats: {
     keyFor: (jid: string, isGroup: boolean, now: number, altJid?: string | null) => string;
     setBlocked: (k: string, b: boolean) => boolean;
@@ -142,7 +143,12 @@ async function harness(overrides: Record<string, unknown> = {}): Promise<Harness
   });
 
   const chats = new ChatRegistry(join(root, 'salt'), join(root, 'chats.json'));
-  const turns = new TurnRegistry(600_000, 50);
+  // From config, so a test that sets a limit actually gets it.
+  const turns = new TurnRegistry(
+    config.limits.turnTimeoutMs,
+    config.limits.outboundPerTurn,
+    config.limits.toolsPerTurn,
+  );
   const limiter = new Limiter({
     messagesPerHour: 1000,
     burst: 50,
@@ -184,6 +190,15 @@ async function harness(overrides: Record<string, unknown> = {}): Promise<Harness
     chats: chats as never,
     turns: turns as never,
     configFile,
+    /** How many notes actually reached the memory file the bridge writes. */
+    remembered: () => {
+      try {
+        const file = JSON.parse(readFileSync(inPaths.memory, 'utf8')) as { notes?: unknown[] };
+        return file.notes?.length ?? 0;
+      } catch {
+        return 0;
+      }
+    },
     emitted,
     queue: (action) => {
       const id = randomUUID();
@@ -723,5 +738,119 @@ describe('the ledger', () => {
 
     expect(sent).toHaveLength(1);
     expect(existsSync(join(process.env['TULIP_OUT_DIR'] ?? '', 'actions'))).toBe(true);
+  });
+});
+
+/**
+ * A switched-off capability must not end a turn in silence.
+ *
+ * The failure was live and armed rather than theoretical: `gifs` was off in
+ * production while the persona had a section telling the agent it could send
+ * them. `refuse()` logged, wrote a feed event an operator would read, and sent
+ * nothing — and because `wa-cli` marks a turn as spoken the moment it queues an
+ * action, the Stop hook would not relay a closing remark either. The person on
+ * the other end got nothing at all, which is the one outcome the brief forbids.
+ */
+describe('a capability that is switched off', () => {
+  it('says the voice note in words rather than sending nothing', async () => {
+    const h = await harness({ agent: { crossChat: true, voice: false, contacts: [] } });
+    const now = Date.now();
+    const mine = h.chats.keyFor(PHONE, false, now);
+    const turn = h.turns.open(PHONE, mine, now);
+
+    h.queue({ turnId: turn.turnId, kind: 'voice', text: 'Kumusta, I got all of that' });
+    await h.outbox.drain();
+
+    // Lossless: the words that would have been spoken are the words sent.
+    expect(sent).toEqual([{ method: 'text', jid: PHONE, detail: 'Kumusta, I got all of that' }]);
+  });
+
+  it('falls back to a picture’s caption, which is usually the actual sentence', async () => {
+    const h = await harness({ agent: { crossChat: true, images: false, contacts: [] } });
+    const now = Date.now();
+    const mine = h.chats.keyFor(PHONE, false, now);
+    const turn = h.turns.open(PHONE, mine, now);
+
+    h.queue({ turnId: turn.turnId, kind: 'image', prompt: 'a tulip', caption: 'here is the one I meant' });
+    await h.outbox.drain();
+
+    expect(sent).toEqual([{ method: 'text', jid: PHONE, detail: 'here is the one I meant' }]);
+  });
+
+  it('invents nothing when there are no words to fall back to', async () => {
+    const h = await harness({ agent: { crossChat: true, gifs: false, contacts: [] } });
+    const now = Date.now();
+    const mine = h.chats.keyFor(PHONE, false, now);
+    const turn = h.turns.open(PHONE, mine, now);
+
+    h.queue({ turnId: turn.turnId, kind: 'gif', query: 'celebration', caption: null });
+    await h.outbox.drain();
+
+    // A bare GIF really is decoration. What must never be lost is a reply.
+    expect(sent).toEqual([]);
+  });
+});
+
+/**
+ * Two budgets, not one.
+ *
+ * `outboundPerTurn` bounds what a turn may put in front of a person. Tool
+ * requests deliver nothing, and charging them to that budget meant the page
+ * workflow the persona recommends — page-new, five pictures, publish — spent
+ * all eight sends before the message carrying the link was written, and that
+ * message was then refused as "send limit reached".
+ */
+describe('a turn’s two allowances', () => {
+  it('does not let tool requests consume the reply allowance', async () => {
+    const h = await harness({ limits: { outboundPerTurn: 2 } });
+    const now = Date.now();
+    const mine = h.chats.keyFor(PHONE, false, now);
+    const turn = h.turns.open(PHONE, mine, now);
+
+    // Four things that reach nobody: they must not cost a send.
+    for (const text of ['one', 'two', 'three', 'four']) {
+      h.queue({ turnId: turn.turnId, kind: 'remember', text });
+    }
+    await h.outbox.drain();
+    expect(sent).toEqual([]);
+
+    // The two replies the turn is entitled to still get through.
+    h.queue({ turnId: turn.turnId, kind: 'text', text: 'first' });
+    await h.outbox.drain();
+    h.queue({ turnId: turn.turnId, kind: 'text', text: 'second' });
+    await h.outbox.drain();
+
+    expect(sent.map((s) => s.detail)).toEqual(['first', 'second']);
+  });
+
+  it('still stops a turn sending more than its share', async () => {
+    const h = await harness({ limits: { outboundPerTurn: 1 } });
+    const now = Date.now();
+    const mine = h.chats.keyFor(PHONE, false, now);
+    const turn = h.turns.open(PHONE, mine, now);
+
+    h.queue({ turnId: turn.turnId, kind: 'text', text: 'allowed' });
+    await h.outbox.drain();
+    h.queue({ turnId: turn.turnId, kind: 'text', text: 'over the line' });
+    await h.outbox.drain();
+
+    expect(sent.map((s) => s.detail)).toEqual(['allowed']);
+  });
+
+  it('bounds tool requests too, so a loop cannot run forever', async () => {
+    const h = await harness({ limits: { toolsPerTurn: 3, outboundPerTurn: 8 } });
+    const now = Date.now();
+    const mine = h.chats.keyFor(PHONE, false, now);
+    const turn = h.turns.open(PHONE, mine, now);
+
+    for (let i = 0; i < 12; i++) h.queue({ turnId: turn.turnId, kind: 'remember', text: `note ${String(i)}` });
+    await h.outbox.drain();
+
+    // Three got through; the rest were refused as unroutable, not performed.
+    expect(h.remembered()).toBe(3);
+    // And the turn can still answer, because the two budgets are separate.
+    h.queue({ turnId: turn.turnId, kind: 'text', text: 'and here is what I found' });
+    await h.outbox.drain();
+    expect(sent.map((s) => s.detail)).toEqual(['and here is what I found']);
   });
 });

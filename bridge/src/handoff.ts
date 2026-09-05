@@ -16,6 +16,7 @@
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { AgentStatus, InboxBatch, CurrentTurn, UsageReport, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
 import type {
+  CurrentTurn as CurrentTurnType,
   InboxBatch as InboxBatchType,
   AgentStatus as AgentStatusType,
   UsageReport as UsageReportType,
@@ -36,7 +37,7 @@ export function ensureHandoffDirs(): void {
  * pointer to a file that is not there yet. Both writes are atomic, so it can
  * never read half of either.
  */
-export function publishTurn(batch: InboxBatchType): void {
+export function publishTurn(batch: InboxBatchType, can?: CurrentTurnType['can']): void {
   const validated = InboxBatch.parse(batch);
   writeJsonAtomic(inPaths.batch(validated.turnId), validated, 0o644);
 
@@ -47,6 +48,9 @@ export function publishTurn(batch: InboxBatchType): void {
     isGroup: validated.isGroup,
     batch: `batches/${validated.turnId}.json`,
     startedAt: new Date().toISOString(),
+    // Omitted rather than guessed when the caller does not say: every field
+    // defaults to on, and the bridge refuses for real regardless.
+    ...(can === undefined ? {} : { can }),
   });
   writeJsonAtomic(inPaths.current, current, 0o644);
 }

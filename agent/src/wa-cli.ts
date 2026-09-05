@@ -107,6 +107,35 @@ function ancestors(from: string): string[] {
   return out;
 }
 
+/**
+ * Refuse a capability the operator has switched off, here rather than silently.
+ *
+ * The bridge refuses these for real; this exists because its refusal is
+ * *invisible from inside this container*. An action is fire-and-forget, so a
+ * switched-off `gif` used to be written, dropped, and never mentioned — and
+ * because `queue()` had already marked the turn as spoken, the closing remark
+ * was not relayed either. The turn ended in complete silence, which the brief
+ * forbids, over a capability nobody had told the agent was off.
+ *
+ * Read from `current.json`, which the bridge writes for this turn. Missing or
+ * unreadable means carry on: the bridge is the authority and will say no.
+ */
+function requireCapability(name: 'voice' | 'images' | 'gifs' | 'search' | 'crossChat', verb: string): void {
+  let can: Record<string, unknown>;
+  try {
+    const current = JSON.parse(readFileSync(inPaths.current, 'utf8')) as { can?: Record<string, unknown> };
+    can = current.can ?? {};
+  } catch {
+    return; // no pointer, or unreadable — let the bridge decide
+  }
+  if (can[name] === false) {
+    die(
+      `tulip-wa ${verb}: ${name} is switched off by the operator, so nothing was sent. ` +
+        'Say what you meant in words instead — do not leave them with silence.',
+    );
+  }
+}
+
 function queue(action: Record<string, unknown>): string {
   const id = randomUUID();
   const { dir, turnId } = currentWorkspace();
@@ -336,6 +365,7 @@ switch (command) {
   }
 
   case 'gif': {
+    requireCapability('gifs', 'gif');
     const { chatKey, rest: words } = takeDestination(rest, 'gif');
     // A search phrase, not a URL — you have no internet. The bridge does the
     // searching and the fetching; you only say what you are looking for.
@@ -348,6 +378,7 @@ switch (command) {
   }
 
   case 'image': {
+    requireCapability('images', 'image');
     const { chatKey, rest: words } = takeDestination(rest, 'image');
     const idx = words.indexOf('--caption');
     const caption = idx === -1 ? null : words.slice(idx + 1).join(' ') || null;
@@ -358,6 +389,7 @@ switch (command) {
   }
 
   case 'voice': {
+    requireCapability('voice', 'voice');
     const { chatKey, rest: words } = takeDestination(rest, 'voice');
     // Every remaining argument is about to be read aloud, so an unrecognised
     // one is refused rather than spoken. This is the guard that would have

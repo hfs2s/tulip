@@ -435,6 +435,16 @@ export class Dispatcher extends EventEmitter {
       isGroup: last.envelope.isGroup,
       receivedAt: new Date(now).toISOString(),
       messages,
+    },
+    // What is actually switched on, read from live config at the moment the
+    // turn is published. The agent uses it to avoid planning a reply around
+    // something it cannot do; the bridge still refuses for real either way.
+    {
+      voice: this.deps.config.agent.voice,
+      images: this.deps.config.agent.images,
+      gifs: this.deps.config.agent.gifs,
+      search: this.deps.config.agent.search,
+      crossChat: this.deps.config.agent.crossChat,
     });
 
     this.inFlight = { turnId: turn.turnId, chatKey, startedAt: now };

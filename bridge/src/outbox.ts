@@ -43,7 +43,7 @@ import { imageCount, MAX_IMAGES_PER_PAGE, publishPage, scaffoldPage, usesKit, wr
 import { addContact } from './contacts.js';
 import { remember } from './memory.js';
 import type { Limiter } from './ratelimit.js';
-import type { Turn, TurnRegistry } from './turns.js';
+import type { Cost, Turn, TurnRegistry } from './turns.js';
 import type { Config } from './config.js';
 import type { ChatRegistry } from './chats.js';
 import type { WhatsApp } from './whatsapp.js';
@@ -263,6 +263,24 @@ export interface OutboxDeps {
  * filesystem and driver. A one-second delay is a much smaller problem than a
  * reply that is never sent.
  */
+/**
+ * Actions that put something in front of a person.
+ *
+ * These spend the turn's send allowance and the destination's outbound rate.
+ * Everything else either delivers nothing (`search`, `page`, `remember`,
+ * `contact` …) or costs nothing at all (`typing`), and charging them here was
+ * a real bug rather than an over-cautious default: the five-picture page the
+ * persona recommends spent all eight of a turn's sends before the message
+ * carrying the link was written, and that message was then refused.
+ */
+const DELIVERS: ReadonlySet<string> = new Set(['text', 'sendTo', 'file', 'gif', 'image', 'voice', 'react']);
+
+/** What one action costs its turn. `typing` is cosmetic and free. */
+function costOf(kind: string): Cost {
+  if (kind === 'typing') return 'free';
+  return DELIVERS.has(kind) ? 'send' : 'tool';
+}
+
 export class Outbox extends EventEmitter {
   private readonly attempts = new Map<string, number>();
   private draining = false;
@@ -381,9 +399,37 @@ export class Outbox extends EventEmitter {
    * an operator having turned pictures off look identical from the outside, and
    * only one of them is worth investigating.
    */
-  private refuse(capability: string): void {
-    log('outbox.capabilityOff', { capability });
+  /**
+   * A capability the operator has switched off.
+   *
+   * This used to log, write a feed event, and stop — both of which an operator
+   * reads and neither of which the person waiting sees. Worse, `wa-cli` has
+   * already written its `spoke` marker by the time an action reaches here, so
+   * the Stop hook does not relay a closing message either: with `gifs` off, the
+   * first time the agent reached for one the turn ended in complete silence,
+   * which is the single outcome its brief forbids.
+   *
+   * So a refusal now falls back to whatever words already exist. A voice note
+   * has its own text — the fallback is lossless, and the same one synthesis
+   * failure already used. A picture or a GIF has a caption or it has nothing,
+   * and a caption is usually the sentence the media was illustrating.
+   *
+   * Nothing is invented where there are no words: a bare `gif` with no caption
+   * really is decoration, and the existing gif-failure path already drops it on
+   * the grounds that a missing GIF must never cost somebody their reply. What
+   * must not happen is a *reply* being lost, and that is what this prevents.
+   */
+  private async refuse(
+    capability: string,
+    dest: { jid: string; key: string },
+    fallback: string | null,
+  ): Promise<void> {
+    log('outbox.capabilityOff', { capability, spoken: fallback !== null });
     feed.event('capability.off', `${capability} is switched off; the agent asked for it`);
+    const words = (fallback ?? '').trim();
+    if (words.length === 0) return;
+    await this.deps.wa.sendText(dest.jid, words.slice(0, 4000));
+    feed.outbound(dest.key, 'text', words);
   }
 
   /** Answer a `chats` request on the inbound volume, like a search result. */
@@ -530,7 +576,8 @@ export class Outbox extends EventEmitter {
    */
   private async perform(action: OutboxActionType): Promise<void> {
     const now = Date.now();
-    const resolution = this.deps.turns.resolve(action.turnId, now);
+    const cost = costOf(action.kind);
+    const resolution = this.deps.turns.resolve(action.turnId, now, cost);
     if (!resolution.ok) {
       log('outbox.unroutable', { id: action.id, kind: action.kind, reason: resolution.reason });
       return; // dropped, not retried: an unroutable turn never becomes routable
@@ -548,19 +595,24 @@ export class Outbox extends EventEmitter {
       dest = { jid: target.jid, key: target.key, crossed: true };
     }
 
-    // Typing is cosmetic and uncounted; everything else spends allowance.
+    // Only something a person receives spends the outbound rate, and it is
+    // charged to the *destination* — the chat being written into. It used to be
+    // charged to the turn's chat, so a cross-chat send spent the sender's
+    // budget and the recipient had no ceiling of their own; one conversation
+    // could be used to flood another.
     //
-    // Charged to the *destination*, which is the chat being written into. It
-    // used to be charged to the turn's chat, so a cross-chat send spent the
-    // sender's budget and the recipient had no ceiling of their own — one
-    // conversation could be used to flood another.
-    if (action.kind !== 'typing') {
+    // A tool request delivers nothing, so it spends the turn's separate tool
+    // budget instead and no chat's rate at all. Both budgets exist; neither is
+    // the other's spare capacity.
+    if (cost === 'send') {
       const allowance = this.deps.limiter.admitOutbound(dest.key, now);
       if (!allowance.ok) {
         log('outbox.throttled', { chatKey: dest.key, reason: allowance.reason });
         return;
       }
       this.deps.turns.countSend(action.turnId);
+    } else if (cost === 'tool') {
+      this.deps.turns.countTool(action.turnId);
     }
 
     switch (action.kind) {
@@ -587,7 +639,7 @@ export class Outbox extends EventEmitter {
         break;
       }
       case 'gif': {
-        if (!this.deps.config.agent.gifs) return this.refuse('gifs');
+        if (!this.deps.config.agent.gifs) return this.refuse('gifs', dest, action.caption);
         const gif = await findGif(action.query, {
           apiKey: process.env['GIPHY_API_KEY'] ?? '',
           rating: (process.env['GIPHY_RATING'] as Rating | undefined) ?? 'pg',
@@ -606,7 +658,10 @@ export class Outbox extends EventEmitter {
       }
       // Tool requests. These do not send anybody a message, so they are not
       // charged against the outbound allowance above — but they do leave the
-      // deployment, which is why they are rate-limited by turn instead.
+      // deployment, which is why they are rate-limited by turn instead, against
+      // `limits.toolsPerTurn`. That sentence was true of no code for a long
+      // time: everything but `typing` was charged as a send, and this comment
+      // was the only place the intended design was written down.
       case 'search': {
         if (!this.deps.config.agent.search) {
           await this.answer(action.id, 'search', { ok: false, error: 'web search is switched off by the operator' });
@@ -648,7 +703,18 @@ export class Outbox extends EventEmitter {
       }
 
       case 'pageImage': {
-        if (!this.deps.config.agent.images) return this.refuse('images');
+        // Answered rather than spoken: this one the agent waits for, so telling
+        // it is both possible and better — it can write the page without the
+        // picture instead of stopping. The other three are fire-and-forget.
+        if (!this.deps.config.agent.images) {
+          log('outbox.capabilityOff', { capability: 'images', spoken: false });
+          feed.event('capability.off', 'images is switched off; the agent asked for it');
+          await this.answer(action.id, 'page', {
+            ok: false,
+            error: 'pictures are switched off by the operator — write the page without one',
+          });
+          break;
+        }
         if (imageCount(action.slug) >= MAX_IMAGES_PER_PAGE) {
           await this.answer(action.id, 'page', {
             ok: false,
@@ -809,7 +875,7 @@ export class Outbox extends EventEmitter {
       }
 
       case 'image': {
-        if (!this.deps.config.agent.images) return this.refuse('images');
+        if (!this.deps.config.agent.images) return this.refuse('images', dest, action.caption);
         // Claimed before the request, so a slow provider cannot let two through
         // the same last unit of the day's allowance.
         if (!claim('images', this.deps.config.limits.imagesPerDay)) {
@@ -832,7 +898,7 @@ export class Outbox extends EventEmitter {
       }
 
       case 'voice': {
-        if (!this.deps.config.agent.voice) return this.refuse('voice');
+        if (!this.deps.config.agent.voice) return this.refuse('voice', dest, action.text);
         // Metered like pictures, and for the same reason: synthesis is billed
         // per call. This was unmetered while voice could only ever answer the
         // person in front of it, which bounded it by the conversation; a voice
