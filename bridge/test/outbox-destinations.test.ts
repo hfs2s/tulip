@@ -55,7 +55,6 @@ let sent: Array<{ method: string; jid: string; detail?: string }> = [];
  */
 let voiceOutcome: unknown = { ok: true, data: Buffer.from('ogg') };
 let imageOutcome: unknown = { ok: true, data: Buffer.from('png') };
-let gifOutcome: unknown = { ok: true, video: Buffer.from('mp4'), title: 'a cat' };
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -70,9 +69,6 @@ vi.mock('../src/minimax.js', () => ({
   generateImage: vi.fn(async () => imageOutcome),
 }));
 
-vi.mock('../src/giphy.js', () => ({
-  findGif: vi.fn(async () => gifOutcome),
-}));
 
 vi.mock('../src/mediaStore.js', () => ({ retainOutbound: vi.fn() }));
 
@@ -138,7 +134,7 @@ async function harness(overrides: Record<string, unknown> = {}): Promise<Harness
 
   const config = parseConfig({
     operators: { numbers: ['15551110000'] },
-    agent: { crossChat: true, voice: true, images: true, gifs: true, contacts: [] },
+    agent: { crossChat: true, voice: true, images: true, contacts: [] },
     ...overrides,
   });
 
@@ -168,7 +164,6 @@ async function harness(overrides: Record<string, unknown> = {}): Promise<Harness
     sendVoice: record('voice'),
     sendImage: record('image'),
     sendFile: record('file'),
-    sendGif: record('gif'),
     react: record('react'),
     typing: record('typing'),
   };
@@ -226,7 +221,6 @@ beforeEach(() => {
   sent = [];
   voiceOutcome = { ok: true, data: Buffer.from('ogg') };
   imageOutcome = { ok: true, data: Buffer.from('png') };
-  gifOutcome = { ok: true, video: Buffer.from('mp4'), title: 'a cat' };
 });
 
 describe('a named destination', () => {
@@ -260,7 +254,6 @@ describe('a named destination', () => {
   // that differs, which is the property the threat model rests on.
   it.each([
     ['image', { kind: 'image', prompt: 'a tulip', caption: null }, 'image'],
-    ['gif', { kind: 'gif', query: 'cat', caption: null }, 'gif'],
     ['file', { kind: 'file', file: 'chart.png', caption: null }, 'file'],
     ['sendTo', { kind: 'sendTo', text: 'passing this on' }, 'text'],
   ])('routes %s to the named chat', async (_label, action, method) => {
@@ -306,7 +299,6 @@ describe('a named destination', () => {
 
   it.each([
     ['image', { kind: 'image', prompt: 'a tulip', caption: null }],
-    ['gif', { kind: 'gif', query: 'cat', caption: null }],
     ['file', { kind: 'file', file: 'chart.png', caption: null }],
   ])('sends %s home when no chat is named', async (_label, action) => {
     const h = await harness();
@@ -357,7 +349,7 @@ describe('a destination the bridge will not resolve', () => {
   });
 
   it('refuses every medium when the operator’s switch is off', async () => {
-    const h = await harness({ agent: { crossChat: false, voice: true, images: true, gifs: true, contacts: [] } });
+    const h = await harness({ agent: { crossChat: false, voice: true, images: true, contacts: [] } });
     h.stage('chart.png', PNG);
     const now = Date.now();
     const mine = h.chats.keyFor(PHONE, false, now);
@@ -508,7 +500,7 @@ describe('the fallbacks follow the destination', () => {
 
   it('sends the words as text to the named chat when the day’s voice allowance is spent', async () => {
     const h = await harness({
-      agent: { crossChat: true, voice: true, images: true, gifs: true, contacts: [] },
+      agent: { crossChat: true, voice: true, images: true, contacts: [] },
       limits: { voicePerDay: 0 },
     });
     const now = Date.now();
@@ -525,7 +517,7 @@ describe('the fallbacks follow the destination', () => {
   // Same shape, one verb along: the "allowance spent" apology is a send too.
   it('tells the named chat, not the turn’s, when the picture allowance is spent', async () => {
     const h = await harness({
-      agent: { crossChat: true, voice: true, images: true, gifs: true, contacts: [] },
+      agent: { crossChat: true, voice: true, images: true, contacts: [] },
       limits: { imagesPerDay: 0 },
     });
     const now = Date.now();
@@ -744,7 +736,7 @@ describe('the ledger', () => {
 /**
  * A switched-off capability must not end a turn in silence.
  *
- * The failure was live and armed rather than theoretical: `gifs` was off in
+ * The failure was live and armed rather than theoretical: a capability was off in
  * production while the persona had a section telling the agent it could send
  * them. `refuse()` logged, wrote a feed event an operator would read, and sent
  * nothing — and because `wa-cli` marks a turn as spoken the moment it queues an
@@ -778,15 +770,16 @@ describe('a capability that is switched off', () => {
   });
 
   it('invents nothing when there are no words to fall back to', async () => {
-    const h = await harness({ agent: { crossChat: true, gifs: false, contacts: [] } });
+    // A picture with no caption carries nothing sayable. What must never be
+    // lost is a reply; decoration without words is allowed to be dropped.
+    const h = await harness({ agent: { crossChat: true, images: false, contacts: [] } });
     const now = Date.now();
     const mine = h.chats.keyFor(PHONE, false, now);
     const turn = h.turns.open(PHONE, mine, now);
 
-    h.queue({ turnId: turn.turnId, kind: 'gif', query: 'celebration', caption: null });
+    h.queue({ turnId: turn.turnId, kind: 'image', prompt: 'a party', caption: null });
     await h.outbox.drain();
 
-    // A bare GIF really is decoration. What must never be lost is a reply.
     expect(sent).toEqual([]);
   });
 });

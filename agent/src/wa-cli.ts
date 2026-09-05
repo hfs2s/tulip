@@ -62,8 +62,6 @@ const USAGE = `usage:
                               you can then message. Refused from anybody else.
   tulip-wa search <query>     search the web (waits for the answer)
   tulip-wa fetch <url>        read one page (waits for the answer)
-  tulip-wa gif <search> [--caption "…"]
-                              find and send an animated GIF
   tulip-wa react <emoji>      react to their most recent message
   tulip-wa typing on|off      show or clear the typing indicator
   tulip-wa quiet              deliberately say nothing this turn
@@ -130,7 +128,7 @@ function ancestors(from: string): string[] {
  * Read from `current.json`, which the bridge writes for this turn. Missing or
  * unreadable means carry on: the bridge is the authority and will say no.
  */
-function requireCapability(name: 'voice' | 'images' | 'gifs' | 'search' | 'crossChat', verb: string): void {
+function requireCapability(name: 'voice' | 'images' | 'search' | 'crossChat', verb: string): void {
   let can: Record<string, unknown>;
   try {
     const current = JSON.parse(readFileSync(inPaths.current, 'utf8')) as { can?: Record<string, unknown> };
@@ -369,19 +367,6 @@ switch (command) {
     break;
   }
 
-  case 'gif': {
-    requireCapability('gifs', 'gif');
-    const { chatKey, rest: words } = takeDestination(rest, 'gif');
-    // A search phrase, not a URL — you have no internet. The bridge does the
-    // searching and the fetching; you only say what you are looking for.
-    const idx = words.indexOf('--caption');
-    const caption = idx === -1 ? null : words.slice(idx + 1).join(' ') || null;
-    const query = (idx === -1 ? words : words.slice(0, idx)).join(' ').trim();
-    if (query.length === 0) die('tulip-wa gif: need something to search for');
-    queue({ kind: 'gif', chatKey, query: query.slice(0, 100), caption });
-    break;
-  }
-
   case 'image': {
     requireCapability('images', 'image');
     const { chatKey, rest: words } = takeDestination(rest, 'image');
@@ -597,7 +582,7 @@ switch (command) {
       break;
     }
 
-    process.stdout.write('Chats you may message with `--to <key>` (send, voice, image, file or gif):\n');
+    process.stdout.write('Chats you may message with `--to <key>` (send, voice, image or file):\n');
     for (const item of result.items) {
       const note = item.text === 'contact' ? 'contact — listed by an operator, fine to approach' : 'has messaged before';
       process.stdout.write(`  ${item.url}  ${item.title}  (${note})\n`);

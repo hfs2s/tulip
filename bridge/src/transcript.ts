@@ -326,7 +326,7 @@ export function projectDirName(chatKey: string): string {
  * check rather than treating an unknown as a pass. The canonical copy of this
  * is in `bridge/src/outbox.ts`; it is eight lines and duplicated rather than
  * shared because importing that module here would drag the whole outbound
- * stack — Baileys, MiniMax, Giphy — into a read-only reader.
+ * stack — Baileys, MiniMax — into a read-only reader.
  */
 function describeFd(fd: number): string | null {
   try {

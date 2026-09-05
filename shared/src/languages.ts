@@ -138,6 +138,7 @@ export const SPOKEN_LANGUAGES = [
   { name: 'English', boost: 'English' },
   { name: 'Filipino', boost: 'Filipino' },
   { name: 'Cebuano', boost: 'Filipino' },
+  { name: 'Indonesian', boost: 'Indonesian' },
   { name: 'Catalan', boost: 'Catalan' },
   { name: 'Spanish', boost: 'Spanish' },
   { name: 'Portuguese', boost: 'Portuguese' },

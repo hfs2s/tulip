@@ -226,7 +226,6 @@ export const CurrentTurn = z
       .object({
         voice: z.boolean().default(true),
         images: z.boolean().default(true),
-        gifs: z.boolean().default(true),
         search: z.boolean().default(true),
         crossChat: z.boolean().default(true),
       })
@@ -275,26 +274,6 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       /** Where it goes; see `Destination`. Null is this turn's own chat. */
       chatKey: Destination,
       file: OutFileName,
-      caption: z.string().max(1024).nullable(),
-    })
-    .strict(),
-  z
-    .object({
-      id: z.string().uuid(),
-      turnId: TurnId,
-      kind: z.literal('gif'),
-      /** Where it goes; see `Destination`. Null is this turn's own chat. */
-      chatKey: Destination,
-      /**
-       * A search phrase, never a URL.
-       *
-       * The agent has no internet, so it cannot fetch a GIF itself — it names
-       * what it wants and the bridge resolves it. That keeps the API key out of
-       * the agent container and leaves the egress allowlist untouched. It also
-       * means the content rating is enforced somewhere the agent cannot reach:
-       * choosing a phrase is expressible here, turning off the filter is not.
-       */
-      query: z.string().min(1).max(100),
       caption: z.string().max(1024).nullable(),
     })
     .strict(),

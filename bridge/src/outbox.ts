@@ -33,7 +33,6 @@ import { EventEmitter } from 'node:events';
 import { OutboxAction, ToolResult, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
 import type { OutboxAction as OutboxActionType } from '@tulip/shared';
 import { feed } from './feed.js';
-import { findGif, type Rating } from './giphy.js';
 import { fetchPage, search, type ExaOutcome } from './exa.js';
 import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
@@ -274,7 +273,7 @@ export interface OutboxDeps {
  * persona recommends spent all eight of a turn's sends before the message
  * carrying the link was written, and that message was then refused.
  */
-const DELIVERS: ReadonlySet<string> = new Set(['text', 'sendTo', 'file', 'gif', 'image', 'voice', 'react']);
+const DELIVERS: ReadonlySet<string> = new Set(['text', 'sendTo', 'file', 'image', 'voice', 'react']);
 
 /** What one action costs its turn. `typing` is cosmetic and free. */
 function costOf(kind: string): Cost {
@@ -406,7 +405,7 @@ export class Outbox extends EventEmitter {
    * This used to log, write a feed event, and stop — both of which an operator
    * reads and neither of which the person waiting sees. Worse, `wa-cli` has
    * already written its `spoke` marker by the time an action reaches here, so
-   * the Stop hook does not relay a closing message either: with `gifs` off, the
+   * the Stop hook does not relay a closing message either: with a capability off,
    * first time the agent reached for one the turn ended in complete silence,
    * which is the single outcome its brief forbids.
    *
@@ -637,24 +636,6 @@ export class Outbox extends EventEmitter {
         // by name is safe in a way that *reading* by name is not — if the agent
         // has swapped a symlink in since, this unlinks the link, not its target.
         rmSync(file.unlinkPath, { force: true });
-        break;
-      }
-      case 'gif': {
-        if (!this.deps.config.agent.gifs) return this.refuse('gifs', dest, action.caption);
-        const gif = await findGif(action.query, {
-          apiKey: process.env['GIPHY_API_KEY'] ?? '',
-          rating: (process.env['GIPHY_RATING'] as Rating | undefined) ?? 'pg',
-        });
-        if (!gif.ok) {
-          // Cosmetic. A missing GIF must never cost somebody their reply, so
-          // this is recorded and dropped rather than retried or escalated.
-          log('outbox.gifFailed', { query: action.query, reason: gif.reason });
-          feed.event('gif.failed', `${action.query}: ${gif.reason}`);
-          return;
-        }
-        await this.deps.wa.sendGif(dest.jid, gif.video, action.caption);
-        retainOutbound(dest.key, 'gif', gif.video);
-        feed.outbound(dest.key, 'gif', `[gif] ${gif.title}`);
         break;
       }
       // Tool requests. These do not send anybody a message, so they are not

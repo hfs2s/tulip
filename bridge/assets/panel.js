@@ -3795,7 +3795,6 @@ async function renderSettings() {
   tools.appendChild(node('p', 'sub', 'Extra things Tulip can do beyond sending words. Each one needs two separate permissions: an account key must exist, and you must allow its use. A switch marked “no key set” will not do anything until somebody adds the key — keys live outside this panel and changing one needs the container restarted, while these switches take effect immediately. Tulip itself has no internet connection: it asks, and the bridge performs the request on its behalf, so no key is ever inside the machine running the agent.'));
 
   [['search', 'Look things up on the web', 'Lets Tulip search the web (through Exa) when it needs a fact it does not have. The thing to know: a web page can be written specifically to be read by an AI and to contain instructions aimed at it. Unlike a message, there is no sender behind it you can block, so this is the widest door on this card.'],
-   ['gifs', 'Send GIFs', 'Lets Tulip reply with a GIF from Giphy, filtered at rating ' + s.tools.gifRating + '. Free, and the least consequential switch here.'],
    ['images', 'Generate pictures', 'Lets Tulip make an image and send it. Every picture is billed, so this is the switch most able to cost you money quickly — the per-turn and per-hour reply limits above are what bound it.'],
    ['voice', 'Send voice notes', 'Lets Tulip answer with a spoken voice note instead of text. Also billed per use. If the speech fails, the same words are sent as text, so nobody loses their reply.']
   ].forEach(function (row) {
@@ -3813,8 +3812,12 @@ async function renderSettings() {
     field(tools, row[1], row[2] + (keyed ? '' : ' Currently unavailable: no key is configured.'), wrap);
   });
 
-  field(tools, 'Voice',
-    'Which MiniMax voice speaks. Leave empty for this deployment’s default. A name that does not exist fails the whole request — the provider answers “voice id not exist” — and voice notes quietly fall back to text until it is corrected, so change it and then send yourself one.',
+  field(tools, 'Default voice',
+    'The voice used for any language you have not given one of its own, and for the thirty-odd '
+    + 'languages the matrix below does not cover. Set the ones you care about there; this is what '
+    + 'catches everything else. A name that does not exist fails the whole request — the provider '
+    + 'answers “voice id not exist” — and voice notes fall back to text until it is corrected, so '
+    + 'change it and then send yourself one.',
     textField(s.agent && s.agent.voiceId, 'e.g. English_engaging_instructor_vv2', function (v, revert) {
       saveSettings({ agent: { voiceId: v } }, revert);
     }));
@@ -3825,8 +3828,12 @@ async function renderSettings() {
     (s.languages || []).map(function (l) {
       return [l, l === 'auto' ? 'Detect automatically' : l];
     }));
-  field(tools, 'Spoken language',
-    'Not the language Juan writes in — that is his choice — but the mouth his words are spoken with. Set it wrong and a Spanish sentence is read with an English accent. “Detect automatically” lets the provider decide, which is the safer setting for a chat that switches language mid-conversation.',
+  field(tools, 'Fallback language',
+    'Juan names the language on every voice note — it is a required argument — so this almost never '
+    + 'applies. It is the value used if one ever arrives without a language, which in practice means '
+    + 'a note written by the previous build during a deploy. Leave it on whatever he speaks most. '
+    + 'Note that “Detect automatically” is a poor choice here: the provider hears Filipino and '
+    + 'Bisaya as Malay.',
     selectField(s.agent && s.agent.languageBoost, languages, function (v, revert) {
       saveSettings({ agent: { languageBoost: v } }, revert);
     }));

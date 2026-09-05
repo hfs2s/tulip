@@ -77,9 +77,7 @@ services:
       # search phrase; the bridge does the searching, so the key never enters
       # the container the threat model assumes an attacker owns, and no new
       # host is added to the egress allowlist. See bridge/src/giphy.ts.
-      GIPHY_API_KEY: ${GIPHY_API_KEY:-}
       # g | pg | pg-13 | r — enforced where the agent cannot reach it.
-      GIPHY_RATING: ${GIPHY_RATING:-pg}
       # Web search and page reading, for the same reason and on the same terms:
       # the agent asks, the bridge performs. Rotated on rate limits. See
       # bridge/src/exa.ts for why `fetch` is not an HTTP request from here.

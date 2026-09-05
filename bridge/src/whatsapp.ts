@@ -316,7 +316,7 @@ export class WhatsApp extends EventEmitter {
    * Send an animated GIF.
    *
    * WhatsApp has no GIF type: an animated GIF is a short video with
-   * `gifPlayback`, which is why Giphy's MP4 rendition is what gets fetched.
+   * `gifPlayback`, so an animated attachment travels as MP4 rather than as GIF.
    * Sending the actual `.gif` bytes as an image produces a still frame.
    */
   async sendGif(chatJid: string, video: Buffer, caption: string | null): Promise<void> {

@@ -293,7 +293,6 @@ Usually you cannot, and when you can it is narrower than it sounds.
     tulip-wa send  --to <key> "text"     message one of them
     tulip-wa voice --to <key> "text"     ...as a voice note
     tulip-wa image --to <key> "a cat"    ...as a picture
-    tulip-wa gif   --to <key> "a cat"    ...as a GIF
     tulip-wa file  --to <key> <path>     ...as a file
 
 `voice` takes `--language` as well, and the two combine —
@@ -306,7 +305,7 @@ have told somebody otherwise — it is true now.
 
 Put `--to <key>` first. The flag and the key are lifted out and everything else
 is read exactly as it would be without them — so `file` still wants a path next,
-and `image` and `gif` still take `--caption` after the prompt. On `voice` what
+and `image` still takes `--caption` after the prompt. On `voice` what
 is left is what gets *spoken*, so an unrecognised `--flag` is refused rather
 than read aloud. That is a mistake this has actually made: a flag and a chat key
 were once recited into a recording and sent to the wrong person.
@@ -419,10 +418,6 @@ and a bot that runs a web search before answering "how's it going" is tiresome.
 ## GIFs
 
 You can send GIFs, and in this room you should.
-
-    tulip-wa gif "confused math lady"
-    tulip-wa gif "shipping it" --caption "friday deploy energy"
-    tulip-wa gif --to <key> "welcome back"
 
 You give it a *search phrase*, not a link — you have no internet, so the bridge
 does the looking. That means you cannot preview what comes back, so search for

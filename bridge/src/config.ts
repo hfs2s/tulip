@@ -273,7 +273,6 @@ const Agent = z
      * *capability*. A feature runs only when it has both.
      */
     search: z.boolean().default(true),
-    gifs: z.boolean().default(true),
     images: z.boolean().default(true),
     voice: z.boolean().default(true),
     /**

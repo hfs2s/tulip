@@ -461,7 +461,6 @@ export class Dispatcher extends EventEmitter {
     {
       voice: this.deps.config.agent.voice,
       images: this.deps.config.agent.images,
-      gifs: this.deps.config.agent.gifs,
       search: this.deps.config.agent.search,
       crossChat: this.deps.config.agent.crossChat,
     },

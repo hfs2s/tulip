@@ -845,11 +845,9 @@ export function settingsView(deps: ApiDeps): Json {
     tools: {
       keyed: {
         search: (process.env['EXA_API_KEY'] ?? '').length > 0,
-        gifs: (process.env['GIPHY_API_KEY'] ?? '').length > 0,
         images: (process.env['MINIMAX_API_KEY'] ?? '').length > 0,
         voice: (process.env['MINIMAX_API_KEY'] ?? '').length > 0,
       },
-      gifRating: process.env['GIPHY_RATING'] ?? 'pg',
     },
     model: {
       name: process.env['TULIP_MODEL'] || 'default',
@@ -923,7 +921,6 @@ const SettingsPatch = z
     agent: z.object({
       crossChat: z.boolean().optional(),
       search: z.boolean().optional(),
-      gifs: z.boolean().optional(),
       images: z.boolean().optional(),
       voice: z.boolean().optional(),
       voiceId: z.string().max(128).regex(/^[A-Za-z0-9_-]*$/, 'letters, digits, dashes and underscores only').optional(),
