@@ -2776,6 +2776,33 @@ function textField(value, placeholder, onSave) {
   return input;
 }
 
+/**
+ * A dropdown, with the same save-and-revert contract as `textField`.
+ *
+ * `options` is a list of [value, label] pairs. The empty value is offered
+ * first where one is passed, because "the deployment's default" is a real
+ * choice here rather than an absence.
+ */
+function selectField(value, options, onSave) {
+  var select = document.createElement('select');
+  select.className = 'textset';
+  options.forEach(function (o) {
+    var opt = document.createElement('option');
+    opt.value = o[0];
+    opt.textContent = o[1];
+    select.appendChild(opt);
+  });
+  select.value = value || '';
+  select.addEventListener('change', function () {
+    var next = select.value;
+    if (next === (value || '')) return;
+    var was = value;
+    value = next;
+    onSave(next, function () { value = was; select.value = was || ''; });
+  });
+  return select;
+}
+
 function numberControl(value, min, max, onSave, opts) {
   opts = opts || {};
   var step = opts.step || 1;
@@ -3101,6 +3128,18 @@ async function renderSettings() {
     'Which MiniMax voice speaks. Leave empty for this deployment’s default. A name that does not exist fails the whole request — the provider answers “voice id not exist” — and voice notes quietly fall back to text until it is corrected, so change it and then send yourself one.',
     textField(s.agent && s.agent.voiceId, 'e.g. English_engaging_instructor_vv2', function (v, revert) {
       saveSettings({ agent: { voiceId: v } }, revert);
+    }));
+
+  // The list comes from the server, so this dropdown and the schema that
+  // validates a save are the same list rather than two that can drift.
+  var languages = [['', 'This deployment’s default']].concat(
+    (s.languages || []).map(function (l) {
+      return [l, l === 'auto' ? 'Detect automatically' : l];
+    }));
+  field(tools, 'Spoken language',
+    'Not the language Juan writes in — that is his choice — but the mouth his words are spoken with. Set it wrong and a Spanish sentence is read with an English accent. “Detect automatically” lets the provider decide, which is the safer setting for a chat that switches language mid-conversation.',
+    selectField(s.agent && s.agent.languageBoost, languages, function (v, revert) {
+      saveSettings({ agent: { languageBoost: v } }, revert);
     }));
 
   field(tools, 'Model', 'Which Claude model answers. Read-only here — it is set outside the panel, and changing it needs the container restarted.', node('span', 'value', s.model.name));

@@ -25,7 +25,7 @@ import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
-import { parseConfig, Contact } from './config.js';
+import { LANGUAGE_BOOSTS, parseConfig, Contact } from './config.js';
 import { deletePage, listPages, pagesHost, type PageSummary } from './pages.js';
 import { forget, forgetAll, readMemory } from './memory.js';
 import type { ChatRegistry } from './chats.js';
@@ -615,6 +615,10 @@ export function settingsView(deps: ApiDeps): Json {
     audience: { everyone: c.audience.everyone, numbers: c.audience.numbers, jids: c.audience.jids },
     operators: { numbers: c.operators.numbers, jids: c.operators.jids },
     agent: c.agent,
+    // Sent rather than hard-coded in the page: the panel's dropdown and the
+    // schema's validation are then the same list by construction, and a value
+    // the provider stops accepting is removed in one place.
+    languages: LANGUAGE_BOOSTS,
     groups: c.groups,
     limits: c.limits,
     delivery: c.delivery,

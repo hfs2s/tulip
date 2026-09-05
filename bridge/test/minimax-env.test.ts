@@ -45,19 +45,19 @@ const { synthesise } = await import('../src/minimax.js');
 describe('an empty environment variable', () => {
   it('falls back to the real host rather than producing a relative URL', async () => {
     process.env['MINIMAX_BASE_URL'] = '';
-    await synthesise('hola');
+    await synthesise('hola', '', '');
     expect(requested[0]).toMatch(/^https:\/\/api\.minimax\.io\/v1\/t2a_v2/);
   });
 
   it('is treated the same as whitespace, which is equally not a host', async () => {
     process.env['MINIMAX_BASE_URL'] = '   ';
-    await synthesise('hola');
+    await synthesise('hola', '', '');
     expect(requested[0]).toMatch(/^https:\/\/api\.minimax\.io\//);
   });
 
   it('does not append an empty GroupId', async () => {
     process.env['MINIMAX_GROUP_ID'] = '';
-    await synthesise('hola');
+    await synthesise('hola', '', '');
     expect(requested[0]).not.toContain('GroupId');
   });
 });
@@ -65,13 +65,13 @@ describe('an empty environment variable', () => {
 describe('a value that is actually set', () => {
   it('is used', async () => {
     process.env['MINIMAX_BASE_URL'] = 'https://api.minimaxi.chat';
-    await synthesise('hola');
+    await synthesise('hola', '', '');
     expect(requested[0]).toMatch(/^https:\/\/api\.minimaxi\.chat\//);
   });
 
   it('is trimmed, so a stray newline in an .env file is not a broken host', async () => {
     process.env['MINIMAX_BASE_URL'] = ' https://api.minimaxi.chat\n';
-    await synthesise('hola');
+    await synthesise('hola', '', '');
     expect(requested[0]).toMatch(/^https:\/\/api\.minimaxi\.chat\//);
   });
 });
@@ -79,7 +79,7 @@ describe('a value that is actually set', () => {
 describe('a missing key', () => {
   it('is refused before any request is made', async () => {
     process.env['MINIMAX_API_KEY'] = '';
-    const result = await synthesise('hola');
+    const result = await synthesise('hola', '', '');
     expect(result.ok).toBe(false);
     expect(requested).toHaveLength(0);
   });
@@ -94,7 +94,7 @@ describe('a missing key', () => {
  */
 describe('the emotion', () => {
   const spoken = async (): Promise<Record<string, unknown>> => {
-    await synthesise('hola');
+    await synthesise('hola', '', '');
     return (sent[0]?.voice_setting ?? {}) as Record<string, unknown>;
   };
 
@@ -122,7 +122,7 @@ describe('the emotion', () => {
 
 describe('which voice speaks', () => {
   const voiceOf = async (arg?: string): Promise<unknown> => {
-    await synthesise('hola', arg);
+    await synthesise('hola', arg, '');
     return (sent[0]?.['voice_setting'] as Record<string, unknown>)['voice_id'];
   };
 
@@ -151,66 +151,66 @@ describe('what is spoken', () => {
     // Round brackets: the provider performs these. Square brackets are not a
     // tag syntax and get spoken as words, which is why the persona names the
     // form explicitly rather than leaving the agent to guess.
-    await synthesise('(laughs) no, that is not what I meant');
+    await synthesise('(laughs) no, that is not what I meant', '', '');
     expect(sent[0]?.['text']).toBe('(laughs) no, that is not what I meant');
   });
 
   it('rewrites a known tag written in square brackets, which would be spoken', async () => {
-    await synthesise('[laughs] no, that is not what I meant');
+    await synthesise('[laughs] no, that is not what I meant', '', '');
     expect(sent[0]?.['text']).toBe('(laughs) no, that is not what I meant');
   });
 
   it('leaves bracketed words that are not tags exactly as written', async () => {
     // Silently deleting speech is worse than speaking a stray word, so only a
     // token that is already a known tag is touched.
-    await synthesise('[honestly] I have no idea');
+    await synthesise('[honestly] I have no idea', '', '');
     expect(sent[0]?.['text']).toBe('[honestly] I have no idea');
   });
 
   it('keeps the first sound tag and drops the rest', async () => {
-    await synthesise('(laughs) yes (sighs) well (chuckle) anyway (breath) so');
+    await synthesise('(laughs) yes (sighs) well (chuckle) anyway (breath) so', '', '');
     expect(sent[0]?.['text']).toBe('(laughs) yes well anyway so');
   });
 
   it('leaves a message alone when it is already within the ceiling', async () => {
-    await synthesise('(laughs) yes, well');
+    await synthesise('(laughs) yes, well', '', '');
     expect(sent[0]?.['text']).toBe('(laughs) yes, well');
   });
 
   it('leaves a message with no tags at all completely alone', async () => {
-    await synthesise('yes, that is fine');
+    await synthesise('yes, that is fine', '', '');
     expect(sent[0]?.['text']).toBe('yes, that is fine');
   });
 
   it('does not count ordinary parentheses towards the ceiling', async () => {
     // Only known tags spend the allowance, and speech in brackets is never
     // deleted — so the sole real tag here survives and the asides are untouched.
-    await synthesise('(mostly) fine (really) yes (laughs) good, done');
+    await synthesise('(mostly) fine (really) yes (laughs) good, done', '', '');
     expect(sent[0]?.['text']).toBe('(mostly) fine (really) yes (laughs) good, done');
   });
 
   it('removes hyphens, en dashes and semicolons, which are read badly', async () => {
-    await synthesise('voice-for-voice; yes – always');
+    await synthesise('voice-for-voice; yes – always', '', '');
     expect(sent[0]?.['text']).toBe('voice for voice, yes always');
   });
 
   it('does not strip the hyphen inside a sound tag, which would unmake the tag', async () => {
-    await synthesise('(clear-throat) right then');
+    await synthesise('(clear-throat) right then', '', '');
     expect(sent[0]?.['text']).toBe('(clear-throat) right then');
   });
 
   it('leaves em dashes alone, which the model handles', async () => {
-    await synthesise('yes — of course');
+    await synthesise('yes — of course', '', '');
     expect(sent[0]?.['text']).toBe('yes — of course');
   });
 
   it('does not invent tags from ordinary parentheses', async () => {
-    await synthesise('it was fine (mostly) in the end');
+    await synthesise('it was fine (mostly) in the end', '', '');
     expect(sent[0]?.['text']).toBe('it was fine (mostly) in the end');
   });
 
   it('uses the model and voice this deployment is configured for', async () => {
-    await synthesise('hola');
+    await synthesise('hola', '', '');
     expect(sent[0]?.['model']).toBe('speech-2.8-turbo');
     expect(sent[0]?.['language_boost']).toBe('English');
     expect((sent[0]?.['voice_setting'] as Record<string, unknown>)['voice_id'])

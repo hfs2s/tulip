@@ -349,6 +349,11 @@
   .textset{font:inherit;font-family:var(--mono);font-size:12.5px;color:var(--ink);
            background:var(--raise);border:1px solid var(--line);border-radius:8px;
            padding:7px 10px;width:280px;max-width:100%}
+  /* The page declares a dark color-scheme, so the native menu follows; these
+     only cover the closed control and the options that some engines still
+     paint from the page rather than the scheme. */
+  select.textset{cursor:pointer}
+  select.textset option{background:var(--panel);color:var(--ink)}
   .numbox{font:inherit;font-family:var(--mono);font-size:12.5px;color:var(--ink);
           background:var(--raise);border:1px solid var(--line);border-radius:8px;
           padding:6px 8px;width:9ch;text-align:right}

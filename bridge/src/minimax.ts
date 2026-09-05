@@ -218,7 +218,7 @@ export async function generateImage(prompt: string): Promise<Produced> {
  * words as text. A voice note that does not arrive should never cost somebody
  * their reply.
  */
-export async function synthesise(text: string, voiceId = ''): Promise<Produced> {
+export async function synthesise(text: string, voiceId: string, language: string): Promise<Produced> {
   if (key().length === 0) return { ok: false, error: 'no MINIMAX_API_KEY is configured' };
   const group = env('MINIMAX_GROUP_ID');
 
@@ -254,7 +254,15 @@ export async function synthesise(text: string, voiceId = ''): Promise<Produced> 
          * `language_boost` at all — speech-02 and speech-01 reject it outright —
          * so this setting and `MINIMAX_VOICE_MODEL` have to move together.
          */
-        language_boost: env('MINIMAX_LANGUAGE_BOOST', 'English'),
+        // Configuration first, environment second — the same order as the voice
+        // below, and for the same reason. Required as an argument rather than
+        // read here directly: this used to be a bare `env()` call, which meant
+        // the one setting that decides how a sentence is *pronounced* was
+        // invisible at every call site and could only be changed by restarting
+        // the container.
+        language_boost: language.trim().length > 0
+          ? language.trim()
+          : env('MINIMAX_LANGUAGE_BOOST', 'English'),
         /**
          * Opus in an OGG container is what WhatsApp renders as a push-to-talk
          * bubble rather than a file attachment.

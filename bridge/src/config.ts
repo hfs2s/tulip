@@ -218,6 +218,29 @@ export const Contact = z
   })
   .strict();
 
+/**
+ * Every value the speech provider accepts for `language_boost`, verbatim.
+ *
+ * Transcribed from MiniMax's own reference rather than guessed, because a value
+ * it does not know fails the entire request — voice notes then fall back to
+ * text, which looks like a broken voice rather than a bad setting. `auto` lets
+ * the model decide, and is the provider's own suggestion when the language is
+ * not known in advance.
+ *
+ * `Chinese,Yue` carries a comma in the middle. That is the provider's spelling
+ * of Cantonese and not a mistake here; anything splitting this list on commas
+ * will produce two languages that do not exist.
+ */
+export const LANGUAGE_BOOSTS = [
+  'auto',
+  'Afrikaans', 'Arabic', 'Bulgarian', 'Catalan', 'Chinese', 'Chinese,Yue', 'Croatian',
+  'Czech', 'Danish', 'Dutch', 'English', 'Filipino', 'Finnish', 'French', 'German',
+  'Greek', 'Hebrew', 'Hindi', 'Hungarian', 'Indonesian', 'Italian', 'Japanese',
+  'Korean', 'Malay', 'Norwegian', 'Nynorsk', 'Persian', 'Polish', 'Portuguese',
+  'Romanian', 'Russian', 'Slovak', 'Slovenian', 'Spanish', 'Swedish', 'Tamil',
+  'Thai', 'Turkish', 'Ukrainian', 'Vietnamese',
+] as const;
+
 const Agent = z
   .object({
     /**
@@ -284,6 +307,32 @@ const Agent = z
      * box.
      */
     voiceId: z.string().max(128).default(''),
+    /**
+     * Which language the voice is tuned for.
+     *
+     * Not the language of the words — the agent chooses those — but the mouth
+     * they are spoken with. Without it a Spanish sentence is read with whatever
+     * accent the model defaults to, which is the failure Iris records from the
+     * other direction: "she reads Tagalog with a Catalan mouth."
+     *
+     * Beside `voiceId` and for the same reason. This deployment talks to a
+     * Barcelona group and a Filipino one, so it is a thing an operator changes
+     * between conversations, and an environment variable costs a container
+     * restart for every attempt.
+     *
+     * Empty means the deployment's own default, so an existing install keeps
+     * whatever `MINIMAX_LANGUAGE_BOOST` gave it. Any other value is checked
+     * against the provider's list: an unrecognised one fails the whole request
+     * and voice notes fall back to text, so a typo here is silent until someone
+     * sends one.
+     */
+    languageBoost: z
+      .string()
+      .max(32)
+      .refine((v) => v === '' || (LANGUAGE_BOOSTS as readonly string[]).includes(v), {
+        message: 'not a language the speech provider recognises',
+      })
+      .default(''),
   })
   .strict()
   .default({});

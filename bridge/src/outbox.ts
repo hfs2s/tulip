@@ -916,7 +916,7 @@ export class Outbox extends EventEmitter {
           feed.outbound(dest.key, 'text', action.text);
           break;
         }
-        const audio = await synthesise(action.text, this.deps.config.agent.voiceId);
+        const audio = await synthesise(action.text, this.deps.config.agent.voiceId, this.deps.config.agent.languageBoost);
         if (!audio.ok) {
           // Never drop the message: say it in text rather than stay silent.
           log('outbox.voiceFallback', { reason: audio.error });
