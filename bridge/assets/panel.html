@@ -553,35 +553,21 @@
      three aligned columns, rather than terminal output. The verb column is
      fixed so the eye runs straight down it and a change of activity is visible
      without reading any of the detail. */
-  /* One step, one line. The detail is not wrapped: a log is read by running
-     down the verb column, and a step that becomes three lines breaks that
-     column into a ragged one. Long detail scrolls sideways instead.
-
-     The gutter is carried by the cells rather than by the scroller, because a
-     scroller's own padding scrolls away with its content — and the whole point
-     of the next rule is that one column does not. */
-  /* `display:block`, not flex. A flex column stretches its children to the
-     container's width, which caps them there — so a row wider than the pane
-     never made the pane scroll, and a sticky column had nothing to stick
-     against. Block-level rows are free to be `max-content` wide. */
-  .session{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;
+  /* The detail wraps. A log that scrolls sideways hides the end of every long
+     line behind a gesture, and the long lines are the ones worth reading — a
+     reply, a thought, the command that failed. The verb column still lines up,
+     which is what makes the page scannable; a wrapped third column costs
+     nothing to that because it is the last one. */
+  .session{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
            width:100%;max-width:var(--col);margin-inline:auto;
-           padding:18px 0 24px;display:block}
-  .srow{display:grid;grid-template-columns:calc(var(--gut) + 52px) 132px minmax(0,max-content);
-        gap:0 12px;align-items:baseline;padding:6px 0;font-size:12.5px;
-        width:max-content;min-width:100%}
+           padding:18px var(--gut) 24px;display:flex;flex-direction:column;gap:1px}
+  .srow{display:grid;grid-template-columns:52px 132px minmax(0,1fr);gap:0 12px;
+        align-items:baseline;padding:6px 0;font-size:12.5px}
   .srow:hover{background:var(--raise)}
-  /* The time stays put when the detail is scrolled sideways. Losing it is what
-     makes a wide log unreadable — you can see what happened but no longer when,
-     and the column you were comparing against has gone off the left edge. */
-  .sat{position:sticky;left:0;z-index:1;padding-left:var(--gut);
-       background:var(--ground);
-       font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
+  .sat{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
        font-size:11px;color:var(--faint);white-space:nowrap}
-  .srow:hover .sat{background:var(--raise)}
   .sverb{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .swhat{color:var(--ink);min-width:0;white-space:nowrap;line-height:1.5;
-         padding-right:var(--gut)}
+  .swhat{color:var(--ink);min-width:0;overflow-wrap:anywhere;line-height:1.5}
   .swhat code{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
               font-size:.88em;background:var(--raise);border-radius:0;padding:1px 4px}
   /* What a person said or heard is the spine of the session; everything else is
@@ -593,7 +579,7 @@
   .srow.k-turn{color:var(--faint)}
   .srow.k-turn .sverb,.srow.k-turn .swhat{color:var(--faint)}
   @media (max-width:760px){
-    .srow{grid-template-columns:calc(var(--gut) + 44px) minmax(0,max-content);gap:2px 10px}
+    .srow{grid-template-columns:44px minmax(0,1fr);gap:2px 10px}
     .srow .swhat{grid-column:2}
   }
   /* The page is a column: a header that stays, a body that scrolls under it,
@@ -615,15 +601,14 @@
 
   /* The rule that closes an ended session. A horizon, not a badge: the list
      stops and the line says when, at the point the eye has already arrived. */
-  .endrule{display:flex;align-items:center;gap:14px;
-           margin:18px var(--gut) 4px;position:sticky;left:var(--gut);
+  .endrule{display:flex;align-items:center;gap:14px;margin:18px 0 4px;
            font-size:11px;color:var(--faint);white-space:nowrap}
   .endrule::before,.endrule::after{content:"";height:1px;flex:1;background:var(--line-soft)}
 
   /* The one genuine void, left-aligned with everything else. A centred icon and
      a heading is what an empty state looks like when nobody asked what the page
      is for; this one is a paragraph in the place the transcript would be. */
-  .pane-note{max-width:56ch;padding:26px var(--gut);display:flex;flex-direction:column;
+  .pane-note{max-width:56ch;padding:26px 0;display:flex;flex-direction:column;
              align-items:flex-start;gap:10px}
   .pane-note h3{margin:0;font-size:15px;font-weight:500;color:var(--ink)}
   .pane-note p{margin:0;font-size:12.5px;line-height:1.65;color:var(--faint)}
