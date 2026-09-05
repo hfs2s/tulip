@@ -86,6 +86,31 @@ export interface DispatcherDeps {
   readonly onControl: (envelope: Envelope, chatKey: string) => Promise<void>;
 }
 
+/**
+ * Whether a batch carries operator authority.
+ *
+ * Read by the `contact` action, which turns a phone number into a chat key —
+ * the one place a number enters the agent's vocabulary. The rule is not "an
+ * operator is present" but "everything in this batch came from one", because
+ * the agent reads the batch as a whole: a number sitting in a stranger's
+ * message would otherwise be picked up as though an operator had given it.
+ *
+ * **Groups count.** They used to be excluded and that was over-cautious — it
+ * broke the actual use, an operator saying "message this number" in the group
+ * they are already in and being refused for being in a room. What makes this
+ * safe is not the shape of the room, it is `senderIds`: WhatsApp assigns those,
+ * and a sender cannot change them by picking a display name. A stranger in the
+ * group still fails, and one of their messages in the batch fails it for
+ * everybody in that batch.
+ *
+ * An empty batch is not authority. `every` returns true for one, and a turn is
+ * never opened without messages — but this is a security predicate and it
+ * should not depend on a caller's invariant to be safe.
+ */
+export function carriesOperatorAuthority(envelopes: readonly Envelope[], config: Config): boolean {
+  return envelopes.length > 0 && envelopes.every((e) => isOperator(config, e.senderIds));
+}
+
 export class Dispatcher extends EventEmitter {
   private readonly queue = new Queue();
   private readonly pending = new Map<string, QueuedMessage[]>();
@@ -406,13 +431,7 @@ export class Dispatcher extends EventEmitter {
 
     const record = this.deps.chats.get(chatKey);
 
-    // Whether the turn carries operator authority, decided here because this is
-    // where the envelopes are and the outbox only sees a turn id. `every`
-    // rather than checking the last message: a batch is one chat's messages, so
-    // in practice they agree, and if they ever did not the answer should be no.
-    const fromOperator = batch.every(
-      ({ envelope }) => !envelope.isGroup && isOperator(this.deps.config, envelope.senderIds),
-    );
+    const fromOperator = carriesOperatorAuthority(batch.map((m) => m.envelope), this.deps.config);
     const turn = this.deps.turns.open(last.envelope.chatJid, chatKey, now, fromOperator);
 
     const messages: InboundMessage[] = await Promise.all(

@@ -307,12 +307,22 @@ cannot become a sender as a side effect.
 permission.** A `contact` action turns a phone number into a key — the one place
 a number appears in the agent's vocabulary, and it runs *inward*: the number is
 one an operator typed in their own message, which the agent could already read.
-The bridge refuses it on any turn that is not an operator writing directly, and
-"directly" excludes a group, because a room with strangers in it cannot carry
-one identified person's intent. The check is on the turn, which the dispatcher
-decided from the envelope before the agent saw anything, so it is not reachable
-by an agent that has been taken over: an attacker in any chat they can reach
-gets a refusal from all of them.
+The bridge refuses it on any turn whose messages did not all come from an
+operator. The check is on the turn, decided by the dispatcher from the envelope
+before the agent saw anything, so it is not reachable by an agent that has been
+taken over: an attacker in any chat they can reach gets a refusal from all of
+them.
+
+**Every message in the batch, not one of them.** A batch is injected as a single
+prompt and the agent cannot attribute a line within it to a sender, so a number
+sitting in a stranger's message would be indistinguishable from one an operator
+gave. A mixed batch is refused for everybody in it.
+
+Groups are included, and were not at first. The exclusion was over-cautious and
+broke the actual use — an operator saying "message this number" in the group
+they are already in, refused for being in a room. What carries the guarantee is
+`senderIds`, which WhatsApp assigns and a sender cannot change by picking a
+display name; the shape of the room is not evidence about who spoke.
 
 It is deliberately **not** gated on `agent.crossChat`, which is why the table
 row above reads the same in both columns. The switch governs whether an issued
