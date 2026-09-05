@@ -571,6 +571,21 @@
     .srow{grid-template-columns:44px minmax(0,1fr);gap:4px 10px}
     .srow .swhat{grid-column:2}
   }
+  /* The rule that closes an ended session. A horizon, not a badge: the list
+     stops and the line says when, at the point the eye has already arrived. */
+  .endrule{display:flex;align-items:center;gap:14px;margin:18px 10px 4px;
+           font-size:11px;color:var(--faint);white-space:nowrap}
+  .endrule::before,.endrule::after{content:"";height:1px;flex:1;background:var(--line-soft)}
+
+  /* The one genuine void, left-aligned with everything else. A centred icon and
+     a heading is what an empty state looks like when nobody asked what the page
+     is for; this one is a paragraph in the place the transcript would be. */
+  .pane-note{max-width:56ch;padding:26px 10px;display:flex;flex-direction:column;
+             align-items:flex-start;gap:10px}
+  .pane-note h3{margin:0;font-size:15px;font-weight:500;color:var(--ink)}
+  .pane-note p{margin:0;font-size:12.5px;line-height:1.65;color:var(--faint)}
+  .pane-note button{margin-top:4px}
+
   .convo-lead{margin:0;font-size:11.5px;line-height:1.5;color:var(--faint)}
   /* The empty half of a two-pane page, as an invitation rather than a shrug. */
   .pane-empty{margin:auto;max-width:44ch;padding:24px;text-align:center;

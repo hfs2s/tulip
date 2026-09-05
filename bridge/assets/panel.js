@@ -1474,7 +1474,7 @@ function renderSessions() {
   var body = node('div', 'session');
   body.id = 'termBody';
   if (termOpen) body.appendChild(node('p', 'thread-note', 'Reading the session…'));
-  else body.appendChild(noSessionNote());
+  else body.appendChild(neverRanNote());
   pane.appendChild(body);
   p.appendChild(pane);
 
@@ -1485,19 +1485,31 @@ function renderSessions() {
 }
 
 /**
- * The session Juan is in right now, or the one he was in last.
+ * The session to show: the one running, or the last one that ran.
  *
- * The chat it belongs to is context rather than a choice: what an operator came
- * to this page for is "what is Claude Code doing", and the answer is whatever
- * window is live. When nothing is live there is nothing to read, and saying so
- * is better than offering a menu of closed ones.
+ * Idle is the *normal* state of this page, not an edge of it — six hours passed
+ * between turns on the day this was written — so falling back to nothing would
+ * mean the page was blank almost every time it was opened. It would also be
+ * hiding work that still exists: a window closing does not delete the Claude
+ * Code transcript, which is read from the workspace and returned with
+ * `live:false`. So there is nearly always something to read, and the honest
+ * thing is to read it and say when it happened.
+ *
+ * Null means genuinely nothing: no chat has ever run a session here.
  */
 function currentSession() {
-  var live = liveSessions();
-  if (!live.length) return null;
   var busy = state && state.queue && state.queue.inFlight;
+  var live = liveSessions();
   for (var i = 0; i < live.length; i++) if (live[i].chatKey === busy) return busy;
-  return live[0].chatKey;
+  if (live.length) return live[0].chatKey;
+
+  // Nothing open. The most recently active conversation is the one whose
+  // session ended last, and its transcript is still on disk.
+  var seen = ((state && state.chats) || [])
+    .filter(function (c) { return !c.isGroup || c.messages; })
+    .slice()
+    .sort(function (a, b) { return (b.lastSeenAt || 0) - (a.lastSeenAt || 0); });
+  return seen.length ? seen[0].chatKey : null;
 }
 
 /** The windows the agent reports, most recently used first. */
@@ -1524,7 +1536,7 @@ function sessionHead() {
   dot.id = 'termDot';
   if (!termOpen) dot.style.background = 'var(--faint)';
   sub.appendChild(dot);
-  var says = node('span', null, termOpen ? 'reading' : 'no session running');
+  var says = node('span', null, termOpen ? 'reading' : 'nothing has run here yet');
   says.id = 'termState';
   sub.appendChild(says);
   who.appendChild(sub);
@@ -1543,28 +1555,62 @@ function sessionHead() {
 }
 
 /**
- * No session, which is the ordinary resting state rather than a fault.
+ * The one genuine void: no conversation has ever opened a session here.
  *
- * A window opens when a message arrives and closes again after half an hour
- * idle, so most of the time nothing is running and nothing is wrong. The raw
- * pane is still offered: an empty tmux is worth seeing when the question is
- * whether the container is alive at all.
+ * Distinct from idle, which is not empty — idle shows the last session, because
+ * it still exists. This is a new deployment, or one whose state has been wiped,
+ * and it is the only case where there is truly nothing to read.
  */
-function noSessionNote() {
-  var box = node('div', 'pane-empty');
-  box.appendChild(icon('terminal'));
+function neverRanNote() {
+  var box = node('div', 'pane-note');
   var reporting = !!(state && state.agent && state.agent.up !== false);
-  box.appendChild(node('h3', null, reporting ? 'Nothing is running' : 'The agent is not reporting'));
+  box.appendChild(node('h3', null, reporting
+    ? 'Nothing has run here yet'
+    : 'The agent is not reporting'));
   box.appendChild(node('p', null, reporting
-    ? 'Claude Code starts when somebody messages Juan and stops again after half an hour idle. '
-      + 'Nothing has been lost — the next message starts it, and what it does appears here.'
-    : 'There is no status file to read, so this cannot say what is running. The container is the '
-      + 'thing to look at; messages queue safely meanwhile.'));
-  var open = node('button', 'sm', 'Open the raw pane anyway');
+    ? 'Claude Code starts the first time somebody messages Juan. What it does will appear here, '
+      + 'and stays readable afterwards.'
+    : 'There is no status file, so this cannot say what is running. The container is the thing to '
+      + 'look at; messages queue safely meanwhile.'));
+  var open = node('button', 'sm', 'Open the raw pane');
   open.type = 'button';
   open.addEventListener('click', openTerminal);
   box.appendChild(open);
   return box;
+}
+
+/**
+ * What the agent is doing, in one line under the heading.
+ *
+ * Three states, and the third is the common one. Colour is spent on the two
+ * that are happening — amber mid-turn, cyan holding a window open — and idle
+ * deliberately takes none: an agent waiting is not a condition to flag, and
+ * colouring it would leave nothing to distinguish the two that are.
+ *
+ * Idle says how long it has been, because that is the question actually being
+ * asked. "Waiting" alone cannot tell a quiet morning from a wedged process.
+ */
+function paintSessionState(view) {
+  var says = el('termState'), dot = el('termDot');
+  if (!says || !dot) return;
+  var busy = !!(state && state.queue && state.queue.inFlight === termOpen);
+  var name = (view && view.chat && view.chat.name) || 'someone';
+  var last = view && view.items && view.items.length
+    ? view.items[view.items.length - 1].ts : 0;
+
+  if (busy) {
+    says.textContent = 'answering ' + name;
+    dot.style.background = 'var(--warn)';
+  } else if (view && view.live) {
+    says.textContent = 'window open for ' + name;
+    dot.style.background = 'var(--accent)';
+  } else {
+    says.textContent = last
+      ? 'waiting — nothing for ' + ago(Date.now() - last).replace(' ago', '')
+        + ', last answered ' + name
+      : 'waiting';
+    dot.style.background = 'var(--faint)';
+  }
 }
 
 /** The live set as last rendered, so a poll knows when the page must change. */
@@ -1581,15 +1627,7 @@ function paintSessionLive() {
   var keys = liveSessions().map(function (c) { return c.chatKey; }).join(',');
   if (keys !== sessionKeys) { renderSessions(); return; }
   if (!termOpen || !termView) return;
-  var busy = !!(state && state.queue && state.queue.inFlight === termOpen);
-  var name = (termView.chat && termView.chat.name) || 'someone';
-  var says = el('termState'), dot = el('termDot');
-  if (says) {
-    says.textContent = busy ? 'answering ' + name
-      : termView.live ? 'idle — last answered ' + name
-      : 'session closed';
-  }
-  if (dot) dot.style.background = busy ? 'var(--warn)' : termView.live ? 'var(--accent)' : 'var(--faint)';
+  paintSessionState(termView);
 }
 
 async function refreshSession() {
@@ -1608,17 +1646,7 @@ async function refreshSession() {
   if (key !== termOpen || !body.isConnected) return;
   termView = view;
 
-  // Who he is answering is context on one line, not a heading: the subject of
-  // this page is Claude Code, and it is the same Claude Code either way.
-  var says = el('termState'), dot = el('termDot');
-  var busy = !!(state && state.queue && state.queue.inFlight === key);
-  var name = (view.chat && view.chat.name) || 'someone';
-  if (says) {
-    says.textContent = busy ? 'answering ' + name
-      : view.live ? 'idle — last answered ' + name
-      : 'session closed';
-  }
-  if (dot) dot.style.background = busy ? 'var(--warn)' : view.live ? 'var(--accent)' : 'var(--faint)';
+  paintSessionState(view);
 
   paintSession(view);
 }
@@ -1655,6 +1683,17 @@ function paintSession(view) {
     }
     body.appendChild(sessionRow(item));
   });
+
+  // A rule closes the list when the session has ended, at the point the eye
+  // stops. It answers the question this page exists for — is what I am reading
+  // current? — without a badge in the corner that has to be gone looking for.
+  if (!view.live) {
+    var last = view.items[view.items.length - 1];
+    var rule = node('div', 'endrule');
+    rule.appendChild(node('span', null,
+      'session ended ' + (last ? ago(Date.now() - last.ts) : 'earlier')));
+    body.appendChild(rule);
+  }
 
   if (pinned) body.scrollTop = body.scrollHeight;
 }
