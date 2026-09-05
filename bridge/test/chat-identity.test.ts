@@ -62,9 +62,11 @@ describe('one person, one chat record', () => {
     expect(settled).not.toBe(strayKey);
     expect(chats.all()).toHaveLength(1);
     expect(chats.all()[0]!.name).toBe('KD');
-    // The superseded record still resolves, so history and anything holding its
-    // key keeps working — it is merely no longer offered or written to.
-    expect(chats.jidFor(strayKey)).toBe(LID);
+    // The superseded key still resolves, so anything holding one keeps working
+    // — but it resolves to the *survivor*, not to the dead record's own jid.
+    // Resolving to `LID` would mean two keys addressing one person while only
+    // one of them carried their block.
+    expect(chats.jidFor(strayKey)).toBe(PHONE);
     // And a later message under the stray key lands on the survivor.
     expect(chats.keyFor(LID, false, now)).toBe(settled);
   });
@@ -101,5 +103,108 @@ describe('one person, one chat record', () => {
     const key = chats.keyFor('12345-678@g.us', true, now, PHONE);
     expect(chats.jidFor(key)).toBe('12345-678@g.us');
     expect(chats.all()[0]!.altJid).toBeNull();
+  });
+});
+
+/**
+ * A superseded key resolves to the survivor in *every* lookup, not only in
+ * `keyFor`.
+ *
+ * `keyFor` has always followed `mergedInto`, which made inbound safe: the
+ * dispatcher checks the key it was handed, and that is the survivor. Nothing
+ * else followed it. So `jidFor` returned the dead record's jid and `isBlocked`
+ * returned the dead record's flag — and the one caller that supplies its own
+ * key rather than receiving one is `crossChatTarget`, whose key comes from the
+ * agent. The agent's workspace persists per chat across turns, so it can be
+ * holding a pre-merge key long after the merge: block the surviving record, and
+ * a send addressed to the superseded one went through.
+ *
+ * These are the registry-level properties. The end-to-end refusal is in
+ * `outbox-destinations.test.ts`, under "a superseded chat key".
+ */
+describe('a superseded key resolves to the survivor', () => {
+  /** Two records for one person, merged. Returns both keys. */
+  function merged(chats: ChatRegistry, now: number): { stale: string; survivor: string } {
+    const stale = chats.keyFor(LID, false, now);
+    chats.syncContacts([{ label: 'KD', number: '15551234567' }], now);
+    const survivor = chats.keyFor(LID, false, now, PHONE);
+    expect(survivor).not.toBe(stale);
+    return { stale, survivor };
+  }
+
+  it('answers with the survivor’s record, not the record that was superseded', () => {
+    const chats = registry();
+    const now = Date.now();
+    const { stale, survivor } = merged(chats, now);
+
+    expect(chats.get(stale)?.chatKey).toBe(survivor);
+    // The operator's label, which only ever existed on the survivor.
+    expect(chats.get(stale)?.name).toBe('KD');
+  });
+
+  it('reports the survivor’s block state', () => {
+    const chats = registry();
+    const now = Date.now();
+    const { stale, survivor } = merged(chats, now);
+
+    expect(chats.isBlocked(stale)).toBe(false);
+    chats.setBlocked(survivor, true);
+    // The whole point. Before this resolved, an agent holding `stale` had a
+    // key that answered "not blocked" for somebody who is.
+    expect(chats.isBlocked(stale)).toBe(true);
+    expect(chats.jidFor(stale)).toBe(PHONE);
+  });
+
+  it('accepts a block written against the stale key, and applies it to the survivor', () => {
+    const chats = registry();
+    const now = Date.now();
+    const { stale, survivor } = merged(chats, now);
+
+    // The key in front of an operator can easily be the superseded one — an old
+    // feed line, a page open since before the merge. Writing the flag onto the
+    // dead row would report success and do nothing.
+    expect(chats.setBlocked(stale, true)).toBe(true);
+    expect(chats.isBlocked(survivor)).toBe(true);
+
+    expect(chats.setBlocked(stale, false)).toBe(true);
+    expect(chats.isBlocked(survivor)).toBe(false);
+  });
+
+  it('applies a touch to the survivor, so history is not written where nobody reads it', () => {
+    const chats = registry();
+    const now = Date.now();
+    const { stale, survivor } = merged(chats, now);
+
+    chats.touch(stale, { messages: 7 }, now + 1000);
+
+    expect(chats.get(survivor)?.messages).toBe(7);
+    expect(chats.get(survivor)?.lastSeenAt).toBe(now + 1000);
+    // `all()` hides the superseded row, so a count landing there would be
+    // invisible — and it is what the destination list is sorted by.
+    expect(chats.all()).toHaveLength(1);
+    expect(chats.all()[0]!.messages).toBe(7);
+  });
+
+  it('hands out the survivor when a number is looked up', () => {
+    const chats = registry();
+    const now = Date.now();
+    const { survivor } = merged(chats, now);
+
+    // `addContact` returns this key to the agent as an addressable destination.
+    expect(chats.keyForNumber('15551234567')).toBe(survivor);
+    expect(chats.keyForNumber('15550000000')).toBeNull();
+  });
+
+  it('still refuses a key that was never issued at all', () => {
+    const chats = registry();
+    const now = Date.now();
+    merged(chats, now);
+
+    // Canonicalising must not turn an unknown key into a resolvable one: the
+    // fallback is the key itself, and the key itself has no record.
+    expect(chats.jidFor('ffffffffffffffff')).toBeNull();
+    expect(chats.get('ffffffffffffffff')).toBeNull();
+    expect(chats.isBlocked('ffffffffffffffff')).toBe(false);
+    expect(chats.setBlocked('ffffffffffffffff', true)).toBe(false);
   });
 });

@@ -286,7 +286,7 @@ What the exception costs, precisely:
 |---|---|---|
 | Can address | the chat whose turn it is answering | that, plus any chat key the bridge has issued |
 | In which media | all of them | all of them |
-| Can name a phone number | no | **still no** — keys are opaque and deployment-local |
+| Can name a phone number | **in one action only** — `contact`, refused unless the turn is an operator writing directly. Pinning still holds, so the key it yields addresses nothing | **the same one action, the same gate** — and the key it yields is then addressable. Every *other* destination is still an opaque, deployment-local key |
 | Can read another conversation | no | **still no** — sessions are per chat |
 | Recorded | outbound in the chat's feed | that, plus a `crossChat.sent` event naming both chats |
 | Rate limit charged to | the chat being written into | the chat being written into |
@@ -314,6 +314,12 @@ decided from the envelope before the agent saw anything, so it is not reachable
 by an agent that has been taken over: an attacker in any chat they can reach
 gets a refusal from all of them.
 
+It is deliberately **not** gated on `agent.crossChat`, which is why the table
+row above reads the same in both columns. The switch governs whether an issued
+key may be *addressed*; it has never governed whether one may be minted. With
+the switch off a minted key is inert — it is a row in the contact list that no
+action can resolve — and that is the honest reading of "pinning still holds".
+
 What this does *not* do is let the agent choose a destination. It lets an
 operator choose one without opening the panel. Somebody who could add a contact
 by hand adds it by asking instead; nobody else can.
@@ -324,6 +330,23 @@ now be annoying in more formats. It is bounded by the outbound rate limits, it
 is logged on both sides, and the content is limited to one conversation the
 attacker already controls. If that trade is not worth it for a deployment,
 `crossChat: false` restores destination pinning completely and is the default.
+
+**A second residual, and it is the one `contact` introduced.** A provenance gate
+moves an attack; it does not remove one. The number has to come from an
+operator, so the attack is now on the operator: talk one into forwarding a
+number — a pretext, a wrong number, a "can you add my colleague" — and the agent
+can message it. Every check downstream passes, because the number arrived by
+exactly the route a legitimate one takes; there is nothing in the envelope for
+the bridge to tell them apart by, and no amount of validation in `contacts.ts`
+would find it. What an operator has afterwards is the `contact.added` feed line
+and the contact list in the panel, both of which are after the fact.
+
+What the gate buys is not immunity but a smaller and more visible attack
+surface. The attacker must reach a named operator in a direct chat and persuade
+a person, rather than reaching the agent from any chat it can see and persuading
+a language model — and with `crossChat: false` the resulting key still cannot be
+addressed, so on the default configuration this residual costs a panel row
+rather than a message.
 
 Two limits were tightened alongside the widening, because both were sized for a
 verb that could only answer the person in front of it:

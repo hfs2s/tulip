@@ -211,7 +211,34 @@ export class ChatRegistry {
     }
     // A record that was superseded still answers for its own key, so nothing
     // holding one breaks — but a new message under it belongs to the survivor.
-    return existing.mergedInto ?? chatKey;
+    return this.canonical(chatKey);
+  }
+
+  /**
+   * The record a key ultimately answers to.
+   *
+   * A superseded key still resolves — nothing holding an old one breaks — but
+   * it has to resolve to the *survivor*, because that is where the block, the
+   * jid and the history actually live. This is the single definition of that
+   * hop; `keyFor` used to be the only place it existed, which is exactly how
+   * the lookups below came to disagree with it.
+   *
+   * **The bug this closes.** Inbound was already safe: the dispatcher checks
+   * the key `keyFor` handed it, which is the survivor. Outbound was not.
+   * `crossChatTarget` in `outbox.ts` checks the key the *agent* supplied, and
+   * the agent's workspace persists per chat across turns, so it can still be
+   * holding a pre-merge key. An operator blocks the surviving record; the agent
+   * sends to the stale one; `jidFor` returned a jid and `isBlocked` returned
+   * false, and the block was evaded by an identifier WhatsApp chose.
+   *
+   * One hop is the whole story. `mergedInto` is only ever set on the linked-id
+   * record (`asSeen`) and only ever points at the phone-number record
+   * (`preferred`), and a phone-number record is never itself a merge source —
+   * so no chain can form. Following one anyway would put this out of step with
+   * `keyFor`, which is the definition it exists to mirror.
+   */
+  private canonical(chatKey: string): string {
+    return this.byKey.get(chatKey)?.mergedInto ?? chatKey;
   }
 
   /**
@@ -276,12 +303,6 @@ export class ChatRegistry {
   }
 
   /**
-   * The WhatsApp id a key refers to, or null.
-   *
-   * Every outbound send resolves through here. A key that was never issued has
-   * no destination, which is the property that makes a forged one useless.
-   */
-  /**
    * The key a bare phone number resolves to, if the bridge has issued one.
    *
    * Derives the key the same way `syncContacts` does and then *checks a record
@@ -289,33 +310,72 @@ export class ChatRegistry {
    * derivation always succeeds for any digits at all, so returning it would
    * hand out keys for numbers nobody added — which is exactly the property
    * `jidFor` is careful not to have.
+   *
+   * Canonicalised on the way out for the same reason everything else here is:
+   * this key is handed to the agent as an addressable destination, and handing
+   * back one that `all()` no longer lists is how the two views disagree.
    */
   keyForNumber(number: string): string | null {
     const chatKey = chatKeyFor(`${number}@s.whatsapp.net`, this.salt);
-    return this.byKey.has(chatKey) ? chatKey : null;
+    return this.byKey.has(chatKey) ? this.canonical(chatKey) : null;
   }
 
+  /**
+   * The WhatsApp id a key refers to, or null.
+   *
+   * Every outbound send resolves through here. A key that was never issued has
+   * no destination, which is the property that makes a forged one useless — and
+   * a key that was superseded resolves to the survivor's id, so the same person
+   * is reached however they are named.
+   */
   jidFor(chatKey: string): string | null {
-    return this.byKey.get(chatKey)?.jid ?? null;
+    return this.byKey.get(this.canonical(chatKey))?.jid ?? null;
   }
 
   get(chatKey: string): ChatRecord | null {
-    return this.byKey.get(chatKey) ?? null;
+    return this.byKey.get(this.canonical(chatKey)) ?? null;
   }
 
+  /**
+   * Update a record in place.
+   *
+   * **Resolves, like every other accessor here.** Today the only caller passes
+   * a key it just got from `keyFor`, which is already the survivor, so this
+   * changes nothing in the product path. It is still the right shape for two
+   * reasons. The patch may carry `blocked`, which makes this a second write
+   * path into the field `isBlocked` reads — and a write that lands somewhere
+   * a read does not look is the precise shape of the bug `canonical` exists to
+   * close. And `lastSeenAt` and `messages` accumulating on a row that `all()`
+   * filters out is history written where nobody will ever read it, which
+   * silently mis-sorts the destination list the agent is offered.
+   */
   touch(chatKey: string, patch: Partial<Pick<ChatRecord, 'name' | 'messages' | 'blocked'>>, now: number): void {
-    const record = this.byKey.get(chatKey);
+    const record = this.byKey.get(this.canonical(chatKey));
     if (!record) return;
     Object.assign(record, patch, { lastSeenAt: now });
     this.dirty = true;
   }
 
   isBlocked(chatKey: string): boolean {
-    return this.byKey.get(chatKey)?.blocked === true;
+    return this.byKey.get(this.canonical(chatKey))?.blocked === true;
   }
 
+  /**
+   * Block or unblock a chat.
+   *
+   * **Resolves, and this one is not optional.** An operator blocks from the
+   * panel or from `!block <key>`, and the key in front of them can easily be a
+   * superseded one — a feed line, a screenshot, a page they had open before the
+   * merge. Writing the flag onto the dead row while `isBlocked` reads the
+   * survivor would mean the block appears to have been accepted and does
+   * nothing at all: the same split as the original bug, mirrored, and worse,
+   * because it is silent and the operator has been told it worked.
+   *
+   * The alternative — leaving the superseded record's own flag as history —
+   * buys nothing. `all()` never lists it and no reader ever consults it.
+   */
   setBlocked(chatKey: string, blocked: boolean): boolean {
-    const record = this.byKey.get(chatKey);
+    const record = this.byKey.get(this.canonical(chatKey));
     if (!record) return false;
     record.blocked = blocked;
     this.dirty = true;
