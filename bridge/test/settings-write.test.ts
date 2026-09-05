@@ -49,6 +49,39 @@ function deps() {
 beforeEach(() => { if (existsSync(configFile)) unlinkSync(configFile); });
 afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
 
+describe('the spoken language, which the panel saves', () => {
+  it('saves a language the provider recognises', () => {
+    // The read side of this shipped working and the write side did not: the
+    // patch schema is `.strict()` and separate from the config schema, so a
+    // field added to one and not the other reads back fine and refuses every
+    // save with "Unrecognized key(s)".
+    writeFileSync(configFile, '{"audience":{"everyone":false}}');
+    const result = updateSettings(deps(), { agent: { languageBoost: 'Catalan' } });
+    expect(result.ok).toBe(true);
+    expect(JSON.parse(readFileSync(configFile, 'utf8')).agent.languageBoost).toBe('Catalan');
+  });
+
+  it('saves empty, meaning the deployment default', () => {
+    writeFileSync(configFile, '{"audience":{"everyone":false}}');
+    expect(updateSettings(deps(), { agent: { languageBoost: '' } }).ok).toBe(true);
+  });
+
+  it('accepts the one value with a comma in it', () => {
+    // `Chinese,Yue` is how the provider spells Cantonese. A character-class
+    // rule modelled on `voiceId` would reject a language that works.
+    writeFileSync(configFile, '{"audience":{"everyone":false}}');
+    expect(updateSettings(deps(), { agent: { languageBoost: 'Chinese,Yue' } }).ok).toBe(true);
+  });
+
+  it('refuses one it does not', () => {
+    writeFileSync(configFile, '{"audience":{"everyone":false}}');
+    const result = updateSettings(deps(), { agent: { languageBoost: 'Spanglish' } });
+    expect(result.ok).toBe(false);
+    // Nothing written: a refused save changes nothing at all.
+    expect(JSON.parse(readFileSync(configFile, 'utf8')).agent).toBeUndefined();
+  });
+});
+
 describe('a config.json that cannot be parsed', () => {
   it('refuses the save rather than overwriting every other section', async () => {
     // A trailing comma and a missing brace: the classic hand-edit slip.

@@ -25,7 +25,7 @@ import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
-import { LANGUAGE_BOOSTS, parseConfig, Contact } from './config.js';
+import { LANGUAGE_BOOSTS, LanguageBoost, parseConfig, Contact } from './config.js';
 import { deletePage, listPages, pagesHost, type PageSummary } from './pages.js';
 import { forget, forgetAll, readMemory } from './memory.js';
 import type { ChatRegistry } from './chats.js';
@@ -710,6 +710,13 @@ const SettingsPatch = z
       images: z.boolean().optional(),
       voice: z.boolean().optional(),
       voiceId: z.string().max(128).regex(/^[A-Za-z0-9_-]*$/, 'letters, digits, dashes and underscores only').optional(),
+      /**
+       * Imported, not restated — and note it could not be restated as a regex
+       * anyway: `Chinese,Yue` is one of the provider's own values, comma
+       * included, so a character class over the voice-id alphabet would reject
+       * a language that works.
+       */
+      languageBoost: LanguageBoost.optional(),
       /**
        * Imported from `config.ts` rather than restated. This one decides who a
        * machine holding a shell may open a conversation with, and a second copy

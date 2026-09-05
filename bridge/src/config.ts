@@ -231,6 +231,14 @@ export const Contact = z
  * of Cantonese and not a mistake here; anything splitting this list on commas
  * will produce two languages that do not exist.
  */
+/**
+ * One value from that list, or empty for the deployment's default.
+ *
+ * Exported so the panel's patch schema can import it rather than restate it —
+ * the same reasoning `Contact` carries there: a second copy of a rule is a copy
+ * that will eventually disagree with the first, and the failure here is silent
+ * until somebody sends a voice note.
+ */
 export const LANGUAGE_BOOSTS = [
   'auto',
   'Afrikaans', 'Arabic', 'Bulgarian', 'Catalan', 'Chinese', 'Chinese,Yue', 'Croatian',
@@ -240,6 +248,13 @@ export const LANGUAGE_BOOSTS = [
   'Romanian', 'Russian', 'Slovak', 'Slovenian', 'Spanish', 'Swedish', 'Tamil',
   'Thai', 'Turkish', 'Ukrainian', 'Vietnamese',
 ] as const;
+
+export const LanguageBoost = z
+  .string()
+  .max(32)
+  .refine((v) => v === '' || (LANGUAGE_BOOSTS as readonly string[]).includes(v), {
+    message: 'not a language the speech provider recognises',
+  });
 
 const Agent = z
   .object({
@@ -326,13 +341,7 @@ const Agent = z
      * and voice notes fall back to text, so a typo here is silent until someone
      * sends one.
      */
-    languageBoost: z
-      .string()
-      .max(32)
-      .refine((v) => v === '' || (LANGUAGE_BOOSTS as readonly string[]).includes(v), {
-        message: 'not a language the speech provider recognises',
-      })
-      .default(''),
+    languageBoost: LanguageBoost.default(''),
   })
   .strict()
   .default({});
