@@ -214,7 +214,6 @@ function go(next) {
   var parts = String(next).split('/');
   var page = parts[0] || 'overview';
   if (page === 'chat') chatOpen = /^[0-9a-f]{16}$/.test(parts[1] || '') ? parts[1] : null;
-  if (page === 'terminal') termOpen = /^[0-9a-f]{16}$/.test(parts[1] || '') ? parts[1] : null;
 
   route = page;
   if (location.hash !== '#/' + next) location.hash = '#/' + next;
@@ -1462,12 +1461,22 @@ function renderSessions() {
   stopSessionPoll();
   termView = null;
 
-  var app = node('div', 'chatapp');
-  app.id = 'termApp';
-  if (termOpen) app.classList.add('reading');
-  app.appendChild(sessionColumn());
-  app.appendChild(sessionPane());
-  p.appendChild(app);
+  // Juan's Claude Code, not a directory of anybody's. There is one agent; it
+  // opens a window per conversation because that is how the chats are kept from
+  // seeing each other, but that is an implementation of isolation rather than
+  // something to browse. So this shows the session that is running — the one
+  // being answered now, or the last one used — and never asks which.
+  termOpen = currentSession();
+  sessionKeys = liveSessions().map(function (c) { return c.chatKey; }).join(',');
+
+  var pane = node('section', 'sessionpage');
+  pane.appendChild(sessionHead());
+  var body = node('div', 'session');
+  body.id = 'termBody';
+  if (termOpen) body.appendChild(node('p', 'thread-note', 'Reading the session…'));
+  else body.appendChild(noSessionNote());
+  pane.appendChild(body);
+  p.appendChild(pane);
 
   if (termOpen) {
     void refreshSession();
@@ -1475,125 +1484,112 @@ function renderSessions() {
   }
 }
 
-/** Every chat the agent has a window open for, newest first. */
+/**
+ * The session Juan is in right now, or the one he was in last.
+ *
+ * The chat it belongs to is context rather than a choice: what an operator came
+ * to this page for is "what is Claude Code doing", and the answer is whatever
+ * window is live. When nothing is live there is nothing to read, and saying so
+ * is better than offering a menu of closed ones.
+ */
+function currentSession() {
+  var live = liveSessions();
+  if (!live.length) return null;
+  var busy = state && state.queue && state.queue.inFlight;
+  for (var i = 0; i < live.length; i++) if (live[i].chatKey === busy) return busy;
+  return live[0].chatKey;
+}
+
+/** The windows the agent reports, most recently used first. */
 function liveSessions() {
   var keys = (state && state.agent && state.agent.openChats) || [];
   var known = {};
   ((state && state.chats) || []).forEach(function (c) { known[c.chatKey] = c; });
   return keys.map(function (k) {
-    return known[k] || { chatKey: k, name: null, isGroup: false, lastSeenAt: 0, messages: 0 };
+    return known[k] || { chatKey: k, name: null, isGroup: false, lastSeenAt: 0 };
   }).sort(function (a, b) { return (b.lastSeenAt || 0) - (a.lastSeenAt || 0); });
 }
 
-function sessionColumn() {
-  var col = node('aside', 'convo');
-  var top = node('div', 'convo-head');
-  var lead = node('p', 'convo-lead',
-    'One Claude Code session per conversation. They cannot see one another.');
-  top.appendChild(lead);
-  col.appendChild(top);
-
-  var list = node('div', 'convo-list');
-  list.id = 'termList';
-  col.appendChild(list);
-  paintSessionList(list);
-  return col;
-}
-
-function paintSessionList(target) {
-  var list = target || el('termList');
-  if (!list) return;
-  if (!target && list.contains(document.activeElement)) return;
-  var was = list.scrollTop;
-  clear(list);
-
-  var rows = liveSessions();
-  if (!rows.length) {
-    list.appendChild(node('p', 'convo-none',
-      state && state.agent && !state.agent.sessions
-        ? 'No session is open. One starts on the next message and appears here.'
-        : 'The agent is not reporting, so there is nothing to list. The container is the thing to look at.'));
-    return;
-  }
-  rows.forEach(function (c) {
-    var b = node('button', 'convo-row');
-    b.type = 'button';
-    b.setAttribute('aria-current', c.chatKey === termOpen ? 'true' : 'false');
-    var dot = node('span', 'dot');
-    dot.style.background = state && state.queue && state.queue.inFlight === c.chatKey
-      ? 'var(--warn)' : 'var(--accent)';
-    b.appendChild(dot);
-    b.appendChild(node('span', 'name', (c.name || 'someone') + (c.isGroup ? ' (group)' : '')));
-    b.appendChild(node('span', 'when',
-      state && state.queue && state.queue.inFlight === c.chatKey ? 'working' : 'idle'));
-    b.appendChild(node('span', 'last', c.chatKey));
-    b.addEventListener('click', function () { go('terminal/' + c.chatKey); });
-    list.appendChild(b);
-  });
-  list.scrollTop = was;
-}
-
-function sessionPane() {
-  var pane = node('section', 'thread-pane');
-  if (!termOpen) {
-    var none = node('div', 'pane-empty');
-    none.appendChild(icon('terminal'));
-    none.appendChild(node('h3', null, 'Pick a session'));
-    none.appendChild(node('p', null,
-      'Every prompt, thought and command that answered one conversation, in order. '
-      + 'Choose one on the left — or open the raw pane, which shows all of them at once.'));
-    var open = node('button', 'sm', 'Open the raw pane');
-    open.type = 'button';
-    open.addEventListener('click', openTerminal);
-    none.appendChild(open);
-    pane.appendChild(none);
-    return pane;
-  }
-
+function sessionHead() {
   var h = node('header', 'thread-head');
   var cap = node('div', 'cap');
   h.appendChild(cap);
 
-  var back = node('button', 'sm backrow');
-  back.type = 'button';
-  back.setAttribute('aria-label', 'Back to the sessions');
-  back.appendChild(icon('back'));
-  back.addEventListener('click', function () { go('terminal'); });
-  cap.appendChild(back);
-
   var who = node('div', 'who');
-  var title = node('h3', null, '…');
-  title.id = 'termWho';
-  who.appendChild(title);
+  // The name of the thing, not of whoever it happens to be answering. Who that
+  // is belongs on the line below, where it reads as what it is: context.
+  who.appendChild(node('h3', null, 'Juan’s Claude Code'));
   var sub = node('p', 'sub');
   var dot = node('span', 'dot');
   dot.id = 'termDot';
+  if (!termOpen) dot.style.background = 'var(--faint)';
   sub.appendChild(dot);
-  var says = node('span', null, 'reading');
+  var says = node('span', null, termOpen ? 'reading' : 'no session running');
   says.id = 'termState';
   sub.appendChild(says);
-  sub.appendChild(node('span', 'key', termOpen));
   who.appendChild(sub);
   cap.appendChild(who);
 
   var acts = node('div', 'acts');
   var raw = node('button', 'sm raw');
   raw.type = 'button';
-  raw.title = 'The live tmux pane, read-only. It carries every conversation at once.';
+  raw.title = 'The live tmux pane, read-only.';
   raw.appendChild(icon('terminal'));
   raw.appendChild(node('span', null, 'Raw pane'));
   raw.addEventListener('click', openTerminal);
   acts.appendChild(raw);
   cap.appendChild(acts);
-  pane.appendChild(h);
+  return h;
+}
 
-  var wrap = node('div', 'thread-wrap');
-  var body = node('div', 'session');
-  body.id = 'termBody';
-  body.appendChild(node('p', 'thread-note', 'Reading the session…'));
-  wrap.appendChild(body);
-  pane.appendChild(wrap);
-  return pane;
+/**
+ * No session, which is the ordinary resting state rather than a fault.
+ *
+ * A window opens when a message arrives and closes again after half an hour
+ * idle, so most of the time nothing is running and nothing is wrong. The raw
+ * pane is still offered: an empty tmux is worth seeing when the question is
+ * whether the container is alive at all.
+ */
+function noSessionNote() {
+  var box = node('div', 'pane-empty');
+  box.appendChild(icon('terminal'));
+  var reporting = !!(state && state.agent && state.agent.up !== false);
+  box.appendChild(node('h3', null, reporting ? 'Nothing is running' : 'The agent is not reporting'));
+  box.appendChild(node('p', null, reporting
+    ? 'Claude Code starts when somebody messages Juan and stops again after half an hour idle. '
+      + 'Nothing has been lost — the next message starts it, and what it does appears here.'
+    : 'There is no status file to read, so this cannot say what is running. The container is the '
+      + 'thing to look at; messages queue safely meanwhile.'));
+  var open = node('button', 'sm', 'Open the raw pane anyway');
+  open.type = 'button';
+  open.addEventListener('click', openTerminal);
+  box.appendChild(open);
+  return box;
+}
+
+/** The live set as last rendered, so a poll knows when the page must change. */
+var sessionKeys = null;
+
+/**
+ * Reconcile against a fresh snapshot rather than re-rendering.
+ *
+ * A full render every five seconds would throw away the scroll position. Only
+ * two things move on a poll: whether anything is running at all — which changes
+ * the page — and whether it is mid-turn, which is a dot and a few words.
+ */
+function paintSessionLive() {
+  var keys = liveSessions().map(function (c) { return c.chatKey; }).join(',');
+  if (keys !== sessionKeys) { renderSessions(); return; }
+  if (!termOpen || !termView) return;
+  var busy = !!(state && state.queue && state.queue.inFlight === termOpen);
+  var name = (termView.chat && termView.chat.name) || 'someone';
+  var says = el('termState'), dot = el('termDot');
+  if (says) {
+    says.textContent = busy ? 'answering ' + name
+      : termView.live ? 'idle — last answered ' + name
+      : 'session closed';
+  }
+  if (dot) dot.style.background = busy ? 'var(--warn)' : termView.live ? 'var(--accent)' : 'var(--faint)';
 }
 
 async function refreshSession() {
@@ -1612,11 +1608,16 @@ async function refreshSession() {
   if (key !== termOpen || !body.isConnected) return;
   termView = view;
 
-  var who = el('termWho');
-  if (who) who.textContent = (view.chat && view.chat.name) || 'someone';
+  // Who he is answering is context on one line, not a heading: the subject of
+  // this page is Claude Code, and it is the same Claude Code either way.
   var says = el('termState'), dot = el('termDot');
   var busy = !!(state && state.queue && state.queue.inFlight === key);
-  if (says) says.textContent = busy ? 'answering now' : view.live ? 'session open' : 'session closed';
+  var name = (view.chat && view.chat.name) || 'someone';
+  if (says) {
+    says.textContent = busy ? 'answering ' + name
+      : view.live ? 'idle — last answered ' + name
+      : 'session closed';
+  }
   if (dot) dot.style.background = busy ? 'var(--warn)' : view.live ? 'var(--accent)' : 'var(--faint)';
 
   paintSession(view);
@@ -3639,7 +3640,7 @@ async function refresh() {
   else if (route === 'chat') paintChatLive();
   // Same reasoning: this page owns a poll and a selection, and repainting it
   // every five seconds would restart the one and lose the other.
-  else if (route === 'terminal') paintSessionList();
+  else if (route === 'terminal') paintSessionLive();
 }
 
 // ── Shader backdrop ─────────────────────────────────────────────────────────

@@ -27,7 +27,13 @@
     --display:'Onest',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     --body:'InterVar',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    --rail:236px; --r-card:14px; --r-pill:999px;
+    --rail:236px;
+    /* Containers are square. A rounded panel reads as a component library
+       rather than as an instrument, and this is an instrument. `--r-pill` stays
+       for the handful of controls that are genuinely circles — a round button is
+       a shape, not a rounded rectangle — and for the toggle, whose whole
+       affordance is that it looks like a physical switch. */
+    --r-card:0; --r-pill:999px;
   }
 
   *{box-sizing:border-box}
@@ -113,7 +119,7 @@
   .topbar-page{margin-left:auto;font-size:13px;color:var(--faint);
                white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .topbar-toggle{flex:0 0 auto;width:40px;height:40px;display:grid;place-items:center;
-                 border:1px solid var(--line-soft);border-radius:11px;background:transparent;
+                 border:1px solid var(--line-soft);border-radius:0;background:transparent;
                  color:var(--dim);cursor:pointer;padding:0;
                  transition:color .16s ease,border-color .16s ease,background .16s ease}
   .topbar-toggle:hover{color:var(--ink);border-color:var(--line)}
@@ -122,7 +128,7 @@
   .topbar-toggle[aria-expanded="true"]{color:var(--ink);background:var(--panel);border-color:var(--line)}
   .topbar-toggle[aria-expanded="true"] .ico-menu{display:none}
   .topbar-toggle[aria-expanded="true"] .ico-close{display:block}
-  .nav{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:10px;
+  .nav{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:0;
        color:var(--dim);cursor:pointer;border:0;background:transparent;width:100%;
        font:inherit;text-align:left;transition:background .16s ease,color .16s ease}
   .nav svg{width:17px;height:17px;flex:0 0 17px;opacity:.8}
@@ -130,7 +136,7 @@
   .nav[aria-current=page]{background:var(--accent-dim);color:var(--accent)}
   .nav[aria-current=page] svg{opacity:1}
   .nav .count{margin-left:auto;font-size:11.5px;color:var(--faint);
-              background:var(--raise);border-radius:var(--r-pill);padding:1px 8px}
+              background:var(--raise);border-radius:0;padding:1px 8px}
   .rail-foot{margin-top:auto;flex:none;padding:14px 10px 0;
              border-top:1px solid var(--line-soft);
              font-size:11.5px;color:var(--faint);line-height:1.5}
@@ -170,7 +176,7 @@
 
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(126px,1fr));gap:1px;
          background:var(--line-soft);border:1px solid var(--line-soft);
-         border-radius:var(--r-card);overflow:hidden;margin-bottom:26px}
+         border-radius:0;overflow:hidden;margin-bottom:26px}
   .stat{background:var(--panel);padding:16px 18px}
   .stat b{display:block;font:400 27px/1.1 var(--display);letter-spacing:-.03em}
   .stat small{display:block;margin-top:4px;font-size:12px;color:var(--faint)}
@@ -178,7 +184,7 @@
   .stat.bad b{color:var(--bad)}
 
   .card{background:var(--panel);border:1px solid var(--line-soft);
-        border-radius:var(--r-card);padding:20px 22px;margin-bottom:18px;
+        border-radius:0;padding:20px 22px;margin-bottom:18px;
         position:relative;isolation:isolate}
   .card::before{content:"";position:absolute;inset:0;border-radius:inherit;
     pointer-events:none;z-index:-1;
@@ -202,11 +208,11 @@
   .why{font-size:12.5px;color:var(--warn);margin-top:3px}
 
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:12px}
-  .tile{background:var(--panel);border:1px solid var(--line-soft);border-radius:12px;overflow:hidden}
+  .tile{background:var(--panel);border:1px solid var(--line-soft);border-radius:0;overflow:hidden}
   .tile{position:relative}
   .tile .tag{position:absolute;top:8px;left:8px;z-index:1;
              font-size:10.5px;letter-spacing:.02em;padding:3px 7px;
-             border-radius:var(--r-pill);background:rgba(8,8,10,.72);
+             border-radius:0;background:rgba(8,8,10,.72);
              color:var(--faint);border:1px solid var(--line)}
   .tile .tag.sent{color:var(--accent);border-color:var(--accent)}
   .tile img,.tile video{width:100%;height:120px;object-fit:cover;display:block;background:var(--raise)}
@@ -233,12 +239,12 @@
   .voice-foot{display:flex;justify-content:flex-end;padding:0 10px 8px}
   /* The card is a frame now; its padding belongs to the parts inside it, which
      are a full-width button and a player that must sit flush under it. */
-  .voice{background:var(--panel);border:1px solid var(--line-soft);border-radius:12px;
+  .voice{background:var(--panel);border:1px solid var(--line-soft);border-radius:0;
          overflow:hidden;display:flex;flex-direction:column}
   .voice-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .voice-head .who{font-size:13px;color:var(--ink);min-width:0;overflow-wrap:anywhere}
   .voice-head .tag{font-size:10.5px;letter-spacing:.02em;padding:3px 7px;
-                   border-radius:var(--r-pill);color:var(--faint);border:1px solid var(--line)}
+                   border-radius:0;color:var(--faint);border:1px solid var(--line)}
   .voice-head .tag.sent{color:var(--accent);border-color:var(--accent)}
   /* Pushed to the far end so the name and the tag stay together on the left. */
   .voice-head .meta{font-size:11.5px;color:var(--faint);margin-left:auto}
@@ -250,7 +256,7 @@
      Quiet until wanted. It removes a message somebody sent, with no trash and
      no copy kept, so it should not sit under the thumb of someone scrolling. */
   .bin{background:transparent;border:1px solid var(--line);color:var(--faint);
-       border-radius:8px;width:30px;height:30px;line-height:1;padding:0;cursor:pointer;
+       border-radius:0;width:30px;height:30px;line-height:1;padding:0;cursor:pointer;
        font-size:13px;opacity:.55;transition:opacity .15s,border-color .15s,color .15s}
   .bin:hover,.bin:focus-visible{opacity:1;color:var(--bad);border-color:var(--bad)}
   .tile .bin{position:absolute;top:8px;right:8px;z-index:1;background:rgba(8,8,10,.72)}
@@ -265,7 +271,7 @@
   }
 
   .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
-  button{font:inherit;cursor:pointer;border-radius:var(--r-pill);padding:9px 18px;
+  button{font:inherit;cursor:pointer;border-radius:0;padding:9px 18px;
          border:1px solid var(--line);background:var(--raise);color:var(--ink);
          transition:background .16s ease,border-color .16s ease,color .16s ease}
   button:hover{border-color:rgba(255,255,255,.2)}
@@ -277,7 +283,7 @@
   button[disabled]{opacity:.42;cursor:not-allowed}
 
   input[type=text],input[type=search],select{font:inherit;color:var(--ink);
-    background:var(--raise);border:1px solid var(--line);border-radius:10px;
+    background:var(--raise);border:1px solid var(--line);border-radius:0;
     padding:9px 13px;min-width:0}
   input::placeholder{color:var(--faint)}
   input:focus,select:focus{outline:none;border-color:var(--accent)}
@@ -285,7 +291,7 @@
   .search{flex:1;min-width:180px}
 
   .seg{display:inline-flex;background:var(--raise);border:1px solid var(--line);
-       border-radius:var(--r-pill);padding:3px;gap:2px}
+       border-radius:0;padding:3px;gap:2px}
   .seg button{border:0;background:transparent;padding:6px 14px;font-size:13px;color:var(--dim)}
   .seg button[aria-pressed=true]{background:var(--accent-dim);color:var(--accent)}
 
@@ -302,7 +308,7 @@
   .switch input:disabled + .track{opacity:.5}
   .switch input:focus-visible + .track{outline:2px solid var(--accent);outline-offset:2px}
 
-  .range{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;
+  .range{-webkit-appearance:none;appearance:none;height:4px;border-radius:0;
          background:var(--line);width:170px}
   .range::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;
          border-radius:50%;background:var(--accent);cursor:pointer}
@@ -323,7 +329,7 @@
   .numeric .unit{text-align:left}
   .numeric .badge{grid-column:1/-1;justify-self:start;margin-top:2px}
   .textset{font:inherit;font-family:var(--mono);font-size:12.5px;color:var(--ink);
-           background:var(--raise);border:1px solid var(--line);border-radius:8px;
+           background:var(--raise);border:1px solid var(--line);border-radius:0;
            padding:7px 10px;width:280px;max-width:100%}
   /* The page declares a dark color-scheme, so the native menu follows; these
      only cover the closed control and the options that some engines still
@@ -331,7 +337,7 @@
   select.textset{cursor:pointer}
   select.textset option{background:var(--panel);color:var(--ink)}
   .numbox{font:inherit;font-family:var(--mono);font-size:12.5px;color:var(--ink);
-          background:var(--raise);border:1px solid var(--line);border-radius:8px;
+          background:var(--raise);border:1px solid var(--line);border-radius:0;
           padding:6px 8px;width:9ch;text-align:right}
 
   .field{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;
@@ -346,7 +352,7 @@
   .doctoc{position:sticky;top:28px;align-self:start;display:flex;flex-direction:column;gap:1px;
           max-height:calc(100dvh - 90px);overflow-y:auto}
   .doctoc a{font-size:12.5px;line-height:1.4;color:var(--faint);text-decoration:none;
-            padding:6px 10px;border-radius:8px;transition:background .14s ease,color .14s ease}
+            padding:6px 10px;border-radius:0;transition:background .14s ease,color .14s ease}
   .doctoc a:hover{color:var(--ink);background:var(--raise)}
   .doctoc a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
@@ -367,9 +373,9 @@
   .doc blockquote{margin:14px 0;padding-left:14px;border-left:2px solid var(--accent-dim);
                   font-size:14px;line-height:1.65;color:var(--dim)}
   .doc code{font-family:var(--mono);font-size:12.5px;color:var(--accent);
-            background:var(--accent-dim);border:0;border-radius:5px;padding:1px 5px}
+            background:var(--accent-dim);border:0;border-radius:0;padding:1px 5px}
   .doc pre{font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--faint);
-           background:var(--raise);border:1px solid var(--line-soft);border-radius:8px;
+           background:var(--raise);border:1px solid var(--line-soft);border-radius:0;
            padding:11px 13px;margin:10px 0 14px;white-space:pre-wrap;overflow-x:auto}
   .doc pre code{background:none;color:inherit;padding:0}
   .doc hr{border:0;border-top:1px solid var(--line-soft);margin:32px 0}
@@ -401,7 +407,7 @@
   .value{font-family:var(--mono);font-size:12.5px;color:var(--dim)}
 
   .badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;
-         border:1px solid var(--line);border-radius:var(--r-pill);padding:3px 10px;color:var(--dim)}
+         border:1px solid var(--line);border-radius:0;padding:3px 10px;color:var(--dim)}
   .badge.on{border-color:var(--accent);color:var(--accent)}
   .badge.off{border-color:var(--warn);color:var(--warn)}
 
@@ -480,7 +486,7 @@
     margin-right:-1px;
     padding-right:15px;
     border-bottom-color:transparent;
-    border-radius:11px 0 0 11px;
+    border-radius:0;
     box-shadow:inset 0 1px 0 var(--line-soft), inset 1px 0 0 var(--line-soft),
                inset 0 -1px 0 var(--line-soft);
   }
@@ -545,14 +551,14 @@
   .session{flex:1;min-height:0;overflow-y:auto;padding:16px var(--gut) 22px;
            display:flex;flex-direction:column;gap:1px}
   .srow{display:grid;grid-template-columns:52px 132px minmax(0,1fr);gap:12px;
-        align-items:baseline;padding:6px 10px;border-radius:8px;font-size:12.5px}
+        align-items:baseline;padding:6px 10px;border-radius:0;font-size:12.5px}
   .srow:hover{background:var(--raise)}
   .sat{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
        font-size:11px;color:var(--faint);white-space:nowrap}
   .sverb{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .swhat{color:var(--ink);min-width:0;overflow-wrap:anywhere;line-height:1.5}
   .swhat code{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
-              font-size:.88em;background:var(--raise);border-radius:4px;padding:1px 4px}
+              font-size:.88em;background:var(--raise);border-radius:0;padding:1px 4px}
   /* What a person said or heard is the spine of the session; everything else is
      what happened between two of those, and reads quieter. */
   .srow.k-said .sverb{color:var(--accent)}
@@ -577,7 +583,7 @@
      One asymmetric corner on the side the bubble hangs from. It is the whole of
      the "tail" and it is enough: a drawn tail is a decoration, a clipped corner
      is the same information in the shape already there. */
-  .msg{max-width:min(62ch,84%);border-radius:14px;padding:9px 13px 7px;
+  .msg{max-width:min(62ch,84%);border-radius:0;padding:9px 13px 7px;
        border:1px solid var(--line-soft);background:var(--raise)}
   .msg .body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px;line-height:1.55}
   .msg .at{display:block;margin-top:3px;text-align:right;font-size:10.5px;color:var(--faint)}
@@ -598,7 +604,7 @@
      lists, and a paragraph inside a chat bubble is one nobody finishes. */
   .said{align-self:stretch;display:flex;gap:11px;align-items:flex-start;
         max-width:min(70ch,94%)}
-  .av{width:25px;height:25px;flex:0 0 25px;margin-top:1px;border-radius:8px;
+  .av{width:25px;height:25px;flex:0 0 25px;margin-top:1px;border-radius:0;
       background:var(--raise);border:1px solid var(--line);color:var(--accent);
       font-size:11.5px;font-weight:600;display:flex;align-items:center;
       justify-content:center;user-select:none}
@@ -610,7 +616,7 @@
   .said .txt li{margin:0 0 4px}
   .said .txt code{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
                   font-size:.87em;background:var(--raise);border:1px solid var(--line-soft);
-                  border-radius:5px;padding:1px 5px}
+                  border-radius:0;padding:1px 5px}
   .said .txt .at{display:block;margin-top:5px;text-align:left;
                  font-size:10.5px;color:var(--faint)}
   /* A second paragraph from the same voice sits closer than a change of voice. */
@@ -626,7 +632,7 @@
 
   .daymark{align-self:center;margin:8px 0 2px;font-size:11px;color:var(--faint);
            background:var(--raise);border:1px solid var(--line-soft);
-           border-radius:var(--r-pill);padding:3px 12px}
+           border-radius:0;padding:3px 12px}
 
   /* ── The work band ──────────────────────────────────────────────────────────
      What Juan did between two messages, which is the interesting half and was
@@ -643,7 +649,7 @@
      *below* the surface of what was said, which is the relationship — it is
      the machinery under a reply, not a message with a flag on it. */
   .work{align-self:stretch;margin:3px 0;border:1px solid var(--line-soft);
-        border-radius:11px;background:rgba(255,255,255,.022);
+        border-radius:0;background:rgba(255,255,255,.022);
         box-shadow:inset 0 1px 2px rgba(0,0,0,.28)}
   /* Amber, and only while it is happening: the same yellow the rail's dot uses
      for a turn in flight, so one colour means one thing across the panel. It is
@@ -652,7 +658,7 @@
   .work.busy .work-open{color:var(--warn)}
   .work-open{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
              font:inherit;font-size:12.5px;color:var(--dim);
-             background:transparent;border:0;border-radius:11px;
+             background:transparent;border:0;border-radius:0;
              padding:9px 13px;cursor:pointer}
   .work-open:hover{color:var(--ink)}
   .work-open:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
@@ -692,7 +698,7 @@
      conversation. `queue.inFlight` is a chat key, so this can only ever appear
      on the conversation actually being answered. */
   .typing{align-self:flex-end;display:flex;gap:5px;align-items:center;
-          padding:12px 15px;border-radius:14px;border-bottom-right-radius:5px;
+          padding:12px 15px;border-radius:0;border-bottom-right-radius:5px;
           background:var(--accent-dim);border:1px solid rgba(33,210,237,.3)}
   .typing i{width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.38;
             animation:bob 1.25s ease-in-out infinite}
@@ -707,7 +713,7 @@
      conversation and reading the middle of one are different jobs, and the
      scroll must not be taken away from the second to serve the first. */
   .jump{position:absolute;left:50%;bottom:16px;z-index:2;transform:translateX(-50%);
-        padding:6px 15px;font-size:12.5px;border-radius:var(--r-pill);
+        padding:6px 15px;font-size:12.5px;border-radius:0;
         background:var(--raise);border:1px solid var(--line);color:var(--ink);
         box-shadow:0 8px 24px rgba(0,0,0,.45);cursor:pointer}
   .jump:hover{border-color:var(--accent);color:var(--accent)}
@@ -750,7 +756,7 @@
      object rather than a field with a button parked beside it. The border and
      the focus ring belong to the box, so the whole thing lights up together. */
   .composer .row{display:flex;align-items:flex-end;gap:8px;
-    background:var(--raise);border:1px solid var(--line);border-radius:14px;
+    background:var(--raise);border:1px solid var(--line);border-radius:0;
     padding:6px 6px 6px 15px;transition:border-color .16s ease}
   .composer .row:focus-within{border-color:var(--accent)}
   .composer textarea{flex:1;min-width:0;display:block;resize:none;overflow-y:auto;
@@ -789,7 +795,7 @@
      something that has already gone. */
   .composer .attachrow{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 9px}
   .composer .chip{position:relative;width:54px;height:54px;flex:0 0 auto;
-    border-radius:9px;overflow:hidden;border:1px solid var(--line);background:var(--raise)}
+    border-radius:0;overflow:hidden;border:1px solid var(--line);background:var(--raise)}
   .composer .chip img{width:100%;height:100%;object-fit:cover;display:block}
   .composer .chip.pending img{opacity:.4}
   /* The only thing that says an upload is still going. Without it a large photo
@@ -812,7 +818,7 @@
     font-size:11.5px;color:var(--faint)}
   .composer .under .sp{flex:1}
   .composer .under kbd{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
-    font-size:10.5px;border:1px solid var(--line);border-radius:5px;
+    font-size:10.5px;border:1px solid var(--line);border-radius:0;
     padding:1px 5px;background:var(--raise);color:var(--dim)}
   .composer .count.near{color:var(--warn)}
 
@@ -879,7 +885,7 @@
      column rather than overflowing the panel it is supposed to be inside. */
   .termmodal{display:flex;flex-direction:column;overflow:hidden;
         width:min(1180px,96vw);height:min(720px,88vh);
-        background:#0d0d0f;border:1px solid var(--line);border-radius:14px;
+        background:#0d0d0f;border:1px solid var(--line);border-radius:0;
         box-shadow:0 24px 80px rgba(0,0,0,.6)}
   .termbar{display:flex;align-items:center;gap:12px;flex:none;
         padding:10px 10px 10px 16px;border-bottom:1px solid var(--line);
@@ -890,7 +896,7 @@
   /* In the bar rather than floating over the canvas. Every one is a workaround
      for something a canvas cannot do — select, copy, paste, scroll. */
   .termcontrols{display:flex;gap:6px;flex:none}
-  .termcontrols button{width:30px;height:30px;border-radius:8px;
+  .termcontrols button{width:30px;height:30px;border-radius:0;
         display:flex;align-items:center;justify-content:center;font-size:13px;
         background:transparent;border:1px solid var(--line);color:var(--dim);cursor:pointer}
   .termcontrols button:hover{color:var(--ink);border-color:var(--accent)}
@@ -916,7 +922,7 @@
   .termnote{margin:auto;color:var(--faint);font-family:var(--mono);font-size:13px;
             text-align:center;padding:24px;line-height:1.7;white-space:pre-line}
   .termnote[hidden],.termhost[hidden]{display:none}
-  .warnbar{border:1px solid var(--warn);color:var(--warn);border-radius:10px;
+  .warnbar{border:1px solid var(--warn);color:var(--warn);border-radius:0;
            padding:11px 14px;font-size:13px;margin-bottom:16px}
   .logline{font-family:var(--mono);font-size:12px;padding:5px 0;
            border-bottom:1px solid var(--line-soft);white-space:pre-wrap;overflow-wrap:anywhere}
@@ -931,7 +937,7 @@
          -webkit-backdrop-filter:blur(6px);
          align-items:center;justify-content:center;padding:24px}
   .scrim.on{display:flex}
-  .modal{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card);
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:0;
          width:min(520px,100%);max-height:82vh;display:flex;flex-direction:column;
          box-shadow:0 24px 70px rgba(0,0,0,.5);animation:pop .2s cubic-bezier(.2,.7,.3,1)}
   @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
@@ -948,7 +954,7 @@
      thing being sent rather than as more of the dialog's prose. */
   .modal-body blockquote.said{margin:14px 0 0;padding:10px 13px;
     border-left:2px solid var(--accent);background:var(--raise);
-    border-radius:0 10px 10px 0;font-size:13.5px;line-height:1.55}
+    border-radius:0;font-size:13.5px;line-height:1.55}
   .entry{display:flex;gap:10px;align-items:center;padding:9px 0;
          border-bottom:1px solid var(--line-soft)}
   .entry:last-child{border-bottom:0}
@@ -958,7 +964,7 @@
   .summary{display:flex;align-items:center;gap:12px}
 
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
-         background:var(--raise);border:1px solid var(--line);border-radius:var(--r-pill);
+         background:var(--raise);border:1px solid var(--line);border-radius:0;
          padding:10px 20px;font-size:13.5px;opacity:0;transition:opacity .2s ease;
          pointer-events:none;z-index:9}
   .toast.on{opacity:1}
