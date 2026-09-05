@@ -144,30 +144,6 @@
                white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .agent-who small{display:block;font-size:11px;color:var(--faint)}
 
-  /* The way in to the agent, directly under the agent's own name — because the
-     pane belongs to Juan, not to a conversation. It used to live in a thread
-     header, which put it out of reach whenever no conversation was selected
-     and implied a scope it does not have: one pane carries every chat at once.
-
-     Deliberately not the accent fill. Cyan already says two things here — "you
-     are on this page" on a nav row, and "Juan said this" in a thread — and the
-     one control that types into a stranger's live conversation should borrow
-     neither. A bordered rectangle rather than an inset pill, so the shape says
-     control rather than destination. */
-  .rail-term{display:flex;align-items:center;gap:10px;width:100%;margin-top:13px;
-       padding:8px 10px;border:1px solid var(--line);border-radius:9px;
-       background:transparent;color:var(--dim);font:inherit;font-size:12.5px;
-       cursor:pointer;text-align:left;
-       transition:border-color .16s ease,color .16s ease}
-  .rail-term svg{width:15px;height:15px;flex:0 0 15px;opacity:.7}
-  .rail-term:hover,.rail-term:focus-visible{border-color:var(--accent);color:var(--ink)}
-  .rail-term:hover svg,.rail-term:focus-visible svg{opacity:1}
-  .rail-term:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  /* The same treatment the nav uses for a count, because it is the same kind of
-     fact: how many conversations are open is what you are walking into. */
-  .rail-term .count{margin-left:auto;font-size:11.5px;color:var(--faint);
-       background:var(--raise);border-radius:var(--r-pill);padding:1px 8px}
-
   .dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%;
        background:var(--faint);transition:background .2s ease}
   .dot.live{background:var(--accent)}
@@ -751,6 +727,29 @@
   .composer .sendbtn:disabled{opacity:.32;cursor:not-allowed}
   .composer .sendbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
+  /* Attached images, above the box they belong to and sharing its width, so an
+     attachment reads as part of the message being written rather than as
+     something that has already gone. */
+  .composer .attachrow{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 9px}
+  .composer .chip{position:relative;width:54px;height:54px;flex:0 0 auto;
+    border-radius:9px;overflow:hidden;border:1px solid var(--line);background:var(--raise)}
+  .composer .chip img{width:100%;height:100%;object-fit:cover;display:block}
+  .composer .chip.pending img{opacity:.4}
+  /* The only thing that says an upload is still going. Without it a large photo
+     looks attached and would be sent before it exists. */
+  .composer .chip.pending::after{content:'';position:absolute;inset:0;margin:auto;
+    width:15px;height:15px;border:2px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:chipspin .7s linear infinite}
+  @keyframes chipspin{to{transform:rotate(360deg)}}
+  .composer .chip .x{position:absolute;top:2px;right:2px;width:17px;height:17px;padding:0;
+    border:0;border-radius:50%;background:rgba(0,0,0,.66);color:#fff;font-size:12px;
+    line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .composer .chip .x:hover{background:rgba(0,0,0,.88)}
+  @media (prefers-reduced-motion:reduce){
+    .composer .chip.pending::after{animation:none}
+    .composer .micbtn.on svg{animation:none}
+  }
+
   /* What you can press, where you look for it. */
   .composer .under{display:flex;align-items:center;gap:9px;margin-top:8px;
     font-size:11.5px;color:var(--faint)}
@@ -1048,15 +1047,6 @@
           <small id="agentState">checking</small>
         </span>
       </div>
-      <button class="rail-term" id="railTerm" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="4.5" width="18" height="15" rx="2"/>
-          <path d="M7.5 9.5l3 2.5-3 2.5"/><path d="M12.5 15h4"/>
-        </svg>
-        <span>Terminal</span>
-        <span class="count" id="railTermCount" hidden></span>
-      </button>
     </div>
   </aside>
 

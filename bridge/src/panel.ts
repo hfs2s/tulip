@@ -59,6 +59,7 @@ import { paths } from './paths.js';
 import {
   chatHistory,
   chatTranscript,
+  attachToChat,
   sendToChat,
   deleteMedia,
   logTail,
@@ -150,6 +151,35 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
         reject(new Error('body must be JSON'));
       }
     });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Read a raw upload, capped hard.
+ *
+ * Separate from `readBody` because that one accumulates into a *string* and
+ * parses JSON — an image concatenated onto a string is corrupted before it is
+ * ever written, and base64 through a 64 kB cap would refuse anything real.
+ *
+ * The cap is enforced on what actually arrives, not on `content-length`, which
+ * is the sender's claim. Exceeded, the socket is destroyed rather than drained:
+ * the alternative is reading a gigabyte in order to refuse it.
+ */
+function readUpload(req: IncomingMessage, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > limit) {
+        req.destroy();
+        reject(new Error('that image is larger than the limit'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }
@@ -439,12 +469,30 @@ export function startPanel(deps: ApiDeps): Server | null {
         }
         // Types into a live conversation with a member of the public. POST, and
         // refused loudly rather than quietly — see `sendToChat`.
+        // An operator's image, on its way into the agent's session. Written to
+        // the inbound volume — the one the agent mounts read-only — so it
+        // arrives by exactly the route a WhatsApp attachment does, and the
+        // agent has no way to tell the difference or to tamper with either.
+        if (url.pathname === '/api/chat/attach' && req.method === 'POST') {
+          const key = url.searchParams.get('key') ?? '';
+          let bytes: Buffer;
+          try {
+            bytes = await readUpload(req, deps.config.limits.maxMediaBytes);
+          } catch (err) {
+            return send(res, headers, 413, { ok: false, message: String((err as Error).message) });
+          }
+          const result = attachToChat(deps, key, req.headers['content-type'] ?? '', bytes);
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
         if (url.pathname === '/api/chat/send' && req.method === 'POST') {
           const body = await readBody(req);
           const result = sendToChat(
             deps,
             typeof body['key'] === 'string' ? body['key'] : '',
             typeof body['text'] === 'string' ? body['text'] : '',
+            Array.isArray(body['files'])
+              ? body['files'].filter((f): f is string => typeof f === 'string')
+              : [],
           );
           return send(res, headers, result.ok ? 200 : 400, result);
         }

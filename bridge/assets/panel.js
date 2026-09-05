@@ -129,10 +129,6 @@ function icon(name) {
   return svg;
 }
 
-// Terminal is deliberately absent. The raw pane shows every conversation at
-// once — other people's keys, tool arguments, whatever a stack trace printed —
-// so it is not a destination of its own any more. It opens from a secondary
-// control on the Chat page, over the conversation it belongs to.
 var PAGES = [
   ['overview', 'Overview'], ['chat', 'Chat'], ['messages', 'Messages'], ['chats', 'Chats'],
   ['media', 'Media'], ['persona', 'Persona'], ['memory', 'Memory'], ['pages', 'Pages'], ['settings', 'Settings'],
@@ -153,6 +149,26 @@ function buildNav() {
     b.addEventListener('click', function () { go(p[0] === 'chat' && chatOpen ? 'chat/' + chatOpen : p[0]); });
     nav.appendChild(b);
   });
+
+  // Terminal sits with the pages because that is where somebody looks for it,
+  // but it is not one: it opens the pane over whatever you were reading and
+  // gives it back when you close it. Hence a row that looks like the others and
+  // never takes `aria-current` — nothing was navigated to, so nothing is "here".
+  //
+  // It is read-only. The pane carries every conversation at once, so it is for
+  // seeing what the agent actually ran; typing into a conversation is the Chat
+  // page's job, one reviewed line at a time.
+  var term = node('button', 'nav');
+  term.type = 'button';
+  term.id = 'navTerm';
+  term.appendChild(icon('terminal'));
+  term.appendChild(node('span', null, 'Terminal'));
+  var live = node('span', 'count', '');
+  live.id = 'navTermCount';
+  live.hidden = true;
+  term.appendChild(live);
+  term.addEventListener('click', openTerminal);
+  nav.appendChild(term);
 }
 
 /**
@@ -260,11 +276,11 @@ function verdict(s) {
   agentStatus(s);
   var badge = el('navChats');
   if (badge) badge.textContent = String(s.chats.length);
-  // How many conversations the pane is carrying, shown where the decision to
-  // open it is taken. Hidden rather than "0": an empty pane is a fine thing to
-  // open, and a zero badge reads as a warning about nothing.
+  // How many conversations the pane is carrying, on the row that opens it.
+  // Hidden rather than "0": an empty pane is a fine thing to open, and a zero
+  // badge reads as a warning about nothing.
   var open = (s.agent && s.agent.openChats) ? s.agent.openChats.length : 0;
-  var count = el('railTermCount');
+  var count = el('navTermCount');
   if (count) {
     count.textContent = String(open);
     count.hidden = open === 0;
@@ -628,6 +644,10 @@ function startChatPoll() {
 function renderChat() {
   var p = frame('chat');
   stopChatPoll();
+  // An attachment belongs to the line being written in one conversation. Moving
+  // to another must not carry it along — the bridge would refuse a path from a
+  // different chat, but offering it at all is the panel implying it would work.
+  clearAttachments();
   chatView = null;
   chatSig = null;
   chatMissed = false;
@@ -1419,6 +1439,17 @@ function pinThread() {
 
 // ── The composer ────────────────────────────────────────────────────────────
 
+/**
+ * Images attached to the line being written, in upload order.
+ *
+ * Each entry is `{ path, url, done }`. `path` is what the bridge issued and the
+ * only thing ever sent back; a chip is shown from a local object URL so the
+ * strip does not wait on a round trip to draw. Cleared when the line is sent or
+ * the conversation changes, because an attachment belongs to the message being
+ * written and to nothing else.
+ */
+var chatFiles = [];
+
 function composer() {
   var wrap = node('div', 'composer');
   // The ground and the rule above it span the pane; the field does not.
@@ -1432,6 +1463,13 @@ function composer() {
   line.id = 'chatWhyText';
   why.appendChild(line);
   cap.appendChild(why);
+
+  // Above the box and sharing its width, so an attachment reads as belonging to
+  // the message being written rather than to the thread above it.
+  var strip = node('div', 'attachrow');
+  strip.id = 'chatAttachRow';
+  strip.hidden = true;
+  cap.appendChild(strip);
 
   var row = node('div', 'row');
   var box = document.createElement('textarea');
@@ -1450,6 +1488,47 @@ function composer() {
     confirmSend(box);
   });
   row.appendChild(box);
+
+  var pick = document.createElement('input');
+  pick.type = 'file';
+  pick.id = 'chatAttachInput';
+  pick.accept = 'image/png,image/jpeg,image/webp,image/gif';
+  pick.multiple = true;
+  pick.hidden = true;
+  pick.setAttribute('tabindex', '-1');
+  pick.addEventListener('change', function () {
+    var chosen = Array.prototype.slice.call(pick.files || []);
+    pick.value = '';
+    chosen.forEach(attachOne);
+  });
+  cap.appendChild(pick);
+
+  var clip = node('button', 'micbtn');
+  clip.type = 'button';
+  clip.id = 'chatAttach';
+  clip.title = 'Attach an image';
+  clip.setAttribute('aria-label', 'Attach an image');
+  var cs = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  cs.setAttribute('viewBox', '0 0 24 24');
+  cs.setAttribute('fill', 'none');
+  cs.setAttribute('stroke', 'currentColor');
+  cs.setAttribute('stroke-width', '1.7');
+  cs.setAttribute('stroke-linecap', 'round');
+  cs.setAttribute('stroke-linejoin', 'round');
+  cs.setAttribute('aria-hidden', 'true');
+  var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', '3'); rect.setAttribute('y', '4.5');
+  rect.setAttribute('width', '18'); rect.setAttribute('height', '15'); rect.setAttribute('rx', '2');
+  cs.appendChild(rect);
+  var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  dot.setAttribute('cx', '8.5'); dot.setAttribute('cy', '10'); dot.setAttribute('r', '1.5');
+  cs.appendChild(dot);
+  var hill = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  hill.setAttribute('d', 'M4 16.5l4.5-4.5L12 15.5l3-2.5 5 4.5');
+  cs.appendChild(hill);
+  clip.appendChild(cs);
+  clip.addEventListener('click', function () { pick.click(); });
+  row.appendChild(clip);
 
   var mic = micButton(box);
   if (mic) row.appendChild(mic);
@@ -1561,6 +1640,79 @@ function micButton(box) {
   return b;
 }
 
+/** How many images one typed line may carry, matching the bridge's own cap. */
+var MAX_ATTACH = 4;
+
+/**
+ * Upload one image, and show it while that happens.
+ *
+ * The chip appears immediately from a local object URL and is marked pending
+ * until the bridge answers, because a large photo otherwise looks attached and
+ * would be sent before it exists. Failure removes the chip and says why, rather
+ * than leaving one that will never resolve.
+ */
+async function attachOne(file) {
+  if (!chatOpen) return;
+  if (chatFiles.length >= MAX_ATTACH) {
+    toast('Four images is the most one message can carry.', true);
+    return;
+  }
+  var entry = { path: null, url: URL.createObjectURL(file), done: false, name: file.name };
+  chatFiles.push(entry);
+  paintAttachments();
+
+  try {
+    var res = await fetch('/api/chat/attach?key=' + encodeURIComponent(chatOpen), {
+      method: 'POST',
+      headers: { 'content-type': file.type || 'application/octet-stream' },
+      body: file
+    });
+    var out = await res.json();
+    if (!res.ok || !out.ok) throw new Error(out.message || 'the image was refused');
+    entry.path = out.path;
+    entry.done = true;
+  } catch (err) {
+    dropAttachment(entry);
+    toast(err.message, true);
+  }
+  paintAttachments();
+}
+
+function dropAttachment(entry) {
+  var at = chatFiles.indexOf(entry);
+  if (at >= 0) chatFiles.splice(at, 1);
+  if (entry.url) URL.revokeObjectURL(entry.url);
+}
+
+/** Forget everything attached — on send, and when the conversation changes. */
+function clearAttachments() {
+  chatFiles.splice(0).forEach(function (e) { if (e.url) URL.revokeObjectURL(e.url); });
+  paintAttachments();
+}
+
+function paintAttachments() {
+  var strip = el('chatAttachRow');
+  if (!strip) return;
+  clear(strip);
+  strip.hidden = chatFiles.length === 0;
+  chatFiles.forEach(function (entry) {
+    var chip = node('div', 'chip' + (entry.done ? '' : ' pending'));
+    var img = document.createElement('img');
+    img.src = entry.url;
+    img.alt = entry.name || 'attached image';
+    chip.appendChild(img);
+    var x = node('button', 'x', '×');
+    x.type = 'button';
+    x.title = 'Remove';
+    x.setAttribute('aria-label', 'Remove ' + (entry.name || 'this image'));
+    x.addEventListener('click', function () { dropAttachment(entry); paintAttachments(); });
+    chip.appendChild(x);
+    strip.appendChild(chip);
+  });
+  var clip = el('chatAttach');
+  if (clip) clip.disabled = chatFiles.length >= MAX_ATTACH;
+}
+
 function growBox(box) {
   box.style.height = 'auto';
   box.style.height = Math.min(box.scrollHeight, 168) + 'px';
@@ -1633,7 +1785,11 @@ function confirmSend(box) {
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  if (!line) { toast('Nothing to send.'); return; }
+  // Only images the bridge has actually stored. One still uploading is not
+  // ready to be named, and naming it would hand Juan a path to nothing.
+  var ready = chatFiles.filter(function (f) { return f.done && f.path; }).map(function (f) { return f.path; });
+  if (chatFiles.length !== ready.length) { toast('An image is still uploading.'); return; }
+  if (!line && !ready.length) { toast('Nothing to send.'); return; }
   var view = chatView || {};
   var who = (view.chat && view.chat.name) || 'this person';
   var key = chatOpen;
@@ -1645,7 +1801,13 @@ function confirmSend(box) {
         'This is typed at Juan’s prompt exactly as written, as though it had arrived in the '
         + 'conversation. What he does with it is his — including anything he sends to ' + who
         + '. It cannot be recalled.'));
-      body.appendChild(node('blockquote', 'said', line));
+      if (line) body.appendChild(node('blockquote', 'said', line));
+      if (ready.length) {
+        body.appendChild(node('p', 'hint',
+          ready.length === 1
+            ? 'One image goes with it. He is told where to find it and may look at it.'
+            : ready.length + ' images go with it. He is told where to find them and may look at them.'));
+      }
       if (line !== raw.trim()) {
         body.appendChild(node('p', 'hint',
           'Line breaks became spaces: a newline at the prompt submits the message halfway through.'));
@@ -1663,9 +1825,10 @@ function confirmSend(box) {
           var result = await api('/api/chat/send', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ key: key, text: line })
+            body: JSON.stringify({ key: key, text: line, files: ready })
           });
           toast(result.message || 'Typed.');
+          clearAttachments();
           box.value = '';
           growBox(box);
           paintCount(box);
@@ -3429,15 +3592,6 @@ stream.onmessage = function (ev) {
     if (row && row.chatKey && row.chatKey === chatOpen) void refreshThread();
   }, 350);
 };
-
-// The terminal is reached from the chrome, so it no longer depends on a page
-// being open — which is exactly what went wrong when its only entry point was a
-// button inside a conversation header that is not rendered until a conversation
-// is chosen.
-(function wireRailTerminal() {
-  var b = el('railTerm');
-  if (b) b.addEventListener('click', openTerminal);
-})();
 
 refresh();
 setInterval(refresh, 5000);

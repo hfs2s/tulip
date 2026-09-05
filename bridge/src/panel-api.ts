@@ -20,7 +20,8 @@
  *     exception: an allow list you cannot read is one you cannot audit, and the
  *     operator reading it is the person who wrote it.
  */
-import { closeSync, createReadStream, existsSync, openSync, readFileSync, readSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
@@ -235,12 +236,102 @@ export function chatTranscript(deps: ApiDeps, chatKey: string, limit: number): J
  * The Enter is sent as a key rather than as a newline in the text, for the same
  * reason `sendLine` does it in `agent/src/tmux.ts`.
  */
-export function sendToChat(deps: ApiDeps, chatKey: string, raw: string): { ok: boolean; message: string } {
+/**
+ * Image types an operator may attach, and how to recognise one.
+ *
+ * Matched on the file's own leading bytes, never on the declared content-type
+ * or the name: both are the uploader's claim, and the point of writing this
+ * into the agent's inbound volume is that what lands there is what it says it
+ * is. A `.png` full of shell script is a `.png` to every check that trusts a
+ * header.
+ */
+const IMAGE_KINDS: ReadonlyArray<{ ext: string; magic: readonly number[] }> = [
+  { ext: 'png', magic: [0x89, 0x50, 0x4e, 0x47] },
+  { ext: 'jpg', magic: [0xff, 0xd8, 0xff] },
+  { ext: 'gif', magic: [0x47, 0x49, 0x46, 0x38] },
+  // WEBP is RIFF....WEBP; the four bytes at 8 are what distinguish it.
+  { ext: 'webp', magic: [0x52, 0x49, 0x46, 0x46] },
+];
+
+function imageExtension(bytes: Buffer): string | null {
+  for (const kind of IMAGE_KINDS) {
+    if (kind.magic.every((b, i) => bytes[i] === b)) {
+      if (kind.ext !== 'webp') return kind.ext;
+      return bytes.length > 12 && bytes.toString('ascii', 8, 12) === 'WEBP' ? 'webp' : null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Put an operator's image where the agent can read it.
+ *
+ * It lands in `in/media/<chatKey>/`, beside the attachments that arrived from
+ * WhatsApp, because that directory is already the one place the agent reads
+ * pictures from and it is mounted read-only on its side. Nothing new is opened
+ * up: the agent gains a file it can read, in a directory it could already read,
+ * and it still cannot write there or reach anything else.
+ *
+ * Named `op-` so an operator's own attachment is distinguishable from a
+ * stranger's in the media store, the feed, and on disk.
+ */
+export function attachToChat(
+  deps: ApiDeps,
+  chatKey: string,
+  contentType: string,
+  bytes: Buffer,
+): { ok: boolean; message: string; path?: string; name?: string } {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.' };
+  if (deps.chats.get(chatKey) === null) return { ok: false, message: 'No such chat.' };
+  if (bytes.length === 0) return { ok: false, message: 'That file was empty.' };
+
+  const ext = imageExtension(bytes);
+  if (ext === null) {
+    return {
+      ok: false,
+      message: 'That is not a PNG, JPEG, GIF or WebP. The file itself is checked, not its name.',
+    };
+  }
+  // Reported rather than enforced: the bytes already decided. A mismatch is
+  // worth a log line because it is either a confused browser or somebody
+  // probing what this accepts.
+  if (contentType && !contentType.startsWith('image/')) {
+    log('attach.typeMismatch', { chatKey, declared: contentType.slice(0, 40), actual: ext });
+  }
+
+  const directory = join(inPaths.media, chatKey);
+  try {
+    mkdirSync(directory, { recursive: true });
+    const name = `op-${String(Date.now())}-${randomUUID().slice(0, 8)}.${ext}`;
+    writeFileSync(join(directory, name), bytes, { mode: 0o600 });
+    log('attach.stored', { chatKey, name, bytes: bytes.length });
+    return { ok: true, message: 'Attached.', name, path: `media/${chatKey}/${name}` };
+  } catch (err) {
+    log('attach.failed', { chatKey, err: String((err as Error).message) });
+    return { ok: false, message: 'The image could not be saved, so nothing was attached.' };
+  }
+}
+
+export function sendToChat(
+  deps: ApiDeps,
+  chatKey: string,
+  raw: string,
+  files: readonly string[] = [],
+): { ok: boolean; message: string } {
   if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.' };
   if (deps.chats.get(chatKey) === null) return { ok: false, message: 'No such chat.' };
 
+  // Only paths this bridge issued for *this* chat, re-derived rather than
+  // trusted: the panel is authenticated, but a path is still something that
+  // arrived in a request body, and one pointing at another chat's directory
+  // would be a way to read across conversations using an operator's session.
+  const attached = files
+    .filter((f) => new RegExp(`^media/${chatKey}/op-[0-9]+-[0-9a-f]{8}\\.(png|jpg|gif|webp)$`).test(f))
+    .filter((f) => existsSync(join(inPaths.root, f)))
+    .slice(0, 4);
+
   const line = typedLine(raw);
-  if (line.length === 0) return { ok: false, message: 'Nothing to send.' };
+  if (line.length === 0 && attached.length === 0) return { ok: false, message: 'Nothing to send.' };
   if (line.length > MAX_TYPED) {
     return { ok: false, message: `That is longer than ${MAX_TYPED} characters. Say it in fewer.` };
   }
@@ -254,14 +345,25 @@ export function sendToChat(deps: ApiDeps, chatKey: string, raw: string): { ok: b
     };
   }
 
+  // Named absolutely, because the line is typed at a prompt whose working
+  // directory is the chat's workspace rather than the handoff volume — a
+  // relative path would resolve somewhere that does not exist.
+  const said = attached.length === 0
+    ? line
+    : `${line}${line ? ' ' : ''}[the operator attached ${
+        attached.length === 1 ? 'an image' : `${String(attached.length)} images`
+      }: ${attached.map((f) => `${inPaths.root}/${f}`).join(', ')} — read ${
+        attached.length === 1 ? 'it' : 'them'
+      } if it helps]`;
+
   const window = `c-${chatKey}`;
   const result = terminalKeys(window, [
-    { text: line, literal: true },
+    { text: said, literal: true },
     { text: 'Enter', literal: false },
   ]) as { ok?: boolean; message?: string };
   if (result.ok === false) return { ok: false, message: result.message ?? 'The keystrokes could not be written.' };
 
-  log('chat.typed', { chatKey, window, chars: line.length });
+  log('chat.typed', { chatKey, window, chars: said.length, attached: attached.length });
   feed.event('operator.typed', `${chatKey} — ${line.slice(0, 160)}`);
   return { ok: true, message: 'Typed into the session.' };
 }
