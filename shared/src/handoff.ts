@@ -32,6 +32,7 @@
  * that some later version learns to honour.
  */
 import { z } from 'zod';
+import { LanguageBoost } from './languages.js';
 
 // ─── Primitives ──────────────────────────────────────────────────────────────
 
@@ -434,6 +435,19 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       chatKey: Destination,
       /** Spoken aloud and sent as a WhatsApp voice note. */
       text: z.string().min(1).max(2000),
+      /**
+       * The mouth the words are spoken with, for this message only.
+       *
+       * Not the language of the text — the agent already chooses that by
+       * writing in it — but the accent it is read with. Without it a Spanish
+       * sentence is pronounced by whatever the deployment is set to, and a bot
+       * that answers a Barcelona group and a Filipino one on the same evening
+       * is wrong for one of them whichever way the setting points.
+       *
+       * Empty falls back to the operator's setting, so a message that says
+       * nothing about language behaves exactly as it did before this existed.
+       */
+      language: LanguageBoost.default(''),
     })
     .strict(),
   z

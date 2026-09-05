@@ -20,6 +20,7 @@
  * There is still no way to name a number.
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { takeDestination as liftDestination, takeLanguage as liftLanguage, strayFlag } from './cli-args.js';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -292,43 +293,23 @@ function noteReaction(emoji: string): void {
   }
 }
 
-/**
- * Pull `--to <chatKey>` out of an argument list, and hand back what is left.
- *
- * One extractor for every verb that can be addressed, because the bug this
- * replaces was a verb that had no idea `--to` existed: `voice` joined its whole
- * argument list into the words to speak, so `voice --to <key> "Kumusta"` read
- * the flag and the key *out loud* and sent the result to the current chat. The
- * person it was for got nothing; the person who asked got a voice note reciting
- * a chat key.
- *
- * So the flag is removed from the list here, not merely detected, and every
- * addressable verb goes through this. A verb that does not understand `--to`
- * cannot silently treat it as content.
- *
- * There is deliberately no way to name a phone number — you never see one. Use
- * `tulip-wa contact` to have an operator's number turned into a key.
- */
+
+/** Thin wrappers: the parsing lives in cli-args.ts so it can be tested. */
 function takeDestination(argv: readonly string[], verb: string): { chatKey: string | null; rest: string[] } {
-  const at = argv.indexOf('--to');
-  if (at === -1) return { chatKey: null, rest: [...argv] };
-  const chatKey = argv[at + 1];
-  if (chatKey === undefined || !/^[0-9a-f]{16}$/.test(chatKey)) {
-    die(`tulip-wa ${verb} --to: need a 16-character chat key, from \`tulip-wa chats\``);
-  }
-  return { chatKey, rest: [...argv.slice(0, at), ...argv.slice(at + 2)] };
+  const lifted = liftDestination(argv, verb);
+  if (!lifted.ok) die(lifted.message);
+  return { chatKey: lifted.value, rest: lifted.rest };
 }
 
-/**
- * Refuse an unrecognised `--flag` rather than treating it as content.
- *
- * The same lesson as above, generalised: for verbs whose arguments become words
- * somebody reads or hears, an unknown option is far more likely to be a mistake
- * than something to say.
- */
+function takeLanguage(argv: readonly string[], verb: string): { language: string; rest: string[] } {
+  const lifted = liftLanguage(argv, verb);
+  if (!lifted.ok) die(lifted.message);
+  return { language: lifted.value, rest: lifted.rest };
+}
+
 function refuseStrayFlags(argv: readonly string[], verb: string): void {
-  const stray = argv.find((a) => a.startsWith('--'));
-  if (stray !== undefined) die(`tulip-wa ${verb}: ${stray} is not an option, and it would have been sent as content`);
+  const stray = strayFlag(argv, verb);
+  if (stray !== null) die(stray);
 }
 
 const [command, ...rest] = process.argv.slice(2);
@@ -390,14 +371,15 @@ switch (command) {
 
   case 'voice': {
     requireCapability('voice', 'voice');
-    const { chatKey, rest: words } = takeDestination(rest, 'voice');
+    const { chatKey, rest: addressed } = takeDestination(rest, 'voice');
+    const { language, rest: words } = takeLanguage(addressed, 'voice');
     // Every remaining argument is about to be read aloud, so an unrecognised
     // one is refused rather than spoken. This is the guard that would have
-    // caught `--to` before it existed here.
+    // caught `--to` before it existed here, and `--language` after it.
     refuseStrayFlags(words, 'voice');
     const text = words.join(' ').trim() || readFileSync(0, 'utf8').trim();
     if (text.length === 0) die('tulip-wa voice: need something to say');
-    queue({ kind: 'voice', chatKey, text: text.slice(0, 2000) });
+    queue({ kind: 'voice', chatKey, text: text.slice(0, 2000), language });
     break;
   }
 

@@ -916,7 +916,15 @@ export class Outbox extends EventEmitter {
           feed.outbound(dest.key, 'text', action.text);
           break;
         }
-        const audio = await synthesise(action.text, this.deps.config.agent.voiceId, this.deps.config.agent.languageBoost);
+        // The message's own language wins over the deployment's, so the agent can
+        // answer a Barcelona group and a Filipino one in the same evening
+        // without an operator flipping a setting between them. Empty is the
+        // ordinary case and means "whatever the operator chose".
+        const audio = await synthesise(
+          action.text,
+          this.deps.config.agent.voiceId,
+          action.language || this.deps.config.agent.languageBoost,
+        );
         if (!audio.ok) {
           // Never drop the message: say it in text rather than stay silent.
           log('outbox.voiceFallback', { reason: audio.error });

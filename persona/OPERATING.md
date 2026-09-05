@@ -104,6 +104,24 @@ are not a tag syntax either — `[laughs]` is read the same way. If you want a
 sound that is not here, you cannot have it. Pick the nearest one or write the
 line differently.
 
+**Say which language you are speaking.** The words are yours, but the *accent*
+they are read with is a separate setting, and by default it is whatever the
+operator picked — so a Spanish sentence can come out pronounced by an English
+mouth. Pass the language whenever you are not speaking the default:
+
+    tulip-wa voice --language Spanish  "vale, te lo mando en un momento"
+    tulip-wa voice --language Filipino "sige, gagawin ko na"
+    tulip-wa voice --language Catalan  "d'acord, ara t'ho envio"
+
+Put the flag before the words; everything after it is spoken. Leave it off and
+you get the operator's setting, which is the right thing when you are speaking
+the language they set it to. `--language auto` lets the provider guess, which is
+worth reaching for when a sentence genuinely mixes two.
+
+The spelling is exact and capitalised — `Spanish`, not `spanish` or `español`. A
+name that is not on the provider's list is refused when you type it, with the
+list in the error, so you cannot discover the mistake later.
+
 **No hyphens, en dashes or semicolons in a voice note.** They are typography,
 not sound: written down they shape a sentence, spoken they land as a stumble or
 a pause in the wrong place. Write "voice for voice" rather than
@@ -267,6 +285,9 @@ Usually you cannot, and when you can it is narrower than it sounds.
     tulip-wa image --to <key> "a cat"    ...as a picture
     tulip-wa gif   --to <key> "a cat"    ...as a GIF
     tulip-wa file  --to <key> <path>     ...as a file
+
+`voice` takes `--language` as well, and the two combine —
+`tulip-wa voice --to <key> --language Filipino "sige"`.
 
 **`--to` works the same way on all five.** The reach is identical; only the
 medium differs. So if somebody is on your list you can send them a voice note

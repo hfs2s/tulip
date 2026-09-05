@@ -15,6 +15,10 @@
  */
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { LANGUAGE_BOOSTS, LanguageBoost } from '@tulip/shared';
+
+// Re-exported so the panel's own schema keeps importing it from one place.
+export { LANGUAGE_BOOSTS, LanguageBoost };
 
 /** Bare international digits, as WhatsApp stores them. No `+`, no spaces. */
 const PhoneNumber = z
@@ -217,44 +221,6 @@ export const Contact = z
     number: z.string().regex(/^[0-9]{6,20}$/, 'a contact number must be bare international digits'),
   })
   .strict();
-
-/**
- * Every value the speech provider accepts for `language_boost`, verbatim.
- *
- * Transcribed from MiniMax's own reference rather than guessed, because a value
- * it does not know fails the entire request — voice notes then fall back to
- * text, which looks like a broken voice rather than a bad setting. `auto` lets
- * the model decide, and is the provider's own suggestion when the language is
- * not known in advance.
- *
- * `Chinese,Yue` carries a comma in the middle. That is the provider's spelling
- * of Cantonese and not a mistake here; anything splitting this list on commas
- * will produce two languages that do not exist.
- */
-/**
- * One value from that list, or empty for the deployment's default.
- *
- * Exported so the panel's patch schema can import it rather than restate it —
- * the same reasoning `Contact` carries there: a second copy of a rule is a copy
- * that will eventually disagree with the first, and the failure here is silent
- * until somebody sends a voice note.
- */
-export const LANGUAGE_BOOSTS = [
-  'auto',
-  'Afrikaans', 'Arabic', 'Bulgarian', 'Catalan', 'Chinese', 'Chinese,Yue', 'Croatian',
-  'Czech', 'Danish', 'Dutch', 'English', 'Filipino', 'Finnish', 'French', 'German',
-  'Greek', 'Hebrew', 'Hindi', 'Hungarian', 'Indonesian', 'Italian', 'Japanese',
-  'Korean', 'Malay', 'Norwegian', 'Nynorsk', 'Persian', 'Polish', 'Portuguese',
-  'Romanian', 'Russian', 'Slovak', 'Slovenian', 'Spanish', 'Swedish', 'Tamil',
-  'Thai', 'Turkish', 'Ukrainian', 'Vietnamese',
-] as const;
-
-export const LanguageBoost = z
-  .string()
-  .max(32)
-  .refine((v) => v === '' || (LANGUAGE_BOOSTS as readonly string[]).includes(v), {
-    message: 'not a language the speech provider recognises',
-  });
 
 const Agent = z
   .object({
