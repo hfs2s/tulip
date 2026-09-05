@@ -74,9 +74,16 @@
        font:400 14.5px/1.6 var(--body);font-variant-numeric:tabular-nums;
        -webkit-font-smoothing:antialiased;display:flex;overflow:hidden}
 
+  /* The rail itself does not scroll; its nav does. With `overflow-y:auto` on
+     the whole column, `margin-top:auto` on the footer put the agent block —
+     and the terminal — below the fold on a short window, which is a way of
+     hiding a control rather than a way of fitting it. The list is the part
+     that can afford to scroll; who is answering, and the way in to them,
+     should be on screen whatever the window is doing. */
   .rail{width:var(--rail);flex:0 0 var(--rail);height:100%;
         background:var(--panel);border-right:1px solid var(--line-soft);
-        padding:22px 14px;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
+        padding:22px 14px;overflow:hidden;display:flex;flex-direction:column;gap:3px}
+  .rail nav{display:flex;flex-direction:column;gap:3px;overflow-y:auto;min-height:0}
   /* The mark sits on the word's baseline, not on its centre. Two things make
      that true, and the second is the one that is easy to miss:
 
@@ -124,7 +131,8 @@
   .nav[aria-current=page] svg{opacity:1}
   .nav .count{margin-left:auto;font-size:11.5px;color:var(--faint);
               background:var(--raise);border-radius:var(--r-pill);padding:1px 8px}
-  .rail-foot{margin-top:auto;padding:14px 10px 0;border-top:1px solid var(--line-soft);
+  .rail-foot{margin-top:auto;flex:none;padding:14px 10px 0;
+             border-top:1px solid var(--line-soft);
              font-size:11.5px;color:var(--faint);line-height:1.5}
 
   /* Who is answering, and whether they are. The persona's name belongs next to
@@ -135,6 +143,30 @@
   .agent-who b{display:block;font-weight:500;font-size:12.5px;color:var(--dim);
                white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .agent-who small{display:block;font-size:11px;color:var(--faint)}
+
+  /* The way in to the agent, directly under the agent's own name — because the
+     pane belongs to Juan, not to a conversation. It used to live in a thread
+     header, which put it out of reach whenever no conversation was selected
+     and implied a scope it does not have: one pane carries every chat at once.
+
+     Deliberately not the accent fill. Cyan already says two things here — "you
+     are on this page" on a nav row, and "Juan said this" in a thread — and the
+     one control that types into a stranger's live conversation should borrow
+     neither. A bordered rectangle rather than an inset pill, so the shape says
+     control rather than destination. */
+  .rail-term{display:flex;align-items:center;gap:10px;width:100%;margin-top:13px;
+       padding:8px 10px;border:1px solid var(--line);border-radius:9px;
+       background:transparent;color:var(--dim);font:inherit;font-size:12.5px;
+       cursor:pointer;text-align:left;
+       transition:border-color .16s ease,color .16s ease}
+  .rail-term svg{width:15px;height:15px;flex:0 0 15px;opacity:.7}
+  .rail-term:hover,.rail-term:focus-visible{border-color:var(--accent);color:var(--ink)}
+  .rail-term:hover svg,.rail-term:focus-visible svg{opacity:1}
+  .rail-term:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* The same treatment the nav uses for a count, because it is the same kind of
+     fact: how many conversations are open is what you are walking into. */
+  .rail-term .count{margin-left:auto;font-size:11.5px;color:var(--faint);
+       background:var(--raise);border-radius:var(--r-pill);padding:1px 8px}
 
   .dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%;
        background:var(--faint);transition:background .2s ease}
@@ -956,6 +988,15 @@
           <small id="agentState">checking</small>
         </span>
       </div>
+      <button class="rail-term" id="railTerm" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="4.5" width="18" height="15" rx="2"/>
+          <path d="M7.5 9.5l3 2.5-3 2.5"/><path d="M12.5 15h4"/>
+        </svg>
+        <span>Terminal</span>
+        <span class="count" id="railTermCount" hidden></span>
+      </button>
     </div>
   </aside>
 

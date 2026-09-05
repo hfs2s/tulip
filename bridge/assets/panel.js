@@ -260,6 +260,15 @@ function verdict(s) {
   agentStatus(s);
   var badge = el('navChats');
   if (badge) badge.textContent = String(s.chats.length);
+  // How many conversations the pane is carrying, shown where the decision to
+  // open it is taken. Hidden rather than "0": an empty pane is a fine thing to
+  // open, and a zero badge reads as a warning about nothing.
+  var open = (s.agent && s.agent.openChats) ? s.agent.openChats.length : 0;
+  var count = el('railTermCount');
+  if (count) {
+    count.textContent = String(open);
+    count.hidden = open === 0;
+  }
 }
 
 /**
@@ -3221,6 +3230,15 @@ stream.onmessage = function (ev) {
     if (row && row.chatKey && row.chatKey === chatOpen) void refreshThread();
   }, 350);
 };
+
+// The terminal is reached from the chrome, so it no longer depends on a page
+// being open — which is exactly what went wrong when its only entry point was a
+// button inside a conversation header that is not rendered until a conversation
+// is chosen.
+(function wireRailTerminal() {
+  var b = el('railTerm');
+  if (b) b.addEventListener('click', openTerminal);
+})();
 
 refresh();
 setInterval(refresh, 5000);
