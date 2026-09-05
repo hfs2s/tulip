@@ -41,6 +41,7 @@ import { retainOutbound } from './mediaStore.js';
 import { claim } from './spend.js';
 import { imageCount, MAX_IMAGES_PER_PAGE, publishPage, scaffoldPage, usesKit, writePageImage } from './pages.js';
 import { addContact } from './contacts.js';
+import { spokenLanguageFor } from '@tulip/shared';
 import { remember } from './memory.js';
 import type { Limiter } from './ratelimit.js';
 import type { Cost, Turn, TurnRegistry } from './turns.js';
@@ -955,10 +956,20 @@ export class Outbox extends EventEmitter {
         // answer a Barcelona group and a Filipino one in the same evening
         // without an operator flipping a setting between them. Empty is the
         // ordinary case and means "whatever the operator chose".
+        //
+        // Resolved here rather than in the agent, because the row decides two
+        // things and only one of them is the agent's business: which boost the
+        // request carries, and which voice reads it. The second is an
+        // operator's choice and the agent should not be able to name a voice.
+        const spoken = spokenLanguageFor(action.language || this.deps.config.agent.languageBoost);
+        const boost = spoken?.boost ?? (action.language || this.deps.config.agent.languageBoost);
+        const perLanguage = spoken === null
+          ? ''
+          : (this.deps.config.agent.voices[spoken.name] ?? '').trim();
         const audio = await synthesise(
           action.text,
-          this.deps.config.agent.voiceId,
-          action.language || this.deps.config.agent.languageBoost,
+          perLanguage || this.deps.config.agent.voiceId,
+          boost,
         );
         if (!audio.ok) {
           // Never drop the message: say it in text rather than stay silent.

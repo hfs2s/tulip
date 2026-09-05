@@ -3067,6 +3067,72 @@ async function saveSettings(patch, revert) {
  * and one that drops focus on the floor sends a keyboard operator back to the
  * top of the page after every single list edit.
  */
+/**
+ * The voice matrix: a row per language Juan speaks, each with a voice id.
+ *
+ * Free text, deliberately. Voice ids belong to the provider, the catalogue
+ * changes, and an operator who has just found one in MiniMax's library should
+ * be able to paste it rather than wait for this list to be updated. The cost is
+ * that a wrong id fails the request — but it fails *loudly*, falling back to
+ * text with the reason in the log, which is a better trade than a dropdown that
+ * goes stale.
+ *
+ * Saved per row on blur rather than behind one Save button. Each row is
+ * independent, an operator changes one and listens to it, and a modal that
+ * demands all eight be right before any of them applies is a modal that gets
+ * abandoned halfway.
+ */
+function openVoiceMatrix(s) {
+  var rows = (s.spokenLanguages || []).slice();
+  var current = (s.agent && s.agent.voices) || {};
+  var fallback = (s.agent && s.agent.voiceId) || '';
+
+  openModal('Voices by language',
+    'Which mouth reads each language. Ids come from MiniMax’s voice library.',
+    function (body) {
+      var table = node('div', 'vmatrix');
+      rows.forEach(function (row) {
+        var line = node('div', 'vrow');
+
+        var names = node('div', 'vname');
+        names.appendChild(node('b', null, row.name));
+        // What actually goes to the provider, so a surprising result is
+        // explainable without reading the source.
+        names.appendChild(node('small', null, 'sends ' + row.boost));
+        line.appendChild(names);
+
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'textset';
+        input.spellcheck = false;
+        input.autocapitalize = 'off';
+        input.setAttribute('autocomplete', 'off');
+        input.placeholder = fallback || 'the deployment default';
+        input.value = current[row.name] || '';
+        input.setAttribute('aria-label', 'Voice id for ' + row.name);
+
+        var was = input.value;
+        input.addEventListener('blur', function () {
+          var next = input.value.trim();
+          if (next === was) return;
+          var patch = {};
+          patch[row.name] = next;
+          was = next;
+          saveSettings({ agent: { voices: patch } }, function () {
+            input.value = was = current[row.name] || '';
+          });
+          current[row.name] = next;
+        });
+        line.appendChild(input);
+        table.appendChild(line);
+      });
+      body.appendChild(table);
+      body.appendChild(node('p', 'hint',
+        'Blank uses the default voice. A voice id the provider does not know fails the whole '
+        + 'request, so Juan sends the words as text instead — the Log says which id was refused.'));
+    });
+}
+
 function openModal(title, description, build) {
   var scrim = el('scrim');
   var opener = document.activeElement;
@@ -3764,6 +3830,19 @@ async function renderSettings() {
     selectField(s.agent && s.agent.languageBoost, languages, function (v, revert) {
       saveSettings({ agent: { languageBoost: v } }, revert);
     }));
+
+  // The matrix. A button rather than eight fields inline: this is a thing an
+  // operator opens, listens to, and changes again — a task with its own
+  // sitting, not a row in a settings list.
+  var open = node('button', 'sm', 'Voices by language…');
+  open.type = 'button';
+  open.addEventListener('click', function () { openVoiceMatrix(s); });
+  field(tools, 'Voice per language',
+    'One voice for eight languages is one voice that is wrong for seven of them. Set a voice id for '
+    + 'each language Juan speaks; anything left blank uses the default above. Cebuano and Filipino send '
+    + 'the same setting to the provider — there is one Austronesian voice family — but they are separate '
+    + 'rows here so you can read them in different mouths if you want to.',
+    open);
 
   field(tools, 'Model', 'Which Claude model answers. Read-only here — it is set outside the panel, and changing it needs the container restarted.', node('span', 'value', s.model.name));
   field(tools, 'Provider', 'Whose servers those requests go to. Also read-only, and also set outside the panel.', node('span', 'value', s.model.provider));

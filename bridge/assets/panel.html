@@ -599,6 +599,21 @@
   .sessionpage > .thread-head{position:sticky;top:0;z-index:5;flex:none;
         background:var(--ground);border-bottom:1px solid var(--line-soft)}
 
+  /* The voice matrix: a row per language, each with an id you can paste into.
+     Two columns rather than a table — the label carries a second line saying
+     what actually goes to the provider, which is what makes a surprising
+     result explainable without reading the source. */
+  .vmatrix{display:flex;flex-direction:column;gap:1px;margin-top:4px}
+  .vrow{display:grid;grid-template-columns:minmax(130px,1fr) minmax(0,2fr);
+        gap:14px;align-items:center;padding:8px 0}
+  .vrow + .vrow{border-top:1px solid var(--line-soft)}
+  .vname b{display:block;font-weight:500;font-size:13px;color:var(--ink)}
+  .vname small{display:block;font-size:11px;color:var(--faint);margin-top:1px}
+  .vrow input{width:100%;font-size:12.5px}
+  @media (max-width:560px){
+    .vrow{grid-template-columns:minmax(0,1fr);gap:5px}
+  }
+
   /* The rule that closes an ended session. A horizon, not a badge: the list
      stops and the line says when, at the point the eye has already arrived. */
   .endrule{display:flex;align-items:center;gap:14px;margin:18px 0 4px;

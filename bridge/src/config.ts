@@ -15,10 +15,10 @@
  */
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
-import { LANGUAGE_BOOSTS, LanguageBoost } from '@tulip/shared';
+import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES } from '@tulip/shared';
 
 // Re-exported so the panel's own schema keeps importing it from one place.
-export { LANGUAGE_BOOSTS, LanguageBoost };
+export { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES };
 
 /** Bare international digits, as WhatsApp stores them. No `+`, no spaces. */
 const PhoneNumber = z
@@ -288,6 +288,21 @@ const Agent = z
      * box.
      */
     voiceId: z.string().max(128).default(''),
+    /**
+     * A voice per spoken language, overriding `voiceId` for that one.
+     *
+     * One mouth for eight languages is one mouth that is wrong for seven of
+     * them. The keys are the languages the agent actually speaks — see
+     * `SPOKEN_LANGUAGES` — rather than the provider's boost values, because
+     * Cebuano and Filipino send the same boost and an operator may still want a
+     * different voice reading each.
+     *
+     * Empty or missing falls back to `voiceId`, so this is additive: a
+     * deployment that never opens the panel keeps exactly the behaviour it had.
+     * A wrong id fails the whole request, so a language left blank is safer
+     * than one filled in hopefully.
+     */
+    voices: z.record(z.string().max(32), z.string().max(128)).default({}),
     /**
      * Which language the voice is tuned for.
      *

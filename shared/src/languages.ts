@@ -118,3 +118,55 @@ export function resolveLanguage(input: string): string | null {
   if (exact !== undefined) return exact;
   return LANGUAGE_ALIASES[raw.toLowerCase()] ?? null;
 }
+
+/**
+ * The languages this deployment actually speaks, and the mouth each is read
+ * with.
+ *
+ * A separate list from `LANGUAGE_BOOSTS`, which is everything the provider will
+ * accept. This is the shorter one an operator has opinions about — and it is
+ * keyed on what the agent *says* rather than on what goes to the API, which is
+ * the whole reason it exists: Cebuano and Filipino are boosted identically,
+ * because the provider has one Austronesian mouth, but an operator may well
+ * want a different voice reading each of them. Collapsing them at the point of
+ * lookup would make that unsayable.
+ *
+ * So a row is a spoken language; `boost` is what the request carries, and the
+ * voice is chosen per row in the panel.
+ */
+export const SPOKEN_LANGUAGES = [
+  { name: 'English', boost: 'English' },
+  { name: 'Filipino', boost: 'Filipino' },
+  { name: 'Cebuano', boost: 'Filipino' },
+  { name: 'Catalan', boost: 'Catalan' },
+  { name: 'Spanish', boost: 'Spanish' },
+  { name: 'Portuguese', boost: 'Portuguese' },
+  { name: 'French', boost: 'French' },
+  { name: 'Italian', boost: 'Italian' },
+] as const;
+
+export type SpokenLanguage = (typeof SPOKEN_LANGUAGES)[number]['name'];
+
+/**
+ * The row for whatever the agent typed, or null.
+ *
+ * Case-insensitive, and aware of the alias table — so "bisaya" finds the
+ * Cebuano row rather than being folded into Filipino before anybody can choose
+ * a voice for it. An exact row name always wins first.
+ */
+export function spokenLanguageFor(input: string): (typeof SPOKEN_LANGUAGES)[number] | null {
+  const raw = input.trim().toLowerCase();
+  if (raw.length === 0) return null;
+
+  const exact = SPOKEN_LANGUAGES.find((l) => l.name.toLowerCase() === raw);
+  if (exact !== undefined) return exact;
+
+  // The Philippine names all alias to Filipino for the API, but Cebuano is its
+  // own row here, so the regional ones land on it rather than on Filipino.
+  const CEBUANO = new Set(['bisaya', 'binisaya', 'visayan', 'cebuano']);
+  if (CEBUANO.has(raw)) return SPOKEN_LANGUAGES.find((l) => l.name === 'Cebuano') ?? null;
+
+  const canonical = resolveLanguage(input);
+  if (canonical === null) return null;
+  return SPOKEN_LANGUAGES.find((l) => l.boost === canonical) ?? null;
+}

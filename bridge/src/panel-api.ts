@@ -26,7 +26,7 @@ import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
-import { LANGUAGE_BOOSTS, LanguageBoost, parseConfig, Contact } from './config.js';
+import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES, parseConfig, Contact } from './config.js';
 import { deletePage, listPages, pagesHost, type PageSummary } from './pages.js';
 import { forget, forgetAll, readMemory } from './memory.js';
 import type { ChatRegistry } from './chats.js';
@@ -832,6 +832,10 @@ export function settingsView(deps: ApiDeps): Json {
     // schema's validation are then the same list by construction, and a value
     // the provider stops accepting is removed in one place.
     languages: LANGUAGE_BOOSTS,
+    // The shorter list the voice matrix is keyed on: what this deployment
+    // actually speaks, with the boost each one sends. Same reasoning as above —
+    // the panel and the schema share one list rather than two that drift.
+    spokenLanguages: SPOKEN_LANGUAGES,
     groups: c.groups,
     limits: c.limits,
     delivery: c.delivery,
@@ -924,6 +928,21 @@ const SettingsPatch = z
       voice: z.boolean().optional(),
       voiceId: z.string().max(128).regex(/^[A-Za-z0-9_-]*$/, 'letters, digits, dashes and underscores only').optional(),
       /**
+       * A voice per spoken language. Keys are checked against the list rather
+       * than accepted freely: an unknown key would be a setting nothing reads,
+       * which looks saved and does nothing — the failure mode this whole
+       * evening has been about.
+       *
+       * The value is free text on purpose. Voice ids are the provider's, they
+       * change, and an operator finding a new one should be able to paste it
+       * without waiting for this list to be updated. A wrong one fails the
+       * request loudly rather than silently, which is the right trade for that.
+       */
+      voices: z.record(
+        z.enum(SPOKEN_LANGUAGES.map((l: { name: string }) => l.name) as [string, ...string[]]),
+        z.string().max(128).regex(/^[A-Za-z0-9_-]*$/, 'letters, digits, dashes and underscores only'),
+      ).optional(),
+      /**
        * Imported, not restated — and note it could not be restated as a regex
        * anyway: `Chinese,Yue` is one of the provider's own values, comma
        * included, so a character class over the voice-id alphabet would reject
@@ -1007,8 +1026,23 @@ export function updateSettings(deps: ApiDeps, body: unknown): { ok: boolean; mes
     }
     /* genuinely absent: this is the first write */
   }
+  // `agent.voices` is a map and the spread below is one level deep, so a save
+  // carrying one language would replace the whole map and wipe the other seven.
+  // Read before the loop, because the loop is what overwrites it.
+  const voicesBefore = ((raw['agent'] as { voices?: Record<string, string> } | undefined)?.voices
+    ?? {}) as Record<string, string>;
+
   for (const [section, values] of Object.entries(patch.data)) {
     raw[section] = { ...(raw[section] as object), ...values };
+  }
+  if (patch.data.agent?.voices !== undefined) {
+    // An empty string is kept rather than deleted: it means "use the default"
+    // and the row stays visible in the panel, which is how an operator unsets
+    // one without wondering where it went.
+    raw['agent'] = {
+      ...(raw['agent'] as object),
+      voices: { ...voicesBefore, ...patch.data.agent.voices },
+    };
   }
   try {
     writeJsonAtomic(CONFIG_FILE, raw, 0o600);
