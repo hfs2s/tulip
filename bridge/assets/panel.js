@@ -1793,6 +1793,42 @@ function composerKey() {
 }
 
 /**
+ * Which of two quite different sends this box performs.
+ *
+ * `say` puts the operator's words on WhatsApp as Juan. No agent reads them, no
+ * session is needed, and the person on the other end cannot tell them from his.
+ * `prompt` types at Claude Code's prompt: the agent reads it and decides what
+ * to say, so it needs a window open.
+ *
+ * Split by page rather than by a switch, because each page already means one of
+ * them. Chat is the conversation, so its box talks to the person. Terminal is
+ * the session, so its box talks to Claude Code. A mode toggle would put the
+ * more consequential of the two one mis-click away from the other.
+ */
+/**
+ * The composer on the page being shown.
+ *
+ * Both pages build one, and they were both built with the same element ids —
+ * so `getElementById` returned the Chat page's whichever page was open, and
+ * painting the Terminal composer quietly rewrote Chat's. Everything below
+ * queries inside this element by class instead. Ids are a document-wide
+ * namespace and there are two of these; classes are not.
+ */
+function composerOf() {
+  return document.querySelector('#p-' + route + ' .composer');
+}
+
+/** One part of the active composer, by class. Null when no composer is shown. */
+function cel(name) {
+  var root = composerOf();
+  return root ? root.querySelector('.' + name) : null;
+}
+
+function composerMode() {
+  return route === 'terminal' ? 'prompt' : 'say';
+}
+
+/**
  * Images attached to the line being written, in upload order.
  *
  * Each entry is `{ path, url, done }`. `path` is what the bridge issued and the
@@ -1810,41 +1846,47 @@ function composer() {
   wrap.appendChild(cap);
 
   var why = node('p', 'why');
-  why.id = 'chatWhy';
+  why.className = 'why c-why';
   why.appendChild(node('span', 'dot'));
   var line = node('span', null, '');
-  line.id = 'chatWhyText';
+  line.className = 'c-whytext';
+  // A real id, unique per composer, because `aria-describedby` is a document-
+  // wide reference and two composers exist. Pointing both at one id would have
+  // read the wrong page's state to a screen reader.
+  line.id = 'why-' + route;
   why.appendChild(line);
   cap.appendChild(why);
 
   // Above the box and sharing its width, so an attachment reads as belonging to
   // the message being written rather than to the thread above it.
   var strip = node('div', 'attachrow');
-  strip.id = 'chatAttachRow';
+  strip.className = 'attachrow c-attachrow';
   strip.hidden = true;
   cap.appendChild(strip);
 
   var row = node('div', 'row');
   var box = document.createElement('textarea');
-  box.id = 'chatBox';
+  box.className = 'c-box';
   box.rows = 1;
   box.maxLength = 2000;
-  box.placeholder = 'Type into Juan’s session…';
-  box.setAttribute('aria-describedby', 'chatWhyText');
+  box.placeholder = composerMode() === 'say'
+    ? 'Write as Juan…'
+    : 'Type at Claude Code’s prompt…';
+  box.setAttribute('aria-describedby', line.id);
   box.addEventListener('input', function () { growBox(box); paintCount(box); });
   box.addEventListener('keydown', function (ev) {
     // Chat convention: Enter sends, Shift+Enter is a new line.
     if (ev.key !== 'Enter' || ev.shiftKey) return;
     ev.preventDefault();
-    var send = el('chatSend');
-    if (send && send.disabled) { toast(el('chatWhyText').textContent, true); return; }
+    var send = cel('c-send');
+    if (send && send.disabled) { toast((cel('c-whytext') || {}).textContent || 'Cannot send.', true); return; }
     confirmSend(box);
   });
   row.appendChild(box);
 
   var pick = document.createElement('input');
   pick.type = 'file';
-  pick.id = 'chatAttachInput';
+  pick.className = 'c-pick';
   // Images and the document types the bridge will accept. The bridge decides
   // for itself by reading the file; this only spares somebody a refusal.
   pick.accept = 'image/png,image/jpeg,image/webp,image/gif,application/pdf,'
@@ -1861,7 +1903,7 @@ function composer() {
 
   var clip = node('button', 'micbtn');
   clip.type = 'button';
-  clip.id = 'chatAttach';
+  clip.className = 'micbtn c-clip';
   clip.title = 'Attach a picture';
   clip.setAttribute('aria-label', 'Attach a picture');
   var cs = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1895,7 +1937,7 @@ function composer() {
   // the common one — a screenshot — harder to reach.
   var doc = node('button', 'micbtn');
   doc.type = 'button';
-  doc.id = 'chatAttachFile';
+  doc.className = 'micbtn c-doc';
   doc.title = 'Attach a file — PDF or text';
   doc.setAttribute('aria-label', 'Attach a file');
   var ds = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1928,7 +1970,7 @@ function composer() {
   // direction does not.
   var send = node('button', 'sendbtn', '↑');
   send.type = 'button';
-  send.id = 'chatSend';
+  send.className = 'sendbtn c-send';
   send.title = 'Send';
   send.setAttribute('aria-label', 'Send');
   send.addEventListener('click', function () { confirmSend(box); });
@@ -1946,7 +1988,7 @@ function composer() {
   under.appendChild(keys);
   under.appendChild(node('span', 'sp'));
   var count = node('span', 'count', '');
-  count.id = 'chatCount';
+  count.className = 'count c-count';
   count.setAttribute('aria-live', 'polite');
   under.appendChild(count);
   cap.appendChild(under);
@@ -2086,7 +2128,7 @@ function clearAttachments() {
 }
 
 function paintAttachments() {
-  var strip = el('chatAttachRow');
+  var strip = cel('c-attachrow');
   if (!strip) return;
   clear(strip);
   strip.hidden = chatFiles.length === 0;
@@ -2104,8 +2146,9 @@ function paintAttachments() {
     chip.appendChild(x);
     strip.appendChild(chip);
   });
-  var clip = el('chatAttach');
+  var clip = cel('c-clip'), doc = cel('c-doc');
   if (clip) clip.disabled = chatFiles.length >= MAX_ATTACH;
+  if (doc) doc.disabled = chatFiles.length >= MAX_ATTACH;
 }
 
 function growBox(box) {
@@ -2115,7 +2158,7 @@ function growBox(box) {
 
 /** Only near the cap. A counter that is always there is one nobody reads. */
 function paintCount(box) {
-  var count = el('chatCount');
+  var count = cel('c-count');
   if (!count) return;
   var n = box.value.length;
   count.textContent = n > 1700 ? n + ' / 2000' : '';
@@ -2131,32 +2174,46 @@ function paintCount(box) {
  * part that could go wrong.
  */
 function paintComposer(view) {
-  var send = el('chatSend'), why = el('chatWhy'), line = el('chatWhyText');
+  var send = cel('c-send'), why = cel('c-why'), line = cel('c-whytext');
   if (!send || !why || !line) return;
   var name = (view && view.chat && view.chat.name) || 'this person';
   var blocked = !!(view && view.chat && view.chat.blocked);
 
+  var saying = composerMode() === 'say';
   var tone = 'live';
-  var says = 'Live. ' + name + ' is on the other end of this session.';
+  var says, can;
+
   if (blocked) {
     tone = 'bad';
+    can = false;
     says = 'This chat is blocked — nothing reaches Juan from ' + name + ', and nothing goes back.';
+  } else if (saying) {
+    // Nothing to wait for: the bridge holds the WhatsApp connection, so this
+    // works whether or not Claude Code is running.
+    can = true;
+    says = 'Writing as Juan to ' + name + '. They cannot tell this from him.';
   } else if (view && !view.reporting) {
     tone = 'warn';
+    can = false;
     says = 'The agent is not reporting, so there is nothing to type into.';
   } else if (view && !view.live) {
     tone = '';
-    says = 'No session open. Juan wakes for ' + name
-      + ' on their next message — you can draft here meanwhile.';
+    can = false;
+    says = 'No session open. Claude Code starts on ' + name + '’s next message — you can draft here '
+      + 'meanwhile, or write to them as Juan from the Chat page.';
+  } else {
+    says = 'Typing at Claude Code’s prompt. Juan reads it and decides what to say.';
+    can = true;
   }
 
-  why.className = 'why' + (tone ? ' ' + tone : '');
+  why.className = 'why c-why' + (tone ? ' ' + tone : '');
   line.textContent = says;
-  var can = !!view && view.reporting && view.live && !blocked;
   send.disabled = !can;
-  // The arrow does not change; who it reaches is said above the box, where
-  // there is room for a name and for the reason it is refused.
-  send.title = can ? 'Send to ' + firstName(name) : 'Nothing to type into';
+  // The arrow does not change; what it does is said above the box, where there
+  // is room for a name and for the reason it is refused.
+  send.title = !can ? 'Cannot send'
+    : saying ? 'Send to ' + firstName(name) + ' as Juan'
+    : 'Type it at Claude Code’s prompt';
   send.setAttribute('aria-label', send.title);
 }
 
@@ -2190,13 +2247,19 @@ function confirmSend(box) {
   var key = composerKey();
   if (!key) { toast('There is no session to type into.'); return; }
 
-  openModal('Type this into Juan’s session?',
-    'He is mid-conversation with ' + who + ' on WhatsApp.',
+  var saying = composerMode() === 'say';
+  openModal(
+    saying ? 'Send this to ' + who + ', as Juan?' : 'Type this into Juan’s session?',
+    saying
+      ? 'It goes to their phone from his number. He does not see it and cannot soften it.'
+      : 'He is mid-conversation with ' + who + ' on WhatsApp.',
     function (body, modal, dismiss) {
-      body.appendChild(node('p', 'hint',
-        'This is typed at Juan’s prompt exactly as written, as though it had arrived in the '
-        + 'conversation. What he does with it is his — including anything he sends to ' + who
-        + '. It cannot be recalled.'));
+      body.appendChild(node('p', 'hint', saying
+        ? 'This is delivered as an ordinary WhatsApp message from Juan. ' + who
+          + ' has no way to tell it apart from one he wrote, and there is no way to unsend it.'
+        : 'This is typed at Juan’s prompt exactly as written, as though it had arrived in the '
+          + 'conversation. What he does with it is his — including anything he sends to ' + who
+          + '. It cannot be recalled.'));
       if (line) body.appendChild(node('blockquote', 'said', line));
       if (ready.length) {
         body.appendChild(node('p', 'hint',
@@ -2213,12 +2276,13 @@ function confirmSend(box) {
       var cancel = node('button', 'sm', 'Cancel');
       cancel.type = 'button';
       cancel.addEventListener('click', dismiss);
-      var go_ = node('button', 'sm primary', 'Type it to ' + firstName(who));
+      var go_ = node('button', 'sm primary',
+        saying ? 'Send as Juan' : 'Type it to ' + firstName(who));
       go_.type = 'button';
       go_.addEventListener('click', async function () {
         go_.disabled = true;
         try {
-          var result = await api('/api/chat/send', {
+          var result = await api(saying ? '/api/chat/say' : '/api/chat/send', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ key: key, text: line, files: ready })
@@ -2230,7 +2294,7 @@ function confirmSend(box) {
           paintCount(box);
           // Shown faded until the transcript reads it back, which is up to a
           // poll away — long enough for a send to look as though it did nothing.
-          chatPending.push({ key: key, text: line, at: Date.now() });
+          if (!saying) chatPending.push({ key: key, text: line, at: Date.now() });
           chatSig = null;
           dismiss();
           void refreshThread();

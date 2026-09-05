@@ -349,6 +349,87 @@ export function attachToChat(
   }
 }
 
+/**
+ * Send a message to a conversation **as Juan**, from the operator.
+ *
+ * Distinct from `sendToChat`, and the difference is who is speaking. That one
+ * types at Claude Code's prompt: the agent reads it and decides what to say, so
+ * the words that arrive are its own and a live session is required. This one
+ * puts the operator's words on the wire directly — no agent, no session, no
+ * turn — which is why it works when nothing is running, and why it is the one
+ * that needs saying out loud.
+ *
+ * Recorded as an ordinary outbound message, because to the person receiving it
+ * that is exactly what it is: a message from Juan's number. The feed carries a
+ * separate `operator.said` line so the transcript is not misleading about which
+ * of the two wrote it.
+ */
+export async function sayAsJuan(
+  deps: ApiDeps,
+  chatKey: string,
+  raw: string,
+  files: readonly string[] = [],
+): Promise<{ ok: boolean; message: string }> {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.' };
+  const record = deps.chats.get(chatKey);
+  if (record === null) return { ok: false, message: 'No such chat.' };
+  if (record.blocked) {
+    return { ok: false, message: 'This chat is blocked. Unblock it on the Chats page before writing to it.' };
+  }
+  const jid = deps.chats.jidFor(chatKey);
+  if (jid === null) return { ok: false, message: 'That chat has no destination.' };
+
+  const attached = attachmentsFor(chatKey, files);
+  const text = raw.replace(/\s+$/, '');
+  if (text.length === 0 && attached.length === 0) return { ok: false, message: 'Nothing to send.' };
+  if (text.length > 4000) return { ok: false, message: 'That is longer than 4000 characters.' };
+
+  // Charged to the chat being written into, like every other outbound.
+  const allowance = deps.limiter.admitOutbound(chatKey, Date.now());
+  if (!allowance.ok) return { ok: false, message: `Too quickly — ${allowance.reason}.` };
+
+  try {
+    for (const rel of attached) {
+      const bytes = readFileSync(join(inPaths.root, rel));
+      const ext = (/\.([a-z0-9]+)$/.exec(rel)?.[1] ?? '').toLowerCase();
+      if (['png', 'jpg', 'gif', 'webp'].includes(ext)) {
+        await deps.wa.sendImage(jid, bytes, null);
+        feed.outbound(chatKey, 'image', '[image]');
+      } else {
+        const mimetype = ext === 'pdf' ? 'application/pdf' : 'text/plain';
+        await deps.wa.sendFile(jid, bytes, mimetype, basename(rel), null);
+        feed.outbound(chatKey, mimetype, basename(rel));
+      }
+    }
+    if (text.length > 0) {
+      await deps.wa.sendText(jid, text);
+      feed.outbound(chatKey, 'text', text);
+    }
+  } catch (err) {
+    log('operator.sayFailed', { chatKey, err: String((err as Error).message) });
+    return { ok: false, message: 'WhatsApp would not take it: ' + String((err as Error).message) };
+  }
+
+  log('operator.said', { chatKey, chars: text.length, attached: attached.length });
+  feed.event('operator.said', `${record.name ?? chatKey} — sent as Juan by the operator`);
+  return { ok: true, message: 'Sent as Juan.' };
+}
+
+/**
+ * Attachment paths that are real, belong to this chat, and exist.
+ *
+ * Shared by both send paths so neither can be laxer than the other. Re-derived
+ * against the chat rather than trusted: the panel is authenticated, but a path
+ * is still a value that arrived over the wire, and one naming another chat's
+ * directory would carry an attachment across conversations.
+ */
+function attachmentsFor(chatKey: string, files: readonly string[]): string[] {
+  return files
+    .filter((f) => new RegExp(`^media/${chatKey}/op-[0-9]+-[0-9a-f]{8}\\.[a-z0-9]{2,5}$`).test(f))
+    .filter((f) => existsSync(join(inPaths.root, f)))
+    .slice(0, 4);
+}
+
 export function sendToChat(
   deps: ApiDeps,
   chatKey: string,
@@ -358,15 +439,7 @@ export function sendToChat(
   if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.' };
   if (deps.chats.get(chatKey) === null) return { ok: false, message: 'No such chat.' };
 
-  // Only paths this bridge issued for *this* chat, re-derived rather than
-  // trusted: the panel is authenticated, but a path is still something that
-  // arrived in a request body, and one pointing at another chat's directory
-  // would be a way to read across conversations using an operator's session.
-  const attached = files
-    .filter((f) =>
-      new RegExp(`^media/${chatKey}/op-[0-9]+-[0-9a-f]{8}\\.[a-z0-9]{2,5}$`).test(f))
-    .filter((f) => existsSync(join(inPaths.root, f)))
-    .slice(0, 4);
+  const attached = attachmentsFor(chatKey, files);
 
   const line = typedLine(raw);
   if (line.length === 0 && attached.length === 0) return { ok: false, message: 'Nothing to send.' };

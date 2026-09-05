@@ -60,6 +60,7 @@ import {
   chatHistory,
   chatTranscript,
   attachToChat,
+  sayAsJuan,
   sendToChat,
   deleteMedia,
   logTail,
@@ -490,6 +491,20 @@ export function startPanel(deps: ApiDeps): Server | null {
             // never reaches a path. Header rather than a query string so a
             // filename does not end up in a log line or a referrer.
             String(req.headers['x-file-name'] ?? '').slice(0, 200),
+          );
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        // The operator speaking as Juan, straight onto the wire. No session and
+        // no agent in the loop, which is why it works when nothing is running.
+        if (url.pathname === '/api/chat/say' && req.method === 'POST') {
+          const body = await readBody(req);
+          const result = await sayAsJuan(
+            deps,
+            typeof body['key'] === 'string' ? body['key'] : '',
+            typeof body['text'] === 'string' ? body['text'] : '',
+            Array.isArray(body['files'])
+              ? body['files'].filter((f): f is string => typeof f === 'string')
+              : [],
           );
           return send(res, headers, result.ok ? 200 : 400, result);
         }
