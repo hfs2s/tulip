@@ -107,6 +107,7 @@ var ICONS = {
   media: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="8.6" cy="9.9" r="1.4"/><path d="M3.5 16.2l4.4-3.9 3.6 3.1 3-2.6 6 4.9"/>',
   tools: '<path d="M14.7 6.3a4 4 0 0 0 5 5L15 16l-3 3-4-4 3-3z"/><path d="M6 18l1.5-1.5"/>',
   terminal: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7.5 9.5l3 2.5-3 2.5"/><path d="M12.5 15h4"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M15 9V5.5A1.5 1.5 0 0 0 13.5 4H5.5A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15H9"/>',
   back: '<path d="M14.5 5.5L8 12l6.5 6.5"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6L18 18M18 6l-1.4 1.4M7.4 16.6L6 18"/>',
   log: '<path d="M6 4.5h9l4 4v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-14a1 1 0 0 1 1-1z"/><path d="M14.5 4.5v4.5H19"/><path d="M8.5 13h7M8.5 16.5h5"/>'
@@ -1476,6 +1477,11 @@ function renderSessions() {
   if (termOpen) body.appendChild(node('p', 'thread-note', 'Reading the session…'));
   else body.appendChild(neverRanNote());
   pane.appendChild(body);
+  // The same box the Chat page uses, writing into the same place by the same
+  // path. This page is where an operator steers Claude Code — the raw pane is
+  // read-only precisely so that steering happens here, one reviewed line at a
+  // time, instead of as loose keystrokes into a live conversation.
+  if (termOpen) pane.appendChild(composer());
   p.appendChild(pane);
 
   if (termOpen) {
@@ -1543,6 +1549,32 @@ function sessionHead() {
   cap.appendChild(who);
 
   var acts = node('div', 'acts');
+
+  // Copies what is on screen, masked exactly as shown. The use for it is
+  // pasting a session into a note or a bug report, and the masking has to
+  // survive that: an unmasked copy would put other people's identifiers into
+  // whatever it was pasted into.
+  var copy = node('button', 'sm');
+  copy.type = 'button';
+  copy.title = 'Copy this session as text';
+  copy.appendChild(icon('copy'));
+  copy.appendChild(node('span', null, 'Copy'));
+  copy.addEventListener('click', async function () {
+    var rows = [];
+    document.querySelectorAll('#termBody .srow').forEach(function (r) {
+      rows.push([r.children[0].textContent, r.children[1].textContent, r.children[2].textContent]
+        .join('  '));
+    });
+    if (!rows.length) { toast('Nothing to copy yet.'); return; }
+    try {
+      await navigator.clipboard.writeText(rows.join('\n'));
+      toast('Session copied — ' + rows.length + ' lines.');
+    } catch (err) {
+      toast('The browser would not let me use the clipboard.', true);
+    }
+  });
+  acts.appendChild(copy);
+
   var raw = node('button', 'sm raw');
   raw.type = 'button';
   raw.title = 'The live tmux pane, read-only.';
@@ -1647,6 +1679,10 @@ async function refreshSession() {
   termView = view;
 
   paintSessionState(view);
+  // The composer's own state line — whether there is anywhere to type, and why
+  // not when there is not. Shared with the Chat page, so the two cannot come to
+  // disagree about when a send is refused.
+  paintComposer(view);
 
   paintSession(view);
 }
@@ -1743,6 +1779,20 @@ function sessionRow(item) {
 // ── The composer ────────────────────────────────────────────────────────────
 
 /**
+ * The conversation the composer is writing into.
+ *
+ * Two pages share this box. Chat writes into the conversation being read; the
+ * Terminal page writes into the session it is showing, which is the same thing
+ * by a different name — one Claude Code window, addressed by the chat it
+ * belongs to. Deciding here rather than passing a key through six functions
+ * keeps the attach, confirm and send paths identical on both pages, which is
+ * what stops one of them growing a rule the other has not got.
+ */
+function composerKey() {
+  return route === 'terminal' ? termOpen : chatOpen;
+}
+
+/**
  * Images attached to the line being written, in upload order.
  *
  * Each entry is `{ path, url, done }`. `path` is what the bridge issued and the
@@ -1795,7 +1845,10 @@ function composer() {
   var pick = document.createElement('input');
   pick.type = 'file';
   pick.id = 'chatAttachInput';
-  pick.accept = 'image/png,image/jpeg,image/webp,image/gif';
+  // Images and the document types the bridge will accept. The bridge decides
+  // for itself by reading the file; this only spares somebody a refusal.
+  pick.accept = 'image/png,image/jpeg,image/webp,image/gif,application/pdf,'
+    + 'text/plain,text/markdown,text/csv,application/json,.md,.log,.yml,.yaml';
   pick.multiple = true;
   pick.hidden = true;
   pick.setAttribute('tabindex', '-1');
@@ -1809,8 +1862,8 @@ function composer() {
   var clip = node('button', 'micbtn');
   clip.type = 'button';
   clip.id = 'chatAttach';
-  clip.title = 'Attach an image';
-  clip.setAttribute('aria-label', 'Attach an image');
+  clip.title = 'Attach a picture';
+  clip.setAttribute('aria-label', 'Attach a picture');
   var cs = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   cs.setAttribute('viewBox', '0 0 24 24');
   cs.setAttribute('fill', 'none');
@@ -1830,8 +1883,42 @@ function composer() {
   hill.setAttribute('d', 'M4 16.5l4.5-4.5L12 15.5l3-2.5 5 4.5');
   cs.appendChild(hill);
   clip.appendChild(cs);
-  clip.addEventListener('click', function () { pick.click(); });
+  clip.addEventListener('click', function () {
+    pick.accept = 'image/png,image/jpeg,image/webp,image/gif';
+    pick.click();
+  });
   row.appendChild(clip);
+
+  // A second button onto the same picker, with the filter widened. Two buttons
+  // rather than one because "attach a picture" and "attach a file" are
+  // different intentions, and a single paperclip that opens everything makes
+  // the common one — a screenshot — harder to reach.
+  var doc = node('button', 'micbtn');
+  doc.type = 'button';
+  doc.id = 'chatAttachFile';
+  doc.title = 'Attach a file — PDF or text';
+  doc.setAttribute('aria-label', 'Attach a file');
+  var ds = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  ds.setAttribute('viewBox', '0 0 24 24');
+  ds.setAttribute('fill', 'none');
+  ds.setAttribute('stroke', 'currentColor');
+  ds.setAttribute('stroke-width', '1.7');
+  ds.setAttribute('stroke-linecap', 'round');
+  ds.setAttribute('stroke-linejoin', 'round');
+  ds.setAttribute('aria-hidden', 'true');
+  ['M14 3.5H7.5A1.5 1.5 0 0 0 6 5v14a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 18 19V7.5z',
+    'M14 3.5V7.5H18', 'M9 13h6', 'M9 16.5h4'].forEach(function (d) {
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    ds.appendChild(path);
+  });
+  doc.appendChild(ds);
+  doc.addEventListener('click', function () {
+    pick.accept = 'application/pdf,text/plain,text/markdown,text/csv,application/json,'
+      + '.md,.log,.yml,.yaml,.txt,.csv,.json';
+    pick.click();
+  });
+  row.appendChild(doc);
 
   var mic = micButton(box);
   if (mic) row.appendChild(mic);
@@ -1955,7 +2042,8 @@ var MAX_ATTACH = 4;
  * than leaving one that will never resolve.
  */
 async function attachOne(file) {
-  if (!chatOpen) return;
+  var target = composerKey();
+  if (!target) return;
   if (chatFiles.length >= MAX_ATTACH) {
     toast('Four images is the most one message can carry.', true);
     return;
@@ -1965,9 +2053,13 @@ async function attachOne(file) {
   paintAttachments();
 
   try {
-    var res = await fetch('/api/chat/attach?key=' + encodeURIComponent(chatOpen), {
+    var res = await fetch('/api/chat/attach?key=' + encodeURIComponent(target), {
       method: 'POST',
-      headers: { 'content-type': file.type || 'application/octet-stream' },
+      headers: {
+        'content-type': file.type || 'application/octet-stream',
+        // Only ever used to pick among a fixed set of text extensions.
+        'x-file-name': file.name.replace(/[^\x20-\x7e]/g, '').slice(0, 200)
+      },
       body: file
     });
     var out = await res.json();
@@ -2093,9 +2185,10 @@ function confirmSend(box) {
   var ready = chatFiles.filter(function (f) { return f.done && f.path; }).map(function (f) { return f.path; });
   if (chatFiles.length !== ready.length) { toast('An image is still uploading.'); return; }
   if (!line && !ready.length) { toast('Nothing to send.'); return; }
-  var view = chatView || {};
+  var view = (route === 'terminal' ? termView : chatView) || {};
   var who = (view.chat && view.chat.name) || 'this person';
-  var key = chatOpen;
+  var key = composerKey();
+  if (!key) { toast('There is no session to type into.'); return; }
 
   openModal('Type this into Juan’s session?',
     'He is mid-conversation with ' + who + ' on WhatsApp.',
@@ -2178,7 +2271,7 @@ function prunePending(view) {
  */
 function paintChatLive() {
   paintConvoList();
-  if (!chatOpen || !chatView) return;
+  if (!composerKey()) return;
   paintHead(chatView);
   var sig = signature(chatView);
   if (sig === chatSig) return;

@@ -14,7 +14,7 @@
  * it claims to belong to, because otherwise an operator's own session would be
  * a way to name a file in somebody else's conversation.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
@@ -87,11 +87,38 @@ describe('what counts as an image', () => {
     }
   });
 
-  it('refuses a script, however it is announced', () => {
-    const out = api.attachToChat(deps(), KEY, 'image/png', SCRIPT);
-    expect(out.ok).toBe(false);
-    expect(out.message).toContain('The file itself is checked');
-    expect(existsSync(join(box, 'in', 'media', KEY))).toBe(false);
+  it('stores a script as the text it is, not as the image it claimed to be', () => {
+    // Text is allowed now, so this is not refused — but it is filed by what it
+    // actually is. Announcing it as a PNG changes nothing, which is the point:
+    // the declared type never decides.
+    const out = api.attachToChat(deps(), KEY, 'image/png', SCRIPT, 'payload.png');
+    expect(out.ok).toBe(true);
+    expect(out.path).toMatch(/\.txt$/);
+    // And it is not executable. The agent may read what an operator sent it;
+    // nothing here should be able to hand it something it can run.
+    const mode = statSync(join(box, 'in', out.path!)).mode & 0o777;
+    expect(mode & 0o111).toBe(0);
+  });
+
+  it('refuses a binary whatever it is called', () => {
+    const elf = Buffer.concat([Buffer.from([0x7f, 0x45, 0x4c, 0x46]), Buffer.alloc(64)]);
+    expect(api.attachToChat(deps(), KEY, 'text/plain', elf, 'notes.txt').ok).toBe(false);
+    // A NUL anywhere in the head is enough: text does not contain one.
+    const sneaky = Buffer.concat([Buffer.from('# looks like markdown\n'), Buffer.from([0x00]), Buffer.alloc(32)]);
+    expect(api.attachToChat(deps(), KEY, 'text/markdown', sneaky, 'notes.md').ok).toBe(false);
+  });
+
+  it('takes a PDF, and picks a text extension only from its own list', () => {
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(64)]);
+    expect(api.attachToChat(deps(), KEY, 'application/pdf', pdf, 'receipt.pdf').path).toMatch(/\.pdf$/);
+
+    const text = Buffer.from('col,val\n1,2\n');
+    expect(api.attachToChat(deps(), KEY, 'text/csv', text, 'data.csv').path).toMatch(/\.csv$/);
+    // An extension outside the list falls back rather than being honoured, so
+    // nothing an uploader types decides what the stored file is called.
+    expect(api.attachToChat(deps(), KEY, 'text/plain', text, 'run.sh').path).toMatch(/\.txt$/);
+    expect(api.attachToChat(deps(), KEY, 'text/plain', text, '../../etc/passwd').path)
+      .toMatch(new RegExp(`^media/${KEY}/op-\\d+-[0-9a-f]{8}\\.txt$`));
   });
 
   it('refuses RIFF that is not WebP — the first four bytes are not enough', () => {
@@ -122,7 +149,7 @@ describe('naming an attachment when the line is typed', () => {
     // Absolute, because the prompt's working directory is the chat's workspace
     // rather than the handoff volume — a relative path resolves to nothing.
     expect(line).toContain(join(box, 'in', stored.path!));
-    expect(line).toContain('the operator attached an image');
+    expect(line).toContain('the operator attached a file');
   });
 
   it('sends an image with no words at all', () => {

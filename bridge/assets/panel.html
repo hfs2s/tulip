@@ -279,7 +279,12 @@
   button.primary{background:var(--accent);border-color:var(--accent);color:#04252b;font-weight:500}
   button.primary:hover{filter:brightness(1.08)}
   button.danger:hover{border-color:var(--bad);color:var(--bad)}
-  button.sm{padding:5px 12px;font-size:12.5px}
+  /* Icon and label sit on one line. Without this a button with both wraps the
+     word under the glyph the moment its row runs short, and a control that
+     changes shape with the window reads as broken rather than as responsive. */
+  button.sm{padding:5px 12px;font-size:12.5px;display:inline-flex;align-items:center;
+            gap:7px;white-space:nowrap}
+  button.sm svg{width:15px;height:15px;flex:0 0 15px}
   button[disabled]{opacity:.42;cursor:not-allowed}
 
   input[type=text],input[type=search],select{font:inherit;color:var(--ink);
@@ -571,6 +576,14 @@
     .srow{grid-template-columns:44px minmax(0,1fr);gap:4px 10px}
     .srow .swhat{grid-column:2}
   }
+  /* The page is a column: a header that stays, a body that scrolls under it,
+     and a box at the foot. The header is sticky rather than fixed so it belongs
+     to this pane rather than to the window — the rail beside it does not move,
+     and a fixed bar would have to be told the rail's width. */
+  .sessionpage{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+  .sessionpage > .thread-head{position:sticky;top:0;z-index:5;flex:none;
+        background:var(--ground);border-bottom:1px solid var(--line-soft)}
+
   /* The rule that closes an ended session. A horizon, not a badge: the list
      stops and the line says when, at the point the eye has already arrived. */
   .endrule{display:flex;align-items:center;gap:14px;margin:18px 10px 4px;

@@ -263,6 +263,38 @@ function imageExtension(bytes: Buffer): string | null {
   return null;
 }
 
+/** Text extensions an operator may attach. The name only picks among these. */
+const TEXT_EXTENSIONS = new Set(['txt', 'md', 'csv', 'json', 'log', 'yml', 'yaml']);
+
+/**
+ * What kind of file this is, decided by reading it.
+ *
+ * Images first, then PDF by its own signature, then text — and text is the one
+ * worth explaining. "Is it text" is answered by decoding it, not by trusting
+ * the name: a buffer that round-trips through UTF-8 unchanged and holds no NUL
+ * is text, and anything else is not, whatever it is called. That is what stops
+ * `notes.txt` being an ELF binary.
+ *
+ * The extension is then chosen from a fixed set using the declared name, which
+ * is safe because it can only pick among members of that set — a name is never
+ * concatenated into the stored filename.
+ */
+function attachmentExtension(bytes: Buffer, declaredName: string): string | null {
+  const image = imageExtension(bytes);
+  if (image !== null) return image;
+
+  if (bytes.length > 4 && bytes.toString('ascii', 0, 5) === '%PDF-') return 'pdf';
+
+  const head = bytes.subarray(0, 8192);
+  if (head.includes(0)) return null;
+  const decoded = new TextDecoder('utf-8', { fatal: false }).decode(head);
+  if (decoded.includes('\uFFFD')) return null;
+
+  const named = /\.([A-Za-z0-9]{1,5})$/.exec(declaredName);
+  const ext = (named?.[1] ?? '').toLowerCase();
+  return TEXT_EXTENSIONS.has(ext) ? ext : 'txt';
+}
+
 /**
  * Put an operator's image where the agent can read it.
  *
@@ -280,16 +312,19 @@ export function attachToChat(
   chatKey: string,
   contentType: string,
   bytes: Buffer,
+  declaredName = '',
 ): { ok: boolean; message: string; path?: string; name?: string } {
   if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.' };
   if (deps.chats.get(chatKey) === null) return { ok: false, message: 'No such chat.' };
   if (bytes.length === 0) return { ok: false, message: 'That file was empty.' };
 
-  const ext = imageExtension(bytes);
+  const ext = attachmentExtension(bytes, declaredName);
   if (ext === null) {
     return {
       ok: false,
-      message: 'That is not a PNG, JPEG, GIF or WebP. The file itself is checked, not its name.',
+      message:
+        'That is not a picture, a PDF, or text. The file itself is read to decide, not its name — '
+        + 'so a renamed binary is refused.',
     };
   }
   // Reported rather than enforced: the bytes already decided. A mismatch is
@@ -302,6 +337,8 @@ export function attachToChat(
   const directory = join(inPaths.media, chatKey);
   try {
     mkdirSync(directory, { recursive: true });
+    // The stored name is built here from a checked extension: nothing the
+    // uploader typed reaches the filesystem, so there is no traversal to sanitise.
     const name = `op-${String(Date.now())}-${randomUUID().slice(0, 8)}.${ext}`;
     writeFileSync(join(directory, name), bytes, { mode: 0o600 });
     log('attach.stored', { chatKey, name, bytes: bytes.length });
@@ -326,7 +363,8 @@ export function sendToChat(
   // arrived in a request body, and one pointing at another chat's directory
   // would be a way to read across conversations using an operator's session.
   const attached = files
-    .filter((f) => new RegExp(`^media/${chatKey}/op-[0-9]+-[0-9a-f]{8}\\.(png|jpg|gif|webp)$`).test(f))
+    .filter((f) =>
+      new RegExp(`^media/${chatKey}/op-[0-9]+-[0-9a-f]{8}\\.[a-z0-9]{2,5}$`).test(f))
     .filter((f) => existsSync(join(inPaths.root, f)))
     .slice(0, 4);
 
@@ -351,8 +389,8 @@ export function sendToChat(
   const said = attached.length === 0
     ? line
     : `${line}${line ? ' ' : ''}[the operator attached ${
-        attached.length === 1 ? 'an image' : `${String(attached.length)} images`
-      }: ${attached.map((f) => `${inPaths.root}/${f}`).join(', ')} — read ${
+        attached.length === 1 ? 'a file' : `${String(attached.length)} files`
+      }: ${attached.map((f) => `${inPaths.root}/${f}`).join(', ')} — open ${
         attached.length === 1 ? 'it' : 'them'
       } if it helps]`;
 

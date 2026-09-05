@@ -481,7 +481,16 @@ export function startPanel(deps: ApiDeps): Server | null {
           } catch (err) {
             return send(res, headers, 413, { ok: false, message: String((err as Error).message) });
           }
-          const result = attachToChat(deps, key, req.headers['content-type'] ?? '', bytes);
+          const result = attachToChat(
+            deps,
+            key,
+            req.headers['content-type'] ?? '',
+            bytes,
+            // Only ever used to pick among a fixed set of text extensions; it
+            // never reaches a path. Header rather than a query string so a
+            // filename does not end up in a log line or a referrer.
+            String(req.headers['x-file-name'] ?? '').slice(0, 200),
+          );
           return send(res, headers, result.ok ? 200 : 400, result);
         }
         if (url.pathname === '/api/chat/send' && req.method === 'POST') {
