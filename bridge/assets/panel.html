@@ -718,18 +718,41 @@
   /* The launcher card these two dressed went with the Terminal page. What opens
      the stage now is the Chat page's own secondary control, which is a
      `button.sm` like every other one on the panel. */
-  .termstage{position:fixed;inset:0;z-index:60;background:#0d0d0f;display:flex}
+  /* A modal the terminal sits inside, not a full-screen takeover.
+     The scrim keeps the panel visibly *on top of* the console rather than
+     replacing it, which is the difference between "I opened a tool" and "the
+     page navigated somewhere" — and the second one is why the old full-bleed
+     version left people looking for a way back. */
+  .termstage{position:fixed;inset:0;z-index:60;display:flex;align-items:center;
+        justify-content:center;padding:clamp(12px,3vh,40px);
+        background:rgba(6,7,9,.72);backdrop-filter:blur(8px)}
+  /* Sized to the viewport with a ceiling, so the terminal fits whatever it is
+     given: min-height:0 on the frame is what lets it shrink inside the flex
+     column rather than overflowing the panel it is supposed to be inside. */
+  .termmodal{display:flex;flex-direction:column;overflow:hidden;
+        width:min(1180px,96vw);height:min(720px,88vh);
+        background:#0d0d0f;border:1px solid var(--line);border-radius:14px;
+        box-shadow:0 24px 80px rgba(0,0,0,.6)}
+  .termbar{display:flex;align-items:center;gap:12px;flex:none;
+        padding:10px 10px 10px 16px;border-bottom:1px solid var(--line);
+        background:rgba(255,255,255,.02)}
+  .termbar h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.01em}
+  .termbar .termwhere{font-size:12px;color:var(--dim);margin-right:auto}
   .ptyframe{flex:1;min-height:0;width:100%;border:0;display:block;background:#0d0d0f}
-  /* The frame is a canvas, so these float over it rather than sitting in a bar:
-     every one is a workaround for something a canvas cannot do — select, copy,
-     paste, scroll — not a convenience. */
-  .termcontrols{position:absolute;top:12px;right:16px;z-index:61;display:flex;gap:8px}
-  .termcontrols button{width:34px;height:34px;border-radius:var(--r-pill);
-        display:flex;align-items:center;justify-content:center;font-size:14px;
-        background:rgba(13,13,15,.86);border:1px solid var(--line);color:var(--dim);
-        cursor:pointer;backdrop-filter:blur(6px)}
+  /* In the bar rather than floating over the canvas. Every one is a workaround
+     for something a canvas cannot do — select, copy, paste, scroll. */
+  .termcontrols{display:flex;gap:6px;flex:none}
+  .termcontrols button{width:30px;height:30px;border-radius:8px;
+        display:flex;align-items:center;justify-content:center;font-size:13px;
+        background:transparent;border:1px solid var(--line);color:var(--dim);cursor:pointer}
   .termcontrols button:hover{color:var(--ink);border-color:var(--accent)}
   .termcontrols button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .termcontrols .termclose{margin-left:6px}
+  .termcontrols .termclose:hover{border-color:var(--warn,#f0b429);color:var(--ink)}
+  @media (max-width:700px){
+    .termstage{padding:0}
+    .termmodal{width:100%;height:100%;border-radius:0;border:0}
+  }
   /* Nothing behind the terminal should scroll while it is open. */
   body.term-open{overflow:hidden}
   @media (max-width:900px){

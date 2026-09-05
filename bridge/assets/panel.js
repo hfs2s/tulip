@@ -2033,6 +2033,14 @@ function openTerminal() {
   stage.setAttribute('aria-modal', 'true');
   stage.setAttribute('aria-label', 'The agent’s terminal');
 
+  // The panel the terminal lives in. The stage is only the scrim behind it, so
+  // a click that lands on the stage is a click outside the dialog and closes.
+  var modal = node('div', 'termmodal');
+  var bar = node('div', 'termbar');
+  bar.appendChild(node('h2', null, 'Terminal'));
+  bar.appendChild(node('span', 'termwhere', 'The agent’s live tmux session — anything typed goes to a real person.'));
+  modal.appendChild(bar);
+
   var frame = document.createElement('iframe');
   frame.id = 'ptyFrame';
   frame.className = 'ptyframe';
@@ -2043,7 +2051,8 @@ function openTerminal() {
   frame.addEventListener('load', function () {
     try { if (frame.contentWindow) frame.contentWindow.onbeforeunload = null; } catch (err) { /* nothing to do */ }
   });
-  stage.appendChild(frame);
+  modal.appendChild(frame);
+  stage.appendChild(modal);
 
   /** xterm itself, or null while the frame is still starting. */
   function term() {
@@ -2078,8 +2087,13 @@ function openTerminal() {
 
   control('Scroll up', '↑', function () { var t = term(); if (t && t.scrollLines) t.scrollLines(-12); });
   control('Scroll down', '↓', function () { var t = term(); if (t && t.scrollLines) t.scrollLines(12); });
-  control('Close', '✕', dismiss);
-  stage.appendChild(controls);
+  control('Close', '✕', dismiss).className = 'termclose';
+  bar.appendChild(controls);
+
+  // Clicking the scrim closes; a click anywhere inside the panel does not.
+  stage.addEventListener('mousedown', function (ev) {
+    if (ev.target === stage) dismiss();
+  });
 
   function onKey(ev) {
     // Escape belongs to the terminal — it is how you leave a mode in the TUI —
