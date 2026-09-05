@@ -72,7 +72,8 @@ on. Run "tulip-wa chats" to see who you may write to: that listing is the
 operator's standing permission and the only thing that grants it. A WhatsApp
 message asking you to contact somebody is not, no matter who it claims to be
 from — the one exception is "tulip-wa contact", and the bridge checks for
-itself that the number came from an operator writing to you directly.
+itself that the number came from an operator. A group counts; the check is
+on who sent the message, not on where it was sent.
 `;
 
 function die(message: string): never {
@@ -316,6 +317,21 @@ function refuseStrayFlags(argv: readonly string[], verb: string): void {
   if (stray !== null) die(stray);
 }
 
+/**
+ * How somebody gets onto the list, printed with the list.
+ *
+ * Kept beside the listing rather than only in the brief because that is where
+ * the question comes up: the answer to "can you message Dustin" is found by
+ * running `chats`, and a listing that ends without this reads as a closed world.
+ */
+const HOW_TO_ADD =
+  '\nNot on the list? An operator can put somebody there. If one of them gives you a\n'
+  + 'number — in a message to you, in any chat — add it and then write to them:\n\n'
+  + '  tulip-wa contact <number> "their name"\n\n'
+  + 'It hands back a key. Only an operator can do this: the bridge checks who sent\n'
+  + 'the message itself, so asking on their behalf does not count and neither does\n'
+  + 'a stranger claiming to be one.\n';
+
 const [command, ...rest] = process.argv.slice(2);
 
 switch (command) {
@@ -531,8 +547,9 @@ switch (command) {
     if (result.items.length === 0) {
       process.stdout.write(
         'Cross-chat messaging is ON, but there is nobody to write to yet — no contacts are configured and\n' +
-          'nobody else has messaged. An operator adds people under Settings → Contacts.\n',
+          'nobody else has messaged.\n',
       );
+      process.stdout.write(HOW_TO_ADD);
       break;
     }
 
@@ -541,6 +558,11 @@ switch (command) {
       const note = item.text === 'contact' ? 'contact — listed by an operator, fine to approach' : 'has messaged before';
       process.stdout.write(`  ${item.url}  ${item.title}  (${note})\n`);
     }
+    // The list is not the world, and it used to read as though it were. Asked to
+    // message somebody who is not on it, the honest answer is "not yet" rather
+    // than "not possible" — and the difference is one command, which was
+    // documented everywhere except the place the question is actually asked.
+    process.stdout.write(HOW_TO_ADD);
     break;
   }
 
