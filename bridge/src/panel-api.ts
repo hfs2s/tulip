@@ -529,23 +529,72 @@ export function memoryForget(id: string): { ok: boolean; message: string } {
 
 // ─── Log ─────────────────────────────────────────────────────────────────────
 
+/** The writer's naming, from `log.ts`. ISO dates sort lexicographically. */
+const LOG_FILE = /^tulip-\d{4}-\d{2}-\d{2}\.jsonl$/;
+
+/**
+ * How many day files one request may open.
+ *
+ * Two is enough to cross a midnight, three leaves room for a quiet day in
+ * between. The cap is the whole reason this is not "read them all": the panel
+ * is a long-lived deployment on a Pi, and `?n=1000` against a year of logs is a
+ * request that reads the disk.
+ */
+const MAX_LOG_FILES = 3;
+
+/**
+ * The tail of the structured log, read **backwards across day files**.
+ *
+ * The obvious implementation opens today's file and stops, and it is wrong for
+ * a reason that only shows up at 00:00 UTC: `log.ts` names files by UTC date,
+ * so at the boundary the file this would ask for does not exist yet. A missing
+ * file reads as no rows, and an empty Logs page is indistinguishable from a
+ * broken deployment — observed live, blank from 00:02 until the next line was
+ * written at 00:03. The operator is in CEST, where that is 02:00 local, in the
+ * middle of an evening's work. `n` could not be satisfied across the boundary
+ * either: one minute past midnight the whole previous day was unreachable
+ * through the panel with the file sitting right there.
+ *
+ * So: newest file first, accumulate until there are enough rows, return them in
+ * chronological order. Do not simplify this back to today-only.
+ *
+ * Total by construction — a missing directory, an unreadable file and a line
+ * that is not JSON each degrade to less output rather than to an error. This is
+ * an observability surface; it must not be the thing that breaks.
+ */
 export function logTail(lines: number): Json {
-  const file = join(paths.logs, `tulip-${new Date().toISOString().slice(0, 10)}.jsonl`);
+  const want = Math.max(Math.trunc(lines), 0);
+  if (want === 0) return [];
+
+  let names: string[];
   try {
-    return readFileSync(file, 'utf8')
-      .trimEnd()
-      .split('\n')
-      .slice(-lines)
-      .map((line): unknown => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return { at: '', event: 'unparsed', raw: line.slice(0, 200) };
-        }
-      });
+    names = readdirSync(paths.logs).filter((name) => LOG_FILE.test(name)).sort().reverse();
   } catch {
     return [];
   }
+
+  const rows: string[] = [];
+  for (const name of names.slice(0, MAX_LOG_FILES)) {
+    if (rows.length >= want) break;
+    let text: string;
+    try {
+      text = readFileSync(join(paths.logs, name), 'utf8');
+    } catch {
+      continue;
+    }
+    // Blank lines are dropped rather than parsed: an empty file would otherwise
+    // spend a row of the budget on an `unparsed` entry with nothing in it.
+    const day = text.split('\n').filter((line) => line.length > 0);
+    rows.unshift(...day.slice(-(want - rows.length)));
+  }
+
+  return rows.map((line): unknown => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      return { at: '', event: 'unparsed', raw: line.slice(0, 200) };
+    }
+  });
 }
 
 // ─── Settings ────────────────────────────────────────────────────────────────
