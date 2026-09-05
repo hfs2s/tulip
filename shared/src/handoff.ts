@@ -318,6 +318,32 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       id: z.string().uuid(),
       turnId: TurnId,
       /**
+       * What actually left, according to the bridge.
+       *
+       * The agent cannot see its own sends. It writes an action, the bridge
+       * deletes the file whether it delivered the message or discarded it, and
+       * those two outcomes are the same observation from inside the container —
+       * so "queued and consumed, no refusals" gets reported as success even
+       * when nothing was sent. That has happened, to a message an operator had
+       * asked for, and the operator found out from the panel rather than from
+       * the agent.
+       *
+       * Deliberately **outbound only**. What the agent said is its own work and
+       * safe to hand back; what other people said is not, and reading another
+       * conversation inward is the thing session isolation exists to prevent.
+       * See THREAT-MODEL.md §T4.
+       */
+      kind: z.literal('sent'),
+      /** Which conversation. Null is the one whose turn this is. */
+      chatKey: ChatKey.nullable().default(null),
+      n: z.number().int().min(1).max(50).default(15),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
        * Ask the bridge to issue a chat key for a phone number.
        *
        * This is the one place a number appears in the agent's vocabulary, and
@@ -552,7 +578,7 @@ export const MemoryFile = z.object({ notes: z.array(MemoryNote).max(200) }).stri
 export const ToolResult = z
   .object({
     actionId: z.string().uuid(),
-    kind: z.enum(['search', 'fetch', 'chats', 'page', 'contact']),
+    kind: z.enum(['search', 'fetch', 'chats', 'page', 'contact', 'sent']),
     at: z.string().datetime(),
     ok: z.boolean(),
     /** Present when ok is false. Short, and safe to show a person. */

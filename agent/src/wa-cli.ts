@@ -50,6 +50,10 @@ const USAGE = `usage:
   tulip-wa page <name>        publish out/pages/<name>/ and print its address.
                               Write index.html there first; CSS and JS beside it
                               work, and so does browser storage. No network.
+  tulip-wa sent [--to <key>] [n]
+                              what actually left, from the bridge's record.
+                              Check before saying a message went — an action
+                              being consumed is not a delivery.
   tulip-wa languages          what --language accepts, and the near-names it maps
   tulip-wa chats              list chats you may message (if enabled)
   tulip-wa contact <number> <name>
@@ -526,6 +530,46 @@ switch (command) {
       '\nCebuano, Bisaya and the rest are read with the Filipino mouth: the provider\n'
       + 'has no voice of their own, and Filipino is far closer than English.\n',
     );
+    break;
+  }
+
+  /**
+   * What actually went out, from the bridge rather than from memory.
+   *
+   * An action is fire-and-forget: the file is written and the bridge deletes it
+   * whether it sent the message or discarded it, so "queued and consumed" is
+   * not evidence of delivery. It has read as evidence, and a message an
+   * operator asked for was reported as sent when nothing left. Check here
+   * before telling anybody a message went.
+   */
+  case 'sent': {
+    const { chatKey, rest: words } = takeDestination(rest, 'sent');
+    const howMany = Number(words[0]);
+    const id = queue({
+      kind: 'sent',
+      chatKey,
+      n: Number.isFinite(howMany) && howMany > 0 ? Math.min(50, Math.trunc(howMany)) : 15,
+    });
+    const result = await awaitResult(id, 15_000);
+    if (result === null) {
+      process.stdout.write('sent: no answer from the bridge within 15s. Try again before concluding anything.\n');
+      break;
+    }
+    if (!result.ok) {
+      process.stdout.write(`${result.error ?? 'sent: refused'}\n`);
+      break;
+    }
+    if (result.items.length === 0) {
+      process.stdout.write(
+        'Nothing has been sent to this chat. If you believed otherwise, you were wrong — an action\n'
+        + 'being consumed is not the same as a message being delivered.\n',
+      );
+      break;
+    }
+    process.stdout.write('Actually delivered, newest last:\n');
+    for (const item of result.items) {
+      process.stdout.write(`  ${item.title}  ${item.url.padEnd(10)} ${item.text ?? ''}\n`);
+    }
     break;
   }
 

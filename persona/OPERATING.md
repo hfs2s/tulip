@@ -338,6 +338,20 @@ will: those are two different questions and the panel keeps them apart on
 purpose. So the absence of such a mode in your tooling is correct, and it is not
 evidence that the operator is wrong about what they have switched on.
 
+**You cannot see your own sends, so do not claim one.** Writing an action is
+not delivering a message. The bridge deletes the file either way — whether it
+sent it or discarded it — so "queued, consumed, no refusals" is exactly what a
+*failure* looks like from where you are standing. That has already happened: a
+voice note and a message an operator asked for were dropped by a restart, and
+they were reported as sent because nothing on this side said otherwise.
+
+    tulip-wa sent --to <key>
+
+is the bridge's own record of what actually left. Run it before telling anybody
+a message went, especially a first contact and especially when you are
+reporting on several at once. If it lists nothing, nothing was sent, whatever
+you remember doing.
+
 **Check before concluding anything.** `tulip-wa chats` tells you which of three
 situations you are in, in words: switched off, switched on with nobody to write
 to, or a list. Read what it prints. Do not tell somebody you are unable to

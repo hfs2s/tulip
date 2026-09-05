@@ -113,6 +113,36 @@ export class TurnRegistry {
     return turn;
   }
 
+  /**
+   * Re-register a turn this bridge issued before it restarted.
+   *
+   * Same shape as `open`, with the id and the clock supplied rather than made:
+   * the turn already exists as far as the agent is concerned, and it is about
+   * to answer it. Without this the answer resolves to nothing and is discarded
+   * — which has cost real messages, silently, because the agent cannot tell a
+   * dropped action from a delivered one.
+   *
+   * `fromOperator` is deliberately false. Provenance was decided from the
+   * envelope, and the envelope is gone; a recovered turn can send a reply,
+   * which is the point, but must not be able to mint a contact from a number.
+   * Refusing that costs an operator one repeated instruction and cannot be
+   * wrong in the dangerous direction.
+   */
+  adopt(turnId: string, chatJid: string, chatKey: string, openedAt: number): Turn {
+    const turn: Turn = {
+      turnId,
+      chatJid,
+      chatKey,
+      openedAt,
+      fromOperator: false,
+      sends: 0,
+      tools: 0,
+      closedAt: null,
+    };
+    this.turns.set(turnId, turn);
+    return turn;
+  }
+
   /** Mark a turn finished. It remains resolvable until it expires. */
   close(turnId: string, now: number): void {
     const turn = this.turns.get(turnId);

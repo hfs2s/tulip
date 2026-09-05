@@ -55,6 +55,39 @@ export function publishTurn(batch: InboxBatchType, can?: CurrentTurnType['can'])
   writeJsonAtomic(inPaths.current, current, 0o644);
 }
 
+/**
+ * The turn that was open when this process last stopped, if there is one.
+ *
+ * The turn registry is in memory, so a restart forgets every open turn — and an
+ * action written by the agent a second later resolves to nothing and is
+ * discarded as unroutable. That is not theoretical: it happened twice in one
+ * day, and the second time it silently dropped a voice note and a message the
+ * operator had asked for. The agent reported success both times, because from
+ * inside the container "the file I wrote disappeared" is indistinguishable from
+ * "the bridge sent it".
+ *
+ * `current.json` is written before injection and is exactly the missing piece,
+ * so the registry can be rebuilt from it. This is safe in a way that inventing
+ * a turn would not be: the file is on the inbound volume, which the agent
+ * mounts read-only, so the id it names is one this bridge issued and not one an
+ * agent chose for itself.
+ *
+ * Null when there is no pointer, when it is unreadable, or when the turn it
+ * names is older than the timeout — a stale pointer from days ago should not
+ * resurrect a turn that everybody has forgotten.
+ */
+export function readCurrentTurn(maxAgeMs: number, now = Date.now()): CurrentTurnType | null {
+  let parsed: CurrentTurnType;
+  try {
+    parsed = CurrentTurn.parse(JSON.parse(readFileSync(inPaths.current, 'utf8')));
+  } catch {
+    return null;
+  }
+  const startedAt = Date.parse(parsed.startedAt);
+  if (!Number.isFinite(startedAt) || now - startedAt > maxAgeMs) return null;
+  return parsed;
+}
+
 /** Remove a delivered batch once its turn is finished. */
 export function retireBatch(turnId: string): void {
   try {

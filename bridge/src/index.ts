@@ -16,7 +16,7 @@ import { loadConfig, type Config } from './config.js';
 import { handleControl } from './control.js';
 import { Dispatcher } from './dispatcher.js';
 import { feed } from './feed.js';
-import { ensureHandoffDirs, readStatus } from './handoff.js';
+import { ensureHandoffDirs, readCurrentTurn, readStatus } from './handoff.js';
 import { log } from './log.js';
 import { Outbox } from './outbox.js';
 import { startPanel } from './panel.js';
@@ -77,6 +77,24 @@ async function main(): Promise<void> {
     config.limits.outboundPerTurn,
     config.limits.toolsPerTurn,
   );
+
+  // Adopt the turn that was open when this process last stopped, if there was
+  // one. A restart used to forget it, and the agent's reply — written seconds
+  // later, against an id this bridge had issued — was discarded as unroutable
+  // with no way for the agent to know. Twice in one day that lost a message
+  // somebody had asked for.
+  const interrupted = readCurrentTurn(config.limits.turnTimeoutMs);
+  if (interrupted !== null) {
+    const jid = chats.jidFor(interrupted.chatKey);
+    if (jid !== null) {
+      turns.adopt(interrupted.turnId, jid, interrupted.chatKey, Date.parse(interrupted.startedAt));
+      log('turn.adopted', {
+        turnId: interrupted.turnId,
+        chatKey: interrupted.chatKey,
+        note: 'was open across a restart; its reply will still be delivered',
+      });
+    }
+  }
   const wa = new WhatsApp();
 
   // `dispatcher` is referenced by things constructed before it, so it is passed

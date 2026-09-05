@@ -479,7 +479,7 @@ export class Outbox extends EventEmitter {
 
   private async answer(
     actionId: string,
-    kind: 'search' | 'fetch' | 'chats' | 'page' | 'contact',
+    kind: 'search' | 'fetch' | 'chats' | 'page' | 'contact' | 'sent',
     outcome: ExaOutcome,
   ): Promise<void> {
     const result = ToolResult.safeParse({
@@ -830,6 +830,41 @@ export class Outbox extends EventEmitter {
        * stranger who takes over the agent entirely gets the same refusal, from
        * every turn they can reach.
        */
+      /**
+       * What actually left, from the bridge's own record.
+       *
+       * Outbound only — see the schema. The agent's own words are its to read
+       * back; anybody else's are not, and this must never become a way to read
+       * a conversation it is not in.
+       *
+       * `answer` is used rather than the feed's own shape so it arrives in the
+       * vocabulary the agent already has from `chats` and `search`.
+       */
+      case 'sent': {
+        const key = action.chatKey ?? turn.chatKey;
+        if (action.chatKey !== null && this.crossChatTarget(action.chatKey) === null) {
+          await this.answer(action.id, 'sent', {
+            ok: false,
+            error: 'that is not a chat you may look at — `tulip-wa chats` lists the ones you can',
+          });
+          break;
+        }
+        const rows = feed
+          .recent(4000)
+          .filter((e) => e.kind === 'out' && e.chatKey === key)
+          .slice(-action.n);
+        await this.answer(action.id, 'sent', {
+          ok: true,
+          items: rows.map((e) => ({
+            title: new Date(e.ts).toISOString(),
+            url: e.detail ?? 'text',
+            published: null,
+            text: (e.text ?? '').slice(0, 200),
+          })),
+        });
+        break;
+      }
+
       case 'contact': {
         if (!turn.fromOperator) {
           log('outbox.contactRefused', { chatKey: turn.chatKey, note: 'not an operator turn' });
