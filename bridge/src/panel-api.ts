@@ -85,6 +85,13 @@ export function snapshot(deps: ApiDeps): Json {
       busyTurn: status?.busyTurn ?? null,
       fatal: status?.fatal ?? null,
       sessions: status?.sessions.length ?? 0,
+      // Which chats have a window open, not just how many. The Chat page's
+      // conversation list shows a dot per row, and a count cannot say which
+      // row it belongs to — the alternative was a transcript fetch per
+      // conversation on every poll. Same standing as the rest of this object:
+      // the agent's account of itself, displayed and never decided from, and
+      // `AgentStatus` caps the array at 64.
+      openChats: status?.sessions.map((s) => s.chatKey) ?? [],
     },
     audience: {
       everyone: deps.config.audience.everyone,

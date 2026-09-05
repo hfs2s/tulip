@@ -394,75 +394,313 @@
   .badge.off{border-color:var(--warn);color:var(--warn)}
 
   /* ── Chat ───────────────────────────────────────────────────────────────────
-     One conversation, read the way a conversation is read.
+     The masked chat: one conversation, read the way a conversation is read.
 
-     The terminal shows the truth and is nearly unreadable: a TUI is spinner
-     frames, box drawing and half-repainted lines, and an operator wanting to
-     know what Juan just said to somebody should not have to parse one. So this
-     page is the same session in the shape it actually has — but the shape is a
-     claim, and the styling has to keep four things apart that a chat app would
-     happily blur into one column of bubbles:
+     This is the panel's primary surface and it is a chat client — a list of
+     conversations beside a thread that scrolls on its own, with the box to type
+     in pinned under it. It was a card containing a log with a text area stapled
+     below, and that shape was the problem: it read as a page *about* a
+     conversation rather than as the conversation.
 
-       · what a person sent            — `.msg.them`
-       · what Juan sent them           — `.msg.juan`, the accent, the only tint
-       · what Juan said *in session*   — `.msg.note`, dashed and unfilled: he
-                                         wrote it, nobody received it
-       · what an operator typed in     — `.msg.op`, amber, because it is the one
-                                         line on this page a human here caused
+     Two structural rules carry the whole thing, and both are about masking.
 
-     Tool calls are a mono chip rather than a bubble. They are not speech, and
-     giving them a bubble was the fastest way to make the page unreadable again. */
-  .thread{display:flex;flex-direction:column;gap:9px;
-          max-height:min(56vh,600px);overflow-y:auto;padding-right:6px}
-  .msg{max-width:min(70ch,88%);border-radius:13px;padding:9px 13px;
+     **Only speech gets a bubble.** What a person sent, what Juan sent them, and
+     what an operator typed at his prompt. Everything else Juan did between
+     those — the tools, the thinking, the words he wrote in session that nobody
+     received — is a band that spans the column. Alignment is the encoding: a
+     bubble hangs from one edge and is somebody talking; a band touches both
+     edges and is a stage direction.
+
+     **The accent is Juan's voice and nothing else.** Cyan appears in the thread
+     on his bubbles and nowhere else, so "who said this" is answered before
+     anything is read. Amber is the operator's own line, and it is unfilled,
+     because it is not speech to the person on WhatsApp — it is a line typed
+     into Juan's prompt that he may or may not act on.
+
+     Everything reaching the DOM here arrives as `textContent`. Half of it was
+     written by a stranger and the other half by an agent that reads what
+     strangers write. */
+
+  /* The page gives up the document's padding and takes the frame. Two panes
+     that scroll independently cannot live inside one page that scrolls as a
+     whole; `.bare` does the same for the terminal, for the same reason. */
+  .page-wrap.chatmode{padding:0;flex:1;min-height:0;display:flex}
+  .page-wrap.chatmode > .page.on{flex:1;min-width:0;min-height:0;display:flex;
+                                 animation:none;opacity:1;transform:none}
+
+  .chatapp{flex:1;min-width:0;min-height:0;display:grid;
+           grid-template-columns:284px minmax(0,1fr)}
+
+  /* ── The conversation list ──────────────────────────────────────────────────
+     A picker was a <select>, which is the control you reach for when the list
+     is an argument rather than the thing itself. Here it is the thing itself:
+     who has written, what they last said, and how long ago. */
+  .convo{min-width:0;min-height:0;display:flex;flex-direction:column;
+         background:var(--panel);border-right:1px solid var(--line-soft)}
+  .convo-head{flex:none;padding:14px 14px 12px;border-bottom:1px solid var(--line-soft)}
+  .convo-head input{width:100%}
+  .convo-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+  /* A 2px bar rather than a fill, so the selected row reads at the edge of
+     vision without the list becoming a column of coloured blocks. */
+  .convo-row{display:grid;grid-template-columns:9px minmax(0,1fr) auto;
+             gap:2px 9px;align-items:baseline;width:100%;text-align:left;
+             font:inherit;color:inherit;cursor:pointer;
+             background:transparent;border:0;border-left:2px solid transparent;
+             border-bottom:1px solid var(--line-soft);padding:11px 14px 12px 12px;
+             transition:background .14s ease}
+  .convo-row:hover{background:var(--raise)}
+  .convo-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .convo-row .dot{width:6px;height:6px;flex:0 0 6px;align-self:center;
+                  background:transparent;transition:background .2s ease}
+  .convo-row .name{min-width:0;font-size:13.5px;color:var(--ink);
+                   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .convo-row .when{font-size:11px;color:var(--faint);white-space:nowrap}
+  .convo-row .last{grid-column:2/-1;font-size:12.5px;line-height:1.45;color:var(--faint);
+                   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .convo-row[aria-current="true"]{background:var(--accent-dim);border-left-color:var(--accent)}
+  .convo-row[aria-current="true"] .name{color:var(--accent)}
+  .convo-row[aria-current="true"]:hover{background:var(--accent-dim)}
+  .convo-none{padding:22px 16px;font-size:12.5px;line-height:1.6;color:var(--faint)}
+
+  /* ── The thread ─────────────────────────────────────────────────────────────
+     One column, and one gutter down each side of it. The header's text, every
+     bubble's outer edge, both ends of every band and the composer's field all
+     start and stop on the same two lines, so nothing in the pane wanders off
+     them.
+
+     The column is capped rather than filling the pane, and that is not a taste
+     decision: with speech hanging from both edges of a 1100px pane, an incoming
+     message and the reply to it sit half a metre apart with a void between, and
+     the eye stops reading them as one conversation. `--col` is what closes that
+     gap; the header and the composer are inset by the same rule so the three
+     cannot drift.
+
+     The chrome stays full width — the header's rule and the composer's ground
+     belong to the pane. Only their contents are capped, which is what the
+     inner `.cap` is for. */
+  .thread-pane{--gut:26px;--col:min(880px,100%);
+               min-width:0;min-height:0;display:flex;flex-direction:column}
+  .cap{width:100%;max-width:var(--col);margin-inline:auto;padding-inline:var(--gut)}
+  .thread-head{flex:none;border-bottom:1px solid var(--line-soft)}
+  .thread-head .cap{display:flex;align-items:center;gap:14px;padding-block:15px 14px}
+  .thread-head .who{min-width:0;flex:1}
+  .thread-head h3{font:400 17px/1.2 var(--display);letter-spacing:-.02em;margin:0;
+                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thread-head .sub{display:flex;align-items:center;gap:8px;margin:4px 0 0;
+                    font-size:11.5px;color:var(--faint);max-width:none;flex-wrap:wrap}
+  .thread-head .sub .key{font-size:11px}
+  .thread-head .acts{flex:0 0 auto;display:flex;gap:8px;align-items:center}
+  /* The raw pty, demoted. It is still one click away and it is deliberately not
+     the first thing on the page: it shows other people's keys, tool arguments
+     and whatever a stack trace printed. */
+  .raw{display:inline-flex;align-items:center;gap:7px}
+  .raw svg{width:15px;height:15px;opacity:.75}
+
+  /* Hidden until the list and the thread share a column. `.nav svg` sizes the
+     rail's icons and does not reach here, so without this the chevron takes an
+     SVG's default 300x150 and the button renders empty. */
+  .backrow{display:none;flex:0 0 auto}
+  .backrow svg{width:16px;height:16px}
+
+  .thread-wrap{position:relative;flex:1;min-width:0;min-height:0;display:flex}
+  .thread{flex:1;min-height:0;width:100%;max-width:var(--col);margin-inline:auto;
+          overflow-y:auto;overscroll-behavior:contain;
+          display:flex;flex-direction:column;gap:10px;
+          padding:20px var(--gut) 24px}
+
+  /* ── Speech ─────────────────────────────────────────────────────────────────
+     One asymmetric corner on the side the bubble hangs from. It is the whole of
+     the "tail" and it is enough: a drawn tail is a decoration, a clipped corner
+     is the same information in the shape already there. */
+  .msg{max-width:min(62ch,84%);border-radius:14px;padding:9px 13px 7px;
        border:1px solid var(--line-soft);background:var(--raise)}
-  .msg .who{display:block;font-size:11px;color:var(--faint);margin-bottom:3px}
   .msg .body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px;line-height:1.55}
-  .msg .at{display:block;font-size:11px;color:var(--faint);margin-top:4px}
-  .msg.them{align-self:flex-start}
-  .msg.juan{align-self:flex-end;background:var(--accent-dim);border-color:rgba(33,210,237,.3)}
-  .msg.juan .who{color:var(--accent)}
-  /* Unfilled and dashed: written, not sent. The distinction is the whole reason
-     this page is not simply the WhatsApp thread, which the Messages page is. */
-  .msg.note{align-self:flex-start;background:transparent;border-style:dashed;color:var(--dim)}
-  .msg.op{align-self:flex-end;background:transparent;border-color:var(--warn)}
-  .msg.op .who{color:var(--warn)}
-  .turnmark{display:flex;align-items:center;gap:11px;margin:5px 0;
-            font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
-  .turnmark::before,.turnmark::after{content:"";flex:1;height:1px;background:var(--line-soft)}
-  .chip{align-self:flex-start;display:flex;gap:9px;align-items:baseline;max-width:100%;
-        font-family:var(--mono);font-size:11.5px;color:var(--faint);padding:1px 2px}
-  .chip b{flex:0 0 auto;font-weight:400;color:var(--dim)}
-  .chip span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .thought{align-self:flex-start;max-width:min(70ch,88%)}
-  .thought > button{background:transparent;border:0;padding:2px 0;border-radius:6px;
-                    font:inherit;font-size:11.5px;color:var(--faint);cursor:pointer}
-  .thought > button:hover{color:var(--dim)}
-  .thought > button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .thought .body{margin-top:5px;padding-left:11px;border-left:2px dotted var(--line);
-                 font-size:12.5px;line-height:1.55;color:var(--faint);
-                 white-space:pre-wrap;overflow-wrap:anywhere}
+  .msg .at{display:block;margin-top:3px;text-align:right;font-size:10.5px;color:var(--faint)}
+  .msg.them{align-self:flex-start;border-bottom-left-radius:5px}
+  .msg.juan{align-self:flex-end;border-bottom-right-radius:5px;
+            background:var(--accent-dim);border-color:rgba(33,210,237,.3)}
+  /* Unfilled and amber: a line an operator typed at Juan's prompt. Nobody on
+     WhatsApp received it, and whether they ever hear anything about it is
+     Juan's decision rather than this panel's. */
+  .msg.op{align-self:flex-end;border-bottom-right-radius:5px;
+          background:transparent;border-color:rgba(240,180,41,.45)}
+  .msg.op .at{color:var(--warn)}
+  /* The name above a run, not on every bubble. Repeating it on each one is what
+     makes a thread read as a table of rows rather than as somebody talking. */
+  .said-by{align-self:flex-start;margin:6px 0 -5px;padding:0 2px;
+           font-size:11px;color:var(--faint)}
+  .said-by.mine{align-self:flex-end}
+  .said-by.op{color:var(--warn)}
+  /* Consecutive lines from the same side, close together in time. */
+  .msg.run{margin-top:-6px}
 
-  /* The composer.
-     The warning is not a page banner. A banner is read once and then becomes
-     furniture, and this needs to be true at the moment of pressing the button —
-     so it sits against the field, it names the person, and the send itself
-     goes through a confirm that quotes the exact line. */
-  .composer{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)}
-  .composer textarea{display:block;width:100%;min-height:74px;resize:vertical;
-    font:inherit;font-size:13.5px;line-height:1.55;color:var(--ink);
-    background:var(--raise);border:1px solid var(--line);border-radius:11px;padding:11px 13px}
+  .daymark{align-self:center;margin:8px 0 2px;font-size:11px;color:var(--faint);
+           background:var(--raise);border:1px solid var(--line-soft);
+           border-radius:var(--r-pill);padding:3px 12px}
+
+  /* ── The work band ──────────────────────────────────────────────────────────
+     What Juan did between two messages, which is the interesting half and was
+     the unreadable half: a column of mono chips carrying file paths, URLs and
+     other people's chat keys.
+
+     Collapsed it is one sentence of narration and a step count. Opened it is a
+     list of verbs in a fixed column with a masked detail beside each — a
+     basename rather than a path, a hostname rather than a URL, a program name
+     rather than a command line. Nothing in it is a raw argument, and the two
+     steps that are pure machinery (the typing indicator, the agent asking which
+     chat it is in) are not listed at all. */
+  .work{align-self:stretch;margin:3px 0;border:1px solid var(--line-soft);
+        border-left:2px solid rgba(255,255,255,.26);border-radius:0 11px 11px 0;
+        background:rgba(255,255,255,.022)}
+  /* Amber, and only while it is happening: the same yellow the rail's dot uses
+     for a turn in flight, so one colour means one thing across the panel. */
+  .work.busy{border-left-color:var(--warn);background:rgba(240,180,41,.05)}
+  .work-open{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+             font:inherit;font-size:12.5px;color:var(--dim);
+             background:transparent;border:0;border-radius:0 11px 11px 0;
+             padding:9px 13px;cursor:pointer}
+  .work-open:hover{color:var(--ink)}
+  .work-open:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .work-open .caret{flex:0 0 auto;width:9px;color:var(--faint);
+                    transition:transform .16s ease;transform-origin:45% 50%}
+  .work-open[aria-expanded="true"] .caret{transform:rotate(90deg)}
+  .work-open .what{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .work.busy .work-open .what{color:var(--warn)}
+  .work-open .n{flex:0 0 auto;font-size:11px;color:var(--faint)}
+  /* Indented to the summary's own text, past the caret: the steps are what the
+     summary opened, so they begin where it begins. */
+  .work-steps{padding:0 13px 10px 32px}
+  .work-steps[hidden]{display:none}
+  /* A fixed first column, so every detail on the list starts on one line
+     however long the verbs are. 19ch is the longest verb in `WA` and `TOOLS`
+     plus a hair — keep it that way, or a two-line verb beside a one-line
+     detail puts the row out of true. */
+  .step{display:grid;grid-template-columns:19ch minmax(0,1fr);gap:14px;
+        padding:6px 0;border-top:1px solid var(--line-soft);font-size:12.5px}
+  .step .verb{color:var(--dim)}
+  .step .detail{min-width:0;font-family:var(--mono);font-size:11.5px;color:var(--faint);
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Prose, so it gets the width and the wrapping that a one-line detail does
+     not: Juan's own words in session, and his thinking. */
+  .step.prose{grid-template-columns:19ch minmax(0,1fr)}
+  .step.prose .detail{font-family:var(--body);font-size:12.5px;line-height:1.55;
+                      white-space:pre-wrap;overflow-wrap:anywhere;color:var(--dim)}
+  .step .more{display:block;margin-top:4px;padding:0;font:inherit;font-size:11.5px;
+              color:var(--faint);background:transparent;border:0;cursor:pointer;text-align:left}
+  .step .more:hover{color:var(--dim)}
+  .step .more:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .step .thinking{margin-top:5px;padding-left:11px;border-left:2px dotted var(--line);
+                  font-family:var(--body);font-size:12.5px;line-height:1.55;color:var(--faint);
+                  white-space:pre-wrap;overflow-wrap:anywhere}
+
+  /* Three dots in Juan's own bubble, because a turn is running for this
+     conversation. `queue.inFlight` is a chat key, so this can only ever appear
+     on the conversation actually being answered. */
+  .typing{align-self:flex-end;display:flex;gap:5px;align-items:center;
+          padding:12px 15px;border-radius:14px;border-bottom-right-radius:5px;
+          background:var(--accent-dim);border:1px solid rgba(33,210,237,.3)}
+  .typing i{width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.38;
+            animation:bob 1.25s ease-in-out infinite}
+  .typing i:nth-child(2){animation-delay:.16s}
+  .typing i:nth-child(3){animation-delay:.32s}
+  @keyframes bob{30%{opacity:1;transform:translateY(-3px)}}
+  /* With motion off the dots stop rather than disappear, so the state is still
+     on the screen — and the element carries the words for a screen reader. */
+  @media (prefers-reduced-motion:reduce){.typing i{opacity:.9}}
+
+  /* Only while the reader is somewhere other than the bottom. Following a
+     conversation and reading the middle of one are different jobs, and the
+     scroll must not be taken away from the second to serve the first. */
+  .jump{position:absolute;left:50%;bottom:16px;z-index:2;transform:translateX(-50%);
+        padding:6px 15px;font-size:12.5px;border-radius:var(--r-pill);
+        background:var(--raise);border:1px solid var(--line);color:var(--ink);
+        box-shadow:0 8px 24px rgba(0,0,0,.45);cursor:pointer}
+  .jump:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* ── Empty and failed ───────────────────────────────────────────────────────
+     Neither is an error. No session open is the ordinary resting state of every
+     conversation on this panel, so it is written as direction. */
+  .pane-empty{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;
+              align-items:center;justify-content:center;text-align:center;padding:40px 32px}
+  .pane-empty svg{width:26px;height:26px;color:var(--faint);opacity:.6;margin-bottom:2px}
+  .pane-empty h3{font:400 19px/1.25 var(--display);letter-spacing:-.02em;margin:0;color:var(--dim)}
+  .pane-empty p{margin:0;max-width:46ch;font-size:13px;line-height:1.65;color:var(--faint)}
+  .thread-note{align-self:center;max-width:46ch;margin:auto 0;padding:18px 4px;
+               text-align:center;font-size:13px;line-height:1.65;color:var(--faint)}
+  .thread-note b{display:block;margin-bottom:5px;font-weight:400;color:var(--dim);
+                 font-family:var(--display);font-size:15px;letter-spacing:-.01em}
+  .thread-note button{margin-top:12px}
+
+  /* ── The composer ───────────────────────────────────────────────────────────
+     Pinned under the thread, and the reason it is disabled is written against
+     it rather than in a banner at the top of the page. A banner is read once
+     and becomes furniture; what has to be true is that the person is named at
+     the moment of pressing the button — so the line above the field carries the
+     name, and the confirm quotes the exact text that will be typed. */
+  .composer{flex:none;padding:0;background:var(--panel);
+            border-top:1px solid var(--line-soft)}
+  .composer .cap{padding-block:12px 14px}
+  .composer .why{display:flex;align-items:flex-start;gap:9px;margin:0 0 9px;
+                 font-size:12.5px;line-height:1.5;color:var(--faint)}
+  .composer .why .dot{margin-top:5px;background:var(--faint)}
+  .composer .why.live{color:var(--dim)}
+  .composer .why.live .dot{background:var(--accent)}
+  .composer .why.warn{color:var(--warn)}
+  .composer .why.warn .dot{background:var(--warn)}
+  .composer .why.bad{color:var(--bad)}
+  .composer .why.bad .dot{background:var(--bad)}
+  /* flex-end, so the button stays on the field's bottom edge as the box grows
+     rather than drifting up the middle of it. */
+  .composer .row{display:flex;align-items:flex-end;gap:10px}
+  .composer textarea{flex:1;min-width:0;display:block;resize:none;overflow-y:auto;
+    height:42px;min-height:42px;max-height:168px;
+    font:inherit;font-size:13.5px;line-height:1.5;color:var(--ink);
+    background:var(--raise);border:1px solid var(--line);border-radius:12px;padding:10px 13px}
   .composer textarea::placeholder{color:var(--faint)}
   .composer textarea:focus{outline:none;border-color:var(--accent)}
   .composer textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .composer textarea:disabled{opacity:.5;cursor:not-allowed}
-  .composer .live{display:flex;align-items:center;gap:9px;margin-bottom:9px;
-                  font-size:12.5px;color:var(--warn)}
-  .composer .live .dot{background:var(--warn)}
-  .composer .foot{display:flex;align-items:center;gap:12px;margin-top:11px;flex-wrap:wrap}
-  .composer .foot .hint{font-size:12px;color:var(--faint);margin:0}
-  .chathead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
-  .chathead h3{font:400 17px/1.2 var(--display);letter-spacing:-.02em;margin:0}
+  .composer .row button{flex:0 0 auto;height:42px;padding:0 18px}
+  .composer .count{display:block;margin-top:6px;text-align:right;
+                   font-size:11px;color:var(--faint)}
+  /* It is empty for all but the last three hundred characters, and an empty
+     block still spends its own top margin on the composer's height. */
+  .composer .count:empty{display:none}
+  .composer .count.near{color:var(--warn)}
+
+  @media (max-width:900px){
+    /* Below this width the document scrolls as a whole — `body` takes the
+       scroll and `main` goes visible. A chat client cannot live in that: its
+       two panes scroll on their own and its composer sits on the bottom edge of
+       the window, both of which need a fixed height to sit inside. So on this
+       page, and only on this page, the frame comes back. */
+    body.chatmode{overflow:hidden}
+    body.chatmode main{flex:1;min-height:0;overflow:hidden}
+
+    /* One pane at a time. The list is the page until a conversation is chosen,
+       and the thread is the page after that — with the way back in the header,
+       where the conversation's name already is. */
+    .chatapp{grid-template-columns:minmax(0,1fr)}
+    .convo{border-right:0}
+    .chatapp.reading .convo{display:none}
+    .chatapp:not(.reading) .thread-pane{display:none}
+    .backrow{display:flex}
+    .thread-pane{--gut:16px;--col:100%}
+    .msg{max-width:92%}
+    .step,.step.prose{grid-template-columns:minmax(0,1fr);gap:2px}
+    .thread-head .acts .raw span{display:none}
+    .thread-head .acts .raw{padding:0;width:44px;height:44px;justify-content:center}
+  }
+
+  /* The pill has two meanings and one of them is news. Parked because you
+     scrolled up to reread is navigation; parked while it kept talking is
+     something you have not seen — and only that one gets the amber. */
+  .jump.new{border-color:var(--warn);color:var(--warn)}
+  .jump.new:hover{border-color:var(--warn);color:var(--warn);filter:brightness(1.12)}
+  /* Typed, and not yet read back out of the transcript. The poll is seconds
+     away, and a send that produces nothing on the screen reads as a send that
+     did not happen. */
+  .msg.pending{opacity:.6}
 
   /* ── Terminal ───────────────────────────────────────────────────────────────
      The page *is* the terminal. The heading, the warning bar, the readable/raw
@@ -477,8 +715,9 @@
   /* ── The terminal ───────────────────────────────────────────────────────────
      Full-bleed and over everything: a terminal wants the whole window, and the
      panel's chrome around it was competing with tmux's own status line. */
-  .termlaunch{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:16px}
-  .termstate{font-size:12.5px;color:var(--faint)}
+  /* The launcher card these two dressed went with the Terminal page. What opens
+     the stage now is the Chat page's own secondary control, which is a
+     `button.sm` like every other one on the panel. */
   .termstage{position:fixed;inset:0;z-index:60;background:#0d0d0f;display:flex}
   .ptyframe{flex:1;min-height:0;width:100%;border:0;display:block;background:#0d0d0f}
   /* The frame is a canvas, so these float over it rather than sitting in a bar:
@@ -708,7 +947,6 @@
       <section class="page" id="p-chats"></section>
       <section class="page" id="p-chat"></section>
       <section class="page" id="p-media"></section>
-      <section class="page" id="p-terminal"></section>
       <section class="page" id="p-persona"></section>
       <section class="page" id="p-memory"></section>
       <section class="page" id="p-pages"></section>

@@ -8,7 +8,10 @@ var state = null;
 var route = 'overview';
 var feedFilter = 'all';
 var chatQuery = '';
-/** Which conversation the Chat page is showing, or null for the picker. */
+/** The Chat page's own filter. Separate from `chatQuery`, which the Chats table
+ *  owns — one variable behind both meant typing in either narrowed the other. */
+var convoQuery = '';
+/** Which conversation the Chat page is showing, or null for none. */
 var chatOpen = null;
 var termWindow = null;
 var booted = false;
@@ -102,12 +105,37 @@ var ICONS = {
   media: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="8.6" cy="9.9" r="1.4"/><path d="M3.5 16.2l4.4-3.9 3.6 3.1 3-2.6 6 4.9"/>',
   tools: '<path d="M14.7 6.3a4 4 0 0 0 5 5L15 16l-3 3-4-4 3-3z"/><path d="M6 18l1.5-1.5"/>',
   terminal: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7.5 9.5l3 2.5-3 2.5"/><path d="M12.5 15h4"/>',
+  back: '<path d="M14.5 5.5L8 12l6.5 6.5"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6L18 18M18 6l-1.4 1.4M7.4 16.6L6 18"/>',
   log: '<path d="M6 4.5h9l4 4v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-14a1 1 0 0 1 1-1z"/><path d="M14.5 4.5v4.5H19"/><path d="M8.5 13h7M8.5 16.5h5"/>'
 };
+/**
+ * One icon, as an element.
+ *
+ * `innerHTML` here is the file's own literal from `ICONS` and never a value
+ * from the API — the note at the top of this file is about that distinction and
+ * this is the one place that relies on it.
+ */
+function icon(name) {
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.6');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = ICONS[name] || '';
+  return svg;
+}
+
+// Terminal is deliberately absent. The raw pane shows every conversation at
+// once — other people's keys, tool arguments, whatever a stack trace printed —
+// so it is not a destination of its own any more. It opens from a secondary
+// control on the Chat page, over the conversation it belongs to.
 var PAGES = [
-  ['overview', 'Overview'], ['messages', 'Messages'], ['chats', 'Chats'], ['chat', 'Chat'],
-  ['media', 'Media'], ['terminal', 'Terminal'], ['persona', 'Persona'], ['memory', 'Memory'], ['pages', 'Pages'], ['settings', 'Settings'],
+  ['overview', 'Overview'], ['chat', 'Chat'], ['messages', 'Messages'], ['chats', 'Chats'],
+  ['media', 'Media'], ['persona', 'Persona'], ['memory', 'Memory'], ['pages', 'Pages'], ['settings', 'Settings'],
   ['log', 'Log']
 ];
 
@@ -117,15 +145,7 @@ function buildNav() {
     var b = node('button', 'nav');
     b.type = 'button';
     b.dataset.route = p[0];
-    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '1.6');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
-    svg.innerHTML = ICONS[p[0]];
-    b.appendChild(svg);
+    b.appendChild(icon(p[0]));
     b.appendChild(node('span', null, p[1]));
     if (p[0] === 'chats') { var c = node('span', 'count', '0'); c.id = 'navChats'; b.appendChild(c); }
     // Chat keeps whichever conversation is open, so coming back from another
@@ -209,10 +229,13 @@ function go(next) {
     if (b.dataset.route === route) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
   });
-  // The terminal page has no chrome of its own, so the wrapper's padding goes
-  // too and the emulator fills what is left of the window.
+  // Chat is a chat client rather than a document: two panes that scroll on
+  // their own, which is impossible inside a page that scrolls as a whole. So
+  // the wrapper gives up its padding and the page takes the frame.
   var wrap = document.querySelector('.page-wrap');
-  if (route !== 'terminal') stopTerminal();
+  if (wrap) wrap.classList.toggle('chatmode', route === 'chat');
+  document.body.classList.toggle('chatmode', route === 'chat');
+  stopTerminal();
   if (route !== 'chat') stopChatPoll();
   var scroller = document.querySelector('main');
   if (scroller) scroller.scrollTop = 0;
@@ -301,6 +324,13 @@ function head(page, title, sub) {
 }
 /** Has another render started since the one holding this token began? */
 function stale(token) { return token !== renderToken; }
+
+/** The same bookkeeping as `head()`, for a page that carries its own chrome. */
+function frame(page) {
+  var p = clear(el('p-' + page));
+  ++renderToken;
+  return p;
+}
 
 function renderOverview(s) {
   var p = head('overview', 'Overview', 'What has happened in the last twenty-four hours.');
@@ -504,106 +534,309 @@ function renderChats(s) {
 }
 
 // ── Chat ────────────────────────────────────────────────────────────────────
-// The masked chat: one conversation, read as a conversation.
+// The masked chat, and the panel's primary surface.
 //
-// The Terminal page shows the session as it really is and is nearly unreadable
-// — a TUI is spinner frames and half-repainted lines, and finding out what Juan
-// just told somebody should not require parsing one. This page shows the same
-// session in the shape it actually has, from `/api/chat/transcript`.
+// The terminal shows the truth and is close to unreadable: a TUI is spinner
+// frames, box drawing and half-repainted lines, and it carries every open
+// conversation at once — other people's chat keys, tool arguments, whatever a
+// stack trace printed. An operator wanting to know what Juan just told somebody
+// should not have to parse one, and should not have to read three strangers'
+// sessions to do it.
 //
-// Everything on it arrives as text and reaches the DOM through `textContent`,
-// which matters more here than anywhere else on this page: half of what is
-// rendered was written by a stranger and the other half by an agent that reads
-// what strangers write.
+// So this page is the same session in the shape it actually has, from
+// `/api/chat/transcript`, and it is built as a chat client: conversations down
+// the side, a thread that scrolls on its own, a box pinned under it. Two rules
+// carry the masking, and both are structural rather than cosmetic.
+//
+//   · **Only speech gets a bubble.** What somebody sent, what Juan sent back,
+//     and what an operator typed at his prompt. Everything else — tools,
+//     thinking, the words Juan wrote in session that nobody received — is a
+//     band that spans the column. A bubble hangs from one edge and is somebody
+//     talking; a band touches both edges and is a stage direction.
+//   · **Nothing raw reaches the band.** A step is a past-tense verb and a
+//     masked detail: a basename rather than a path, a hostname rather than a
+//     URL, a program name rather than a command line, and never a chat key.
+//     `mask()` is the whole of that and every detail goes through it.
+//
+// Everything here reaches the DOM through `textContent`, which matters more on
+// this page than anywhere else: half of what is rendered was written by a
+// stranger and the other half by an agent that reads what strangers write.
 
 /**
- * Repaint interval while the page is open. Cleared the moment it is not.
+ * How often the transcript is re-read, in the two states worth distinguishing.
  *
- * Five seconds rather than one: each poll costs the bridge a read of the feed
- * and a 256 KiB tail of a transcript, on a Raspberry Pi that is also running a
- * model session. The Overview poll already runs at this cadence, so the two sit
- * in the same rhythm instead of interleaving.
+ * Each poll costs the bridge a read of the feed and a 256 KiB tail of a
+ * transcript, on a Raspberry Pi that is also running a model session. So the
+ * page reads faster only while there is something to see — `queue.inFlight` is
+ * a chat key, so "is this conversation being answered right now" is already
+ * known — and idles slower than it used to the rest of the time.
  */
-var CHAT_POLL_MS = 5000;
+var CHAT_BUSY_MS = 4000;
+var CHAT_IDLE_MS = 9000;
 var chatTimer = null;
 /** The most recent payload, so the composer can name who it is about to reach. */
 var chatView = null;
+/** The recent feed, for the conversation list's one-line previews. */
+var chatFeed = [];
+/**
+ * Lines typed from this panel that the transcript has not read back yet.
+ *
+ * The poll is seconds away and a send that puts nothing on the screen reads as
+ * a send that did not happen. These are shown faded until the real item arrives
+ * and `prunePending` drops them.
+ */
+var chatPending = [];
+/** Which work bands and which thinking blocks the reader has opened. */
+var chatBands = {};
+var chatProse = {};
+/** Something arrived while the reader was parked further up the thread. */
+var chatMissed = false;
+/**
+ * What the thread was last painted from.
+ *
+ * A poll that changes nothing must not repaint: a repaint every four seconds
+ * loses the text selection, closes whatever band was open and flickers. So the
+ * paint is gated on this instead.
+ */
+var chatSig = null;
 
 function stopChatPoll() {
-  if (chatTimer !== null) { clearInterval(chatTimer); chatTimer = null; }
+  if (chatTimer !== null) { clearTimeout(chatTimer); chatTimer = null; }
+}
+
+function chatPollMs() {
+  return (state && state.queue && state.queue.inFlight === chatOpen) ? CHAT_BUSY_MS : CHAT_IDLE_MS;
+}
+
+function startChatPoll() {
+  stopChatPoll();
+  chatTimer = setTimeout(function tick() {
+    void refreshThread();
+    chatTimer = setTimeout(tick, chatPollMs());
+  }, chatPollMs());
 }
 
 function renderChat() {
-  var p = head('chat', 'Chat', 'One conversation, as a conversation. What somebody sent, what Juan sent back, and what he did in between — instead of a terminal.');
+  var p = frame('chat');
   stopChatPoll();
   chatView = null;
+  chatSig = null;
+  chatMissed = false;
 
-  p.appendChild(chatPicker());
+  var app = node('div', 'chatapp');
+  app.id = 'chatApp';
+  if (chatOpen) app.classList.add('reading');
+  app.appendChild(convoColumn());
+  app.appendChild(threadPane());
+  p.appendChild(app);
 
-  if (!chatOpen) {
-    var none = node('div', 'card');
-    none.appendChild(node('p', 'empty', 'Choose a conversation above, or open one from the Chats page.'));
-    p.appendChild(none);
+  void loadChatFeed();
+  if (chatOpen) {
+    void refreshThread();
+    startChatPoll();
+  }
+}
+
+// ── The conversation list ───────────────────────────────────────────────────
+// This was a <select>, which is the control you reach for when the list is an
+// argument to the page rather than the page's other half. Here it is the other
+// half: who has written, what they last said, how long ago, and whether Juan
+// has a session open for them.
+
+function convoColumn() {
+  var col = node('aside', 'convo');
+  var top = node('div', 'convo-head');
+  var filter = node('input', 'search');
+  filter.type = 'search';
+  filter.id = 'convoFilter';
+  filter.placeholder = 'Filter conversations';
+  filter.value = convoQuery;
+  filter.setAttribute('aria-label', 'Filter conversations by name or key');
+  filter.addEventListener('input', function () { convoQuery = filter.value; paintConvoList(); });
+  top.appendChild(filter);
+  col.appendChild(top);
+
+  var list = node('div', 'convo-list');
+  list.id = 'convoList';
+  col.appendChild(list);
+  paintConvoList(list);
+  return col;
+}
+
+function paintConvoList(target) {
+  var list = target || el('convoList');
+  if (!list) return;
+  // The state poll repaints this every few seconds; doing so while a row has
+  // the keyboard would take it away mid-tab.
+  if (!target && list.contains(document.activeElement)) return;
+  // And doing so would send anyone scrolled down a long list back to the top,
+  // every five seconds, for as long as they looked at it.
+  var was = list.scrollTop;
+  clear(list);
+
+  var rows = (state && state.chats) ? state.chats : [];
+  if (!rows.length) {
+    list.appendChild(node('p', 'convo-none',
+      'Nobody has messaged Juan yet. The first message opens a conversation here.'));
     return;
   }
+  var q = convoQuery.trim().toLowerCase();
+  var shown = rows.filter(function (c) {
+    return !q || (c.name || '').toLowerCase().indexOf(q) >= 0 || c.chatKey.indexOf(q) >= 0;
+  });
+  if (!shown.length) {
+    list.appendChild(node('p', 'convo-none', 'No conversation matches that.'));
+    return;
+  }
+  shown.forEach(function (c) { list.appendChild(convoRow(c)); });
+  list.scrollTop = was;
+}
 
-  var card = node('div', 'card');
-  var head_ = node('div', 'chathead');
-  var title = node('h3', null, '…');
-  title.id = 'chatWho';
-  head_.appendChild(title);
-  head_.appendChild(node('span', 'key', chatOpen));
-  var badge = node('span', 'badge', 'checking');
-  badge.id = 'chatState';
-  head_.appendChild(badge);
-  card.appendChild(head_);
+/** Whether the agent has a tmux window open for this chat. */
+function chatIsLive(key) {
+  return !!(state && state.agent && state.agent.openChats
+    && state.agent.openChats.indexOf(key) >= 0);
+}
 
+function convoRow(c) {
+  var b = node('button', 'convo-row');
+  b.type = 'button';
+  b.setAttribute('aria-current', c.chatKey === chatOpen ? 'true' : 'false');
+
+  var busy = !!(state && state.queue && state.queue.inFlight === c.chatKey);
+  var live = chatIsLive(c.chatKey);
+  var dot = node('span', 'dot' + (busy ? ' busy' : live ? ' live' : ''));
+  var says = busy ? 'replying now' : live ? 'session open' : 'no session open';
+  dot.setAttribute('role', 'img');
+  dot.setAttribute('aria-label', says);
+  dot.setAttribute('title', says);
+  b.appendChild(dot);
+
+  b.appendChild(node('span', 'name',
+    (c.name || 'Someone') + (c.isGroup ? ' (group)' : '') + (c.blocked ? ' — blocked' : '')));
+  b.appendChild(node('span', 'when', state ? ago(state.now - c.lastSeenAt) : ''));
+  b.appendChild(node('span', 'last', previewFor(c)));
+  b.addEventListener('click', function () { go('chat/' + c.chatKey); });
+  return b;
+}
+
+/** The last thing said in a conversation, from the bridge's own feed. */
+function previewFor(c) {
+  for (var i = chatFeed.length - 1; i >= 0; i--) {
+    var e = chatFeed[i];
+    if (e.chatKey !== c.chatKey) continue;
+    if (e.kind === 'out') return 'Juan: ' + (e.text || '');
+    if (e.kind === 'in') return e.text || (e.detail ? '(' + e.detail + ')' : '');
+  }
+  return plural(c.messages, 'message');
+}
+
+async function loadChatFeed() {
+  var mine = renderToken;
+  var rows;
+  // A missing preview is a smaller loss than an error on a page that is
+  // otherwise working, so this fails quietly and the rows fall back to a count.
+  try { rows = await api('/api/feed?n=250'); } catch (err) { return; }
+  if (stale(mine) || route !== 'chat') return;
+  chatFeed = rows;
+  paintConvoList();
+}
+
+// ── The thread ──────────────────────────────────────────────────────────────
+
+function threadPane() {
+  var pane = node('section', 'thread-pane');
+  pane.id = 'threadPane';
+  if (!chatOpen) {
+    pane.appendChild(emptyPane());
+    return pane;
+  }
+  pane.appendChild(threadHead());
+
+  var wrap = node('div', 'thread-wrap');
   var thread = node('div', 'thread');
   thread.id = 'chatThread';
   thread.setAttribute('role', 'log');
   thread.setAttribute('aria-label', 'The conversation');
-  thread.appendChild(node('p', 'empty', 'Reading the session…'));
-  card.appendChild(thread);
+  thread.addEventListener('scroll', onThreadScroll, { passive: true });
+  thread.appendChild(node('p', 'thread-note', 'Reading the session…'));
+  wrap.appendChild(thread);
 
-  card.appendChild(composer());
-  p.appendChild(card);
+  var jump = node('button', 'jump', 'Jump to latest');
+  jump.type = 'button';
+  jump.id = 'chatJump';
+  jump.hidden = true;
+  jump.addEventListener('click', function () {
+    chatMissed = false;
+    thread.scrollTop = thread.scrollHeight;
+    paintJump();
+  });
+  wrap.appendChild(jump);
+  pane.appendChild(wrap);
 
-  void refreshThread();
-  chatTimer = setInterval(function () { void refreshThread(); }, CHAT_POLL_MS);
+  pane.appendChild(composer());
+  return pane;
 }
 
-/** Every chat, as a select. The same list the Chats page filters. */
-function chatPicker() {
-  var controls = node('div', 'controls');
-  var picker = document.createElement('select');
-  picker.setAttribute('aria-label', 'Which conversation to show');
-  var blank = document.createElement('option');
-  blank.value = '';
-  blank.textContent = 'Choose a conversation…';
-  picker.appendChild(blank);
+function emptyPane() {
+  var box = node('div', 'pane-empty');
+  box.appendChild(icon('chat'));
+  box.appendChild(node('h3', null, 'Pick a conversation'));
+  box.appendChild(node('p', null,
+    'Each one runs as its own Claude Code session and they cannot see one another. '
+    + 'Choose somebody on the left to read what Juan has been saying, and to type into it.'));
+  return box;
+}
 
-  var rows = (state && state.chats) ? state.chats : [];
-  rows.forEach(function (c) {
-    var option = document.createElement('option');
-    option.value = c.chatKey;
-    option.textContent = (c.name || 'Someone') + (c.isGroup ? ' (group)' : '') + ' · ' + c.chatKey;
-    if (c.chatKey === chatOpen) option.selected = true;
-    picker.appendChild(option);
-  });
-  picker.addEventListener('change', function () {
-    go(picker.value ? 'chat/' + picker.value : 'chat');
-  });
-  controls.appendChild(picker);
-  if (!rows.length) controls.appendChild(node('span', 'muted', 'Nobody has messaged yet.'));
-  return controls;
+function threadHead() {
+  var h = node('header', 'thread-head');
+  // The rule under the header belongs to the pane; what it says belongs to the
+  // column. `.cap` is the same inset the thread and the composer take, so the
+  // name, the first bubble and the field all start on one line.
+  var cap = node('div', 'cap');
+  h.appendChild(cap);
+
+  // Only on a phone, where the list and the thread are the same column.
+  var back = node('button', 'sm backrow');
+  back.type = 'button';
+  back.setAttribute('aria-label', 'Back to the conversations');
+  back.appendChild(icon('back'));
+  back.addEventListener('click', function () { go('chat'); });
+  cap.appendChild(back);
+
+  var who = node('div', 'who');
+  var title = node('h3', null, '…');
+  title.id = 'chatWho';
+  who.appendChild(title);
+  var sub = node('p', 'sub');
+  var dot = node('span', 'dot');
+  dot.id = 'chatDot';
+  var says = node('span', null, 'checking');
+  says.id = 'chatState';
+  sub.appendChild(dot);
+  sub.appendChild(says);
+  sub.appendChild(node('span', 'key', chatOpen || ''));
+  who.appendChild(sub);
+  cap.appendChild(who);
+
+  var acts = node('div', 'acts');
+  var raw = node('button', 'sm raw');
+  raw.type = 'button';
+  raw.title = 'The agent’s real tmux pane. It carries every open conversation, not just this one.';
+  raw.appendChild(icon('terminal'));
+  raw.appendChild(node('span', null, 'Raw terminal'));
+  raw.addEventListener('click', openTerminal);
+  acts.appendChild(raw);
+  cap.appendChild(acts);
+  return h;
 }
 
 /**
- * Fetch and repaint the thread.
+ * Fetch and repaint.
  *
  * Scroll position is preserved unless the reader was already at the bottom, in
- * which case it follows. A log that yanks you back to the newest line every few
- * seconds is one you cannot read the middle of.
+ * which case it follows. A thread that yanks you back to the newest line every
+ * few seconds is one you cannot read the middle of.
  */
 async function refreshThread() {
   var thread = el('chatThread');
@@ -619,133 +852,601 @@ async function refreshThread() {
   } catch (err) {
     // Only if nothing has painted yet: a failed poll should not blank a thread
     // that is on screen and readable.
-    if (!chatView) { clear(thread).appendChild(node('p', 'empty', err.message)); }
+    if (!chatView) paintFailure(thread, err.message);
     return;
   }
   // The operator moved on while this was in flight.
   if (key !== chatOpen || !thread.isConnected) return;
 
+  var first = chatView === null;
   chatView = view;
-  var who = el('chatWho');
-  if (who) who.textContent = (view.chat && view.chat.name) || 'Someone';
-  paintChatState(view);
-
-  var pinned = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 48;
-  clear(thread);
-  if (!view.items.length) {
-    thread.appendChild(node('p', 'empty', 'Nothing yet. A session starts on their next message.'));
-  } else {
-    view.items.forEach(function (item) { thread.appendChild(itemNode(item)); });
+  paintHead(view);
+  prunePending(view);
+  var sig = signature(view);
+  if (sig !== chatSig) {
+    chatSig = sig;
+    paintThread(view);
+    if (first) pinThread();
   }
-  if (pinned) thread.scrollTop = thread.scrollHeight;
   paintComposer(view);
 }
 
-/** Whether there is a session to type into, said in words rather than colour. */
-function paintChatState(view) {
-  var badge = el('chatState');
-  if (!badge) return;
-  var blocked = view.chat && view.chat.blocked;
-  var text = blocked ? 'blocked' : !view.reporting ? 'agent not reporting' : view.live ? 'session open' : 'asleep';
-  badge.className = 'badge' + (blocked ? ' off' : view.live ? ' on' : '');
-  badge.textContent = text;
+/** What the thread depends on, so an unchanged poll costs no DOM at all. */
+function signature(view) {
+  var last = view.items.length ? view.items[view.items.length - 1] : null;
+  return [
+    view.items.length,
+    last ? last.ts : 0,
+    last ? String(last.text || '').length : 0,
+    view.live ? 1 : 0,
+    view.reporting ? 1 : 0,
+    (state && state.queue && state.queue.inFlight === chatOpen) ? 1 : 0,
+    chatPending.length
+  ].join('|');
 }
 
-/** One timeline entry. Every branch ends in text, and text only. */
-function itemNode(item) {
-  if (item.kind === 'turn') return node('div', 'turnmark', item.text);
+function paintFailure(thread, message) {
+  clear(thread);
+  var box = node('p', 'thread-note');
+  box.appendChild(node('b', null, 'The transcript could not be read'));
+  box.appendChild(document.createTextNode(message));
+  var again = node('button', 'sm', 'Try again');
+  again.type = 'button';
+  again.addEventListener('click', function () { void refreshThread(); });
+  box.appendChild(again);
+  thread.appendChild(box);
+}
 
-  if (item.kind === 'tool') {
-    var chip = node('div', 'chip');
-    chip.appendChild(node('b', null, item.tool || 'tool'));
-    if (item.text) chip.appendChild(node('span', null, item.text));
-    return chip;
+/** Who this is and what state they are in, said in words rather than colour. */
+function paintHead(view) {
+  var who = el('chatWho'), dot = el('chatDot'), says = el('chatState');
+  if (!who || !dot || !says) return;
+  var name = (view.chat && view.chat.name) || 'Someone';
+  who.textContent = name + (view.chat && view.chat.isGroup ? ' (group)' : '');
+
+  var busy = !!(state && state.queue && state.queue.inFlight === chatOpen);
+  var s = view.chat && view.chat.blocked ? ['down', 'blocked']
+    : !view.reporting ? ['down', 'agent not reporting']
+      : busy ? ['busy', 'replying now']
+        : view.live ? ['live', 'session open']
+          : ['', 'no session open'];
+  dot.className = 'dot' + (s[0] ? ' ' + s[0] : '');
+  dot.setAttribute('role', 'img');
+  dot.setAttribute('aria-label', 'Session: ' + s[1]);
+  says.textContent = s[1];
+}
+
+// ── Folding the timeline ────────────────────────────────────────────────────
+
+/**
+ * The harness's own prompts, which are not somebody speaking.
+ *
+ * A `prompt` item is a line typed at Juan's prompt, which in practice means an
+ * operator typed it here — except when it does not. A skill being loaded, a
+ * slash command's output and a hook's injection all arrive on the same line
+ * type, and rendering one as an operator's message puts a wall of SKILL.md in
+ * the panel in a voice nobody used. System reminders are cut out rather than
+ * rejected, because they are appended to real prompts and dropping the whole
+ * message would eat the operator's words to hide the harness's.
+ */
+var INJECTED = [
+  '<command-name>', '<command-message>', '<local-command-stdout>',
+  '<user-prompt-submit-hook>', 'Base directory for this skill:',
+  'Caveat: The messages below were generated by the user'
+];
+
+function spokenPrompt(text) {
+  var t = String(text || '').replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+  if (!t) return null;
+  for (var i = 0; i < INJECTED.length; i++) if (t.indexOf(INJECTED[i]) === 0) return null;
+  return t;
+}
+
+/**
+ * Strip anything that identifies a machine, a file or a person, and shorten.
+ *
+ * Order matters. A path goes first so that `/workspace/chats/<key>/out.txt`
+ * becomes `out.txt` — running the hex rule first would leave the path shape
+ * behind with a hole in it, which is longer and says no less.
+ */
+function mask(value) {
+  return String(value === null || value === undefined ? '' : value)
+    .replace(/\/(?:[\w.@+-]+\/)+([\w.@+-]+)/g, '$1')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '…')
+    .replace(/[0-9a-f]{16,}/gi, '…')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 110);
+}
+
+/** A URL reduced to the site it is on. */
+function host(url) {
+  var m = /https?:\/\/([^/\s"']+)/i.exec(String(url || ''));
+  return m ? m[1].replace(/^www\./, '') : mask(url);
+}
+
+/** A command line reduced to the program it runs, and nothing else. */
+function program(command) {
+  var rest = String(command || '').replace(/^\s*(?:[A-Z_][A-Z0-9_]*=\S*\s+)*/, '');
+  var first = (rest.split(/\s+/)[0] || '').replace(/^.*\//, '');
+  return first.slice(0, 40);
+}
+
+/** The first argument, masked — a filename, a page name, a window. */
+function firstWord(rest) {
+  var t = String(rest || '').trim().replace(/^["']|["']$/g, '');
+  return mask(t.split(/\s+/)[0] || '');
+}
+
+/** Everything after the verb, masked — a query, a prompt, Juan's own words. */
+function words(rest) {
+  var t = String(rest || '').trim();
+  // A leading flag and its value belong to the command, not to what was said.
+  t = t.replace(/^--[a-z-]+(?:[ =](?:"[^"]*"|'[^']*'|\S+))?\s*/i, '');
+  t = t.replace(/^["']/, '').replace(/["']\s*$/, '');
+  return mask(t);
+}
+
+/**
+ * Juan's own voice, which is a command line.
+ *
+ * Everything he does to a conversation goes through `tulip-wa`, so the verb of
+ * that command is the single most useful thing on this page: "Made a picture",
+ * not `Bash` beside `tulip-wa image "a tulip in a…"`. Two of them are pure
+ * machinery and are mapped to null — the typing indicator he raises on every
+ * turn, and the call that asks which conversation he is in — because listing
+ * them buries the steps that are actually about the person.
+ */
+var WA = {
+  send: ['Replied', null],
+  file: ['Sent a file', firstWord],
+  image: ['Made a picture', words],
+  voice: ['Sent a voice note', null],
+  gif: ['Sent a GIF', words],
+  react: ['Reacted', words],
+  quiet: ['Chose not to reply', null],
+  remember: ['Remembered this', words],
+  search: ['Searched the web', words],
+  fetch: ['Read a web page', host],
+  chats: ['Listed his chats', null],
+  'page-new': ['Started a page', firstWord],
+  'page-image': ['Made a picture', firstWord],
+  page: ['Published a page', firstWord],
+  typing: null,
+  whoami: null
+};
+
+/** Everything else Claude Code reaches for, in the past tense a person reads. */
+var TOOLS = {
+  BashOutput: ['Checked a command', null],
+  Read: ['Read a file', mask],
+  Write: ['Wrote a file', mask],
+  Edit: ['Edited a file', mask],
+  MultiEdit: ['Edited a file', mask],
+  NotebookEdit: ['Edited a notebook', mask],
+  Grep: ['Searched the files', mask],
+  Glob: ['Looked for files', mask],
+  WebFetch: ['Read a web page', host],
+  WebSearch: ['Searched the web', mask],
+  Task: ['Sent a helper off', mask],
+  TodoWrite: ['Made a plan', null],
+  TodoRead: ['Checked his plan', null]
+};
+
+function bashStep(command) {
+  var wa = /(?:^|[;&|]\s*)tulip-wa\s+([a-z-]+)/.exec(String(command || ''));
+  if (wa === null) return { verb: 'Ran a command', detail: program(command) };
+  var rest = String(command).slice(wa.index + wa[0].length);
+  if (wa[1] === 'send' && /^\s*--to\b/.test(rest)) {
+    // The key is masked either way; naming the chat would be worse, not better.
+    return { verb: 'Messaged elsewhere', detail: '' };
   }
+  var entry = WA[wa[1]];
+  if (entry === undefined) return { verb: 'Ran a command', detail: 'tulip-wa ' + mask(wa[1]) };
+  if (entry === null) return null;
+  return { verb: entry[0], detail: entry[1] ? entry[1](rest) : '' };
+}
 
-  if (item.kind === 'thought') {
-    var wrap = node('div', 'thought');
-    var toggle = node('button', null, '▸ thinking · ' + plural(item.text.split(/\s+/).length, 'word'));
-    toggle.type = 'button';
-    toggle.setAttribute('aria-expanded', 'false');
-    var body = node('div', 'body', item.text);
-    body.hidden = true;
-    toggle.addEventListener('click', function () {
-      var open = toggle.getAttribute('aria-expanded') === 'true';
-      toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
-      body.hidden = open;
-      toggle.textContent = (open ? '▸' : '▾') + toggle.textContent.slice(1);
+function toolStep(name, text) {
+  if (name === 'Bash') return bashStep(text);
+  var entry = TOOLS[name];
+  // An unmapped tool keeps its own name rather than being swallowed by a
+  // generic verb: a step nobody has written a sentence for should be visible.
+  if (entry === undefined) return { verb: mask(name).slice(0, 24), detail: mask(text) };
+  return { verb: entry[0], detail: entry[1] ? entry[1](text) : '' };
+}
+
+function stepFor(item) {
+  if (item.kind === 'tool') return toolStep(item.tool || 'tool', item.text || '');
+  // Juan's own words in session. Nobody received them, which is exactly why
+  // they are here and not in the message column.
+  if (item.kind === 'note') return { verb: 'Noted to himself', detail: item.text, prose: true };
+  if (item.kind === 'thought') return { verb: 'Thought it over', detail: item.text, prose: true, fold: true };
+  return null;
+}
+
+/**
+ * The timeline as rows: speech, and the bands between it.
+ *
+ * A band opens at the first thing that is not speech and closes at the next
+ * thing that is — which makes "one band" mean "everything Juan did between two
+ * things a person would recognise as talking", and that is the unit an operator
+ * actually reads. The supervisor's own turn boundary is dropped: the incoming
+ * message right above it already marks the same moment.
+ */
+function foldTimeline(items) {
+  var rows = [];
+  var band = null;
+  items.forEach(function (item) {
+    if (item.kind === 'said') {
+      band = null;
+      rows.push({ row: 'msg', item: item });
+      return;
+    }
+    if (item.kind === 'prompt') {
+      var said = spokenPrompt(item.text);
+      if (said === null) return;
+      band = null;
+      rows.push({ row: 'msg', item: { ts: item.ts, kind: 'prompt', text: said } });
+      return;
+    }
+    if (item.kind === 'turn') { band = null; return; }
+    var step = stepFor(item);
+    if (step === null) return;
+    if (band === null) { band = { row: 'work', ts: item.ts, steps: [] }; rows.push(band); }
+    band.steps.push(step);
+  });
+  return rows;
+}
+
+/** What a band did, as one sentence. Consecutive repeats count once. */
+function narrate(steps) {
+  var verbs = [];
+  steps.forEach(function (s) { if (verbs[verbs.length - 1] !== s.verb) verbs.push(s.verb); });
+  if (!verbs.length) return 'Did something';
+  if (verbs.length === 1) return verbs[0] + '.';
+  if (verbs.length === 2) return verbs[0] + ', then ' + lower(verbs[1]) + '.';
+  return verbs[0] + ', ' + lower(verbs[1]) + ', then ' + lower(verbs[verbs.length - 1]) + '.';
+}
+function lower(v) { return v.charAt(0).toLowerCase() + v.slice(1); }
+
+// ── Painting ────────────────────────────────────────────────────────────────
+
+function bandNode(band, busy) {
+  var wrap = node('div', 'work' + (busy ? ' busy' : ''));
+  var key = 'b' + band.ts;
+  var open = chatBands[key] === true;
+
+  var toggle = node('button', 'work-open');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  toggle.appendChild(node('span', 'caret', '›'));
+  // While it is running the newest verb is the interesting line; once it has
+  // finished that same line is a confusing caption for the whole of it, and the
+  // reply underneath already says what came of it.
+  var lead = busy
+    ? (band.steps.length ? band.steps[band.steps.length - 1].verb + '…' : 'Working…')
+    : narrate(band.steps);
+  toggle.appendChild(node('span', 'what', lead));
+  toggle.appendChild(node('span', 'n', plural(band.steps.length, 'step')));
+  toggle.setAttribute('aria-label', lead + ' ' + plural(band.steps.length, 'step') + '. Show them.');
+
+  var steps = node('div', 'work-steps');
+  steps.hidden = !open;
+  band.steps.forEach(function (s, i) { steps.appendChild(stepNode(s, key + ':' + i)); });
+
+  toggle.addEventListener('click', function () {
+    var was = toggle.getAttribute('aria-expanded') === 'true';
+    toggle.setAttribute('aria-expanded', was ? 'false' : 'true');
+    steps.hidden = was;
+    chatBands[key] = !was;
+  });
+
+  wrap.appendChild(toggle);
+  wrap.appendChild(steps);
+  return wrap;
+}
+
+function stepNode(s, key) {
+  var row = node('div', 'step' + (s.prose ? ' prose' : ''));
+  row.appendChild(node('div', 'verb', s.verb));
+  var detail = node('div', 'detail');
+
+  if (!s.prose) {
+    // Empty when there is nothing worth saying. Half these verbs are complete
+    // on their own, and a column of placeholder dashes beside them is noise.
+    detail.textContent = s.detail || '';
+  } else if (s.fold) {
+    var open = chatProse[key] === true;
+    var count = plural(String(s.detail).split(/\s+/).length, 'word');
+    var more = node('button', 'more', (open ? '▾ ' : '▸ ') + count);
+    more.type = 'button';
+    more.setAttribute('aria-expanded', open ? 'true' : 'false');
+    var body = node('div', 'thinking', s.detail);
+    body.hidden = !open;
+    more.addEventListener('click', function () {
+      var was = more.getAttribute('aria-expanded') === 'true';
+      more.setAttribute('aria-expanded', was ? 'false' : 'true');
+      body.hidden = was;
+      chatProse[key] = !was;
+      more.textContent = (was ? '▸ ' : '▾ ') + count;
     });
-    wrap.appendChild(toggle);
-    wrap.appendChild(body);
-    return wrap;
+    detail.appendChild(more);
+    detail.appendChild(body);
+  } else {
+    detail.textContent = s.detail;
   }
+  row.appendChild(detail);
+  return row;
+}
 
-  // The three that are somebody speaking. `note` is the one worth reading
-  // twice: Juan wrote it in his session and nobody received it.
-  var cls = item.kind === 'said'
-    ? (item.direction === 'out' ? 'msg juan' : 'msg them')
-    : item.kind === 'prompt' ? 'msg op' : 'msg note';
-  var who = item.kind === 'said' ? item.who
-    : item.kind === 'prompt' ? 'typed from this panel'
-      : 'Juan, in session — not sent';
+function dayLabel(ts) {
+  var d = new Date(ts), now = new Date();
+  if (d.toDateString() === now.toDateString()) return 'Today';
+  if (d.toDateString() === new Date(now.getTime() - 86400000).toDateString()) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+}
 
-  var msg = node('div', cls);
-  msg.appendChild(node('span', 'who', who));
+function msgNode(item, side, run) {
+  var msg = node('div', 'msg ' + side + (run ? ' run' : ''));
   msg.appendChild(node('div', 'body', item.text));
   msg.appendChild(node('span', 'at', hhmm(item.ts)));
   return msg;
 }
 
+function nameNode(name, lane) {
+  return node('span', 'said-by' + (lane === 'them' ? '' : ' mine') + (lane === 'op' ? ' op' : ''), name);
+}
+
+function paintThread(view) {
+  var thread = el('chatThread');
+  if (!thread) return;
+  var rows = foldTimeline(view.items);
+  var busy = !!(state && state.queue && state.queue.inFlight === chatOpen);
+  var frag = document.createDocumentFragment();
+
+  if (!rows.length && !chatPending.length) frag.appendChild(quietNote(view));
+
+  var side = null, who = null, at = 0, day = '';
+  rows.forEach(function (r, i) {
+    if (r.row === 'work') {
+      frag.appendChild(bandNode(r, busy && i === rows.length - 1));
+      side = null;
+      return;
+    }
+    var item = r.item;
+    var stamp = new Date(item.ts).toDateString();
+    if (stamp !== day) {
+      frag.appendChild(node('span', 'daymark', dayLabel(item.ts)));
+      day = stamp;
+      side = null;
+    }
+
+    var lane = item.kind === 'prompt' ? 'op' : item.direction === 'out' ? 'juan' : 'them';
+    var name = item.kind === 'prompt' ? 'You, at Juan’s prompt'
+      : lane === 'juan' ? 'Juan' : (item.who || 'Someone');
+    // A run is the same voice again within a few minutes. Repeating the name on
+    // every bubble is what makes a thread read as a table of rows.
+    var run = lane === side && name === who && (item.ts - at) < 240000;
+    if (!run) frag.appendChild(nameNode(name, lane));
+    frag.appendChild(msgNode(item, lane, run));
+    side = lane; who = name; at = item.ts;
+  });
+
+  chatPending.forEach(function (p) {
+    frag.appendChild(nameNode('You, at Juan’s prompt', 'op'));
+    var msg = msgNode({ ts: p.at, text: p.text }, 'op', false);
+    msg.classList.add('pending');
+    frag.appendChild(msg);
+  });
+
+  // An open band is already the indicator; two of them at once says the same
+  // thing twice and in two places.
+  if (busy && !(rows.length && rows[rows.length - 1].row === 'work')) {
+    var dots = node('div', 'typing');
+    dots.setAttribute('role', 'status');
+    dots.setAttribute('aria-label', 'Juan is replying');
+    dots.title = 'Juan is replying';
+    dots.appendChild(node('i'));
+    dots.appendChild(node('i'));
+    dots.appendChild(node('i'));
+    frag.appendChild(dots);
+  }
+
+  var pinned = atThreadBottom(thread);
+  var had = thread.childElementCount > 0;
+  clear(thread);
+  thread.appendChild(frag);
+  if (pinned) { thread.scrollTop = thread.scrollHeight; chatMissed = false; }
+  else if (had) chatMissed = true;
+  paintJump();
+}
+
 /**
- * The box that types into a live conversation.
+ * An empty thread, which is the ordinary resting state rather than a failure.
  *
- * The warning is against the field rather than at the top of the page. A page
- * banner is read once and becomes furniture; what has to be true is that the
- * person is named at the moment of pressing the button — so the label carries
- * the name, and the confirm quotes the exact line that will be typed.
+ * Every conversation ends up here: the session closes, and the next message
+ * opens a new one. Written as direction, in the same terms the send route uses
+ * when it refuses, so the two cannot drift apart.
  */
+function quietNote(view) {
+  var box = node('p', 'thread-note');
+  if (view.chat && view.chat.blocked) {
+    box.appendChild(node('b', null, 'This chat is blocked'));
+    box.appendChild(document.createTextNode(
+      'Nothing reaches Juan from here and nothing goes back. Unblock it on the Chats page to let it run again.'));
+    return box;
+  }
+  if (!view.reporting) {
+    box.appendChild(node('b', null, 'The agent is not reporting'));
+    box.appendChild(document.createTextNode(
+      'There is no session to read. The container is the thing to look at — nothing is lost meanwhile.'));
+    return box;
+  }
+  box.appendChild(node('b', null, 'Nothing said yet'));
+  box.appendChild(document.createTextNode(
+    'A session opens on their next message, and everything Juan does in it appears here.'));
+  return box;
+}
+
+function atThreadBottom(thread) {
+  return thread.scrollHeight - thread.scrollTop - thread.clientHeight < 90;
+}
+
+function onThreadScroll() {
+  var thread = el('chatThread');
+  if (!thread) return;
+  if (atThreadBottom(thread)) chatMissed = false;
+  paintJump();
+}
+
+/**
+ * The pill has two meanings and only one of them is news.
+ *
+ * Parked because you scrolled up to reread is navigation; parked while it kept
+ * talking is something you have not seen. It is hidden entirely at the bottom,
+ * because a control that is always there is one that usually does nothing.
+ */
+function paintJump() {
+  var thread = el('chatThread'), jump = el('chatJump');
+  if (!thread || !jump) return;
+  var parked = !atThreadBottom(thread);
+  jump.hidden = !parked;
+  jump.classList.toggle('new', parked && chatMissed);
+  jump.textContent = chatMissed ? 'New messages' : 'Jump to latest';
+}
+
+/**
+ * Hold the thread at the bottom while the first paint settles.
+ *
+ * One assignment is not enough: the two webfonts land after first paint and
+ * reflow the whole thread at once, which leaves the reader a screen short of
+ * the newest line with no idea it happened. So it is re-asserted for a second
+ * and a half, and released the instant anybody scrolls — pinning that fights
+ * the reader is worse than not pinning.
+ */
+function pinThread() {
+  var thread = el('chatThread');
+  if (!thread) return;
+  var until = Date.now() + 1500;
+  var released = false;
+  function release() { released = true; }
+  ['wheel', 'touchstart', 'keydown'].forEach(function (ev) {
+    thread.addEventListener(ev, release, { once: true, passive: true });
+  });
+  function pin() {
+    if (released || !thread.isConnected || el('chatThread') !== thread) return;
+    thread.scrollTop = thread.scrollHeight;
+    chatMissed = false;
+    paintJump();
+    if (Date.now() < until) setTimeout(pin, 100);
+  }
+  pin();
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(pin, function () { /* no faces to wait for */ });
+  }
+}
+
+// ── The composer ────────────────────────────────────────────────────────────
+
 function composer() {
   var wrap = node('div', 'composer');
+  // The ground and the rule above it span the pane; the field does not.
+  var cap = node('div', 'cap');
+  wrap.appendChild(cap);
 
-  var live = node('div', 'live');
-  live.appendChild(node('span', 'dot'));
-  var warning = node('span', null, '');
-  warning.id = 'chatWarn';
-  live.appendChild(warning);
-  wrap.appendChild(live);
+  var why = node('p', 'why');
+  why.id = 'chatWhy';
+  why.appendChild(node('span', 'dot'));
+  var line = node('span', null, '');
+  line.id = 'chatWhyText';
+  why.appendChild(line);
+  cap.appendChild(why);
 
+  var row = node('div', 'row');
   var box = document.createElement('textarea');
   box.id = 'chatBox';
-  box.rows = 3;
+  box.rows = 1;
   box.maxLength = 2000;
   box.placeholder = 'Type into Juan’s session…';
-  box.setAttribute('aria-describedby', 'chatWarn');
-  wrap.appendChild(box);
+  box.setAttribute('aria-describedby', 'chatWhyText');
+  box.addEventListener('input', function () { growBox(box); paintCount(box); });
+  box.addEventListener('keydown', function (ev) {
+    // Chat convention: Enter sends, Shift+Enter is a new line.
+    if (ev.key !== 'Enter' || ev.shiftKey) return;
+    ev.preventDefault();
+    var send = el('chatSend');
+    if (send && send.disabled) { toast(el('chatWhyText').textContent, true); return; }
+    confirmSend(box);
+  });
+  row.appendChild(box);
 
-  var foot = node('div', 'foot');
-  var send = node('button', 'primary', 'Send into the session');
+  var send = node('button', 'primary', 'Send');
   send.type = 'button';
   send.id = 'chatSend';
   send.addEventListener('click', function () { confirmSend(box); });
-  foot.appendChild(send);
-  foot.appendChild(node('p', 'hint', 'Juan reads it at his prompt. Whatever he does next happens on WhatsApp.'));
-  wrap.appendChild(foot);
+  row.appendChild(send);
+  cap.appendChild(row);
+
+  var count = node('span', 'count', '');
+  count.id = 'chatCount';
+  count.setAttribute('aria-live', 'polite');
+  cap.appendChild(count);
   return wrap;
 }
 
-/** Enable or disable the composer, and say why when it is off. */
+function growBox(box) {
+  box.style.height = 'auto';
+  box.style.height = Math.min(box.scrollHeight, 168) + 'px';
+}
+
+/** Only near the cap. A counter that is always there is one nobody reads. */
+function paintCount(box) {
+  var count = el('chatCount');
+  if (!count) return;
+  var n = box.value.length;
+  count.textContent = n > 1700 ? n + ' / 2000' : '';
+  count.classList.toggle('near', n > 1900);
+}
+
+/**
+ * Whether there is anywhere to type, and what to do when there is not.
+ *
+ * The field itself stays live in every state. Drafting a line while a chat is
+ * asleep is a normal thing to want, and a dead box is the panel deciding you
+ * may not think about it yet; what is refused is the send, which is the only
+ * part that could go wrong.
+ */
 function paintComposer(view) {
-  var box = el('chatBox'), send = el('chatSend'), warning = el('chatWarn');
-  if (!box || !send || !warning) return;
-  var who = (view.chat && view.chat.name) || 'this person';
-  var off = !view.reporting
-    ? 'The agent is not reporting, so there is nothing to type into.'
-    : !view.live
-      ? 'No session is open for this chat. One starts on their next message.'
-      : null;
-  box.disabled = send.disabled = off !== null;
-  warning.textContent = off || ('Live. ' + who + ' is on the other end of this session.');
-  send.textContent = off ? 'Send into the session' : 'Send to ' + who;
+  var send = el('chatSend'), why = el('chatWhy'), line = el('chatWhyText');
+  if (!send || !why || !line) return;
+  var name = (view && view.chat && view.chat.name) || 'this person';
+  var blocked = !!(view && view.chat && view.chat.blocked);
+
+  var tone = 'live';
+  var says = 'Live. ' + name + ' is on the other end of this session.';
+  if (blocked) {
+    tone = 'bad';
+    says = 'This chat is blocked — nothing reaches Juan from ' + name + ', and nothing goes back.';
+  } else if (view && !view.reporting) {
+    tone = 'warn';
+    says = 'The agent is not reporting, so there is nothing to type into.';
+  } else if (view && !view.live) {
+    tone = '';
+    says = 'No session open. Juan wakes for ' + name
+      + ' on their next message — you can draft here meanwhile.';
+  }
+
+  why.className = 'why' + (tone ? ' ' + tone : '');
+  line.textContent = says;
+  var can = !!view && view.reporting && view.live && !blocked;
+  send.disabled = !can;
+  send.textContent = can ? 'Send to ' + firstName(name) : 'Send';
+}
+
+/** Enough of a name to address, short enough to sit on a button. */
+function firstName(name) {
+  return String(name).trim().split(/\s+/)[0].slice(0, 16);
 }
 
 /**
@@ -754,52 +1455,101 @@ function paintComposer(view) {
  * A second step for something with no undo: the line goes into a running Claude
  * Code prompt inside a conversation with a member of the public. The dialog
  * shows the exact text that will be typed rather than what was in the box,
- * because the two differ whenever the box held a line break.
+ * because the two differ whenever the box held a line break — and the confirm
+ * takes the focus, so a send is Enter and Enter rather than a trip to the mouse.
  */
 function confirmSend(box) {
   var raw = box.value;
-  var line = raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim();
+  var line = raw
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!line) { toast('Nothing to send.'); return; }
   var view = chatView || {};
   var who = (view.chat && view.chat.name) || 'this person';
   var key = chatOpen;
 
-  openModal('Type this into Juan’s session?', 'He is mid-conversation with ' + who + ' on WhatsApp.', function (body, modal, dismiss) {
-    body.appendChild(node('p', 'hint',
-      'This is typed at Juan’s prompt exactly as written, as though it had arrived in the conversation. '
-      + 'What he does with it is his — including anything he sends to ' + who + '. It cannot be recalled.'));
-    body.appendChild(node('blockquote', 'said', line));
-    if (line !== raw.trim()) {
+  openModal('Type this into Juan’s session?',
+    'He is mid-conversation with ' + who + ' on WhatsApp.',
+    function (body, modal, dismiss) {
       body.appendChild(node('p', 'hint',
-        'Line breaks became spaces: a newline at the prompt submits the message halfway through.'));
-    }
+        'This is typed at Juan’s prompt exactly as written, as though it had arrived in the '
+        + 'conversation. What he does with it is his — including anything he sends to ' + who
+        + '. It cannot be recalled.'));
+      body.appendChild(node('blockquote', 'said', line));
+      if (line !== raw.trim()) {
+        body.appendChild(node('p', 'hint',
+          'Line breaks became spaces: a newline at the prompt submits the message halfway through.'));
+      }
 
-    var actions = node('div', 'modal-actions');
-    var cancel = node('button', 'sm', 'Cancel');
-    cancel.type = 'button';
-    cancel.addEventListener('click', dismiss);
-    var go_ = node('button', 'sm primary', 'Type it to ' + who);
-    go_.type = 'button';
-    go_.addEventListener('click', async function () {
-      go_.disabled = true;
-      try {
-        var result = await api('/api/chat/send', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ key: key, text: line })
-        });
-        toast(result.message || 'Typed.');
-        box.value = '';
-        dismiss();
-        void refreshThread();
-      } catch (err) { go_.disabled = false; toast(err.message, true); }
+      var actions = node('div', 'modal-actions');
+      var cancel = node('button', 'sm', 'Cancel');
+      cancel.type = 'button';
+      cancel.addEventListener('click', dismiss);
+      var go_ = node('button', 'sm primary', 'Type it to ' + firstName(who));
+      go_.type = 'button';
+      go_.addEventListener('click', async function () {
+        go_.disabled = true;
+        try {
+          var result = await api('/api/chat/send', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ key: key, text: line })
+          });
+          toast(result.message || 'Typed.');
+          box.value = '';
+          growBox(box);
+          paintCount(box);
+          // Shown faded until the transcript reads it back, which is up to a
+          // poll away — long enough for a send to look as though it did nothing.
+          chatPending.push({ key: key, text: line, at: Date.now() });
+          chatSig = null;
+          dismiss();
+          void refreshThread();
+        } catch (err) { go_.disabled = false; toast(err.message, true); }
+      });
+      actions.appendChild(cancel);
+      actions.appendChild(go_);
+      body.appendChild(actions);
     });
-    actions.appendChild(cancel);
-    actions.appendChild(go_);
-    body.appendChild(actions);
+
+  // `openModal` focuses the body's first control, which is the quoted line's
+  // Cancel. The one that matters here is the other one.
+  var confirm = document.querySelector('#scrim .modal-actions button.primary');
+  if (confirm) confirm.focus();
+}
+
+/** Drop the faded copies the transcript has now read back, and any stale ones. */
+function prunePending(view) {
+  var now = Date.now();
+  chatPending = chatPending.filter(function (p) {
+    if (p.key !== chatOpen) return false;
+    // Two minutes. If it has not appeared by then it never will, and a copy
+    // that stays forever is a claim the panel cannot support.
+    if (now - p.at > 120000) return false;
+    for (var i = view.items.length - 1; i >= 0; i--) {
+      if (view.items[i].kind === 'prompt' && view.items[i].text === p.text) return false;
+    }
+    return true;
   });
 }
 
+/**
+ * Reconcile the open conversation with a fresh state snapshot.
+ *
+ * Called from the state poll rather than from `render()`: this page owns a poll
+ * and a text box, and repainting it every five seconds would restart the one
+ * and empty the other.
+ */
+function paintChatLive() {
+  paintConvoList();
+  if (!chatOpen || !chatView) return;
+  paintHead(chatView);
+  var sig = signature(chatView);
+  if (sig === chatSig) return;
+  chatSig = sig;
+  paintThread(chatView);
+}
 async function renderMedia() {
   var p = head('media', 'Media', 'Every attachment, both directions — what people sent Juan, and what he sent them. Files are served from the bridge and never leave it. Copies of what Juan sent are kept for 14 days; what people sent stays as long as its conversation does.'), mine = renderToken;
   var card = node('div', 'card');
@@ -1262,50 +2012,10 @@ async function renderPages() {
   });
 }
 
-/**
- * The terminal, as a launcher and a modal.
- *
- * Inline, it was a frame in a column: the tmux status bar competed with the
- * page's own chrome, and every pixel the panel used was a pixel the session did
- * not get. A terminal wants the whole window, and this is a page you visit to
- * look at one thing.
- *
- * So the page says what is running and opens it full-bleed. Ported from the
- * hfs2s workspace terminal, which solved this already; the skin is the only
- * part that is new.
- */
-function renderTerminal() {
-  var page = el('p-terminal');
-  if (page.dataset.built === '1') { paintTerminalState(); return; }
-  clear(page);
-  page.dataset.built = '1';
-
-  var card = node('div', 'card');
-  card.appendChild(node('h2', null, 'Terminal'));
-  card.appendChild(node('p', 'sub', 'The agent’s live tmux session — the real thing, not a picture of it. Anything typed goes into a conversation with a member of the public.'));
-
-  var row = node('div', 'termlaunch');
-  var open = node('button', 'primary', 'Open terminal');
-  open.type = 'button';
-  open.addEventListener('click', openTerminal);
-  row.appendChild(open);
-  row.appendChild(node('span', 'termstate', ''));
-  card.appendChild(row);
-  page.appendChild(card);
-  paintTerminalState();
-}
-
-/** Whether there is anything to attach to, said plainly rather than implied. */
-function paintTerminalState() {
-  var label = document.querySelector('#p-terminal .termstate');
-  if (!label || !state) return;
-  var n = state.agent.sessions;
-  label.textContent = !state.agent.reporting
-    ? 'The agent is not reporting — the window will be empty.'
-    : n === 0
-      ? 'No chat has a session open right now. A window appears when one gets a message.'
-      : plural(n, 'conversation') + ' open.';
-}
+// The Terminal page is gone. The raw pane carries every open conversation at
+// once, so it is not a destination of its own any more — it opens from the
+// Chat page, over the conversation it belongs to. `openTerminal` below is the
+// modal it opens, unchanged; only where it is launched from moved.
 
 /**
  * The terminal, full-bleed.
@@ -2246,9 +2956,9 @@ function render() {
   else if (route === 'chats') renderChats(state);
   // Deliberately not in NEEDS_STATE: this page owns a poll and a text box, and
   // repainting it every five seconds would restart the one and empty the other.
+  // `paintChatLive` is what a poll calls instead.
   else if (route === 'chat') renderChat();
   else if (route === 'media') renderMedia();
-  else if (route === 'terminal') renderTerminal();
   else if (route === 'pages') void renderPages();
   else if (route === 'memory') void renderMemory();
   else if (route === 'persona') void renderPersona();
@@ -2274,6 +2984,10 @@ async function refresh() {
   // state-driven pages need repainting on a poll.
   if (!booted) { booted = true; render(); }
   else if (NEEDS_STATE[route]) render();
+  // Chat reconciles rather than re-renders: the list's dots and previews, the
+  // header's state and the typing indicator all move with the snapshot, and
+  // none of them is a reason to throw away a half-typed message.
+  else if (route === 'chat') paintChatLive();
 }
 
 // ── Shader backdrop ─────────────────────────────────────────────────────────
@@ -2473,11 +3187,25 @@ window.addEventListener('hashchange', function () { go((location.hash || '#/over
 
 var stream = new EventSource('/api/stream');
 var feedPending = null;
-stream.onmessage = function () {
-  if (route !== 'messages') return;
-  // Coalesce: a burst of entries should repaint once, not once each.
-  clearTimeout(feedPending);
-  feedPending = setTimeout(function () { renderMessages(); }, 400);
+var chatPushPending = null;
+stream.onmessage = function (ev) {
+  if (route === 'messages') {
+    // Coalesce: a burst of entries should repaint once, not once each.
+    clearTimeout(feedPending);
+    feedPending = setTimeout(function () { renderMessages(); }, 400);
+    return;
+  }
+  if (route !== 'chat') return;
+  // A message arriving is the one thing a poll should not make you wait for.
+  // The feed carries the chat key, so this only wakes the conversation on
+  // screen; everything else still moves at the poll's pace.
+  var row = null;
+  try { row = JSON.parse(ev.data); } catch (err) { return; }
+  clearTimeout(chatPushPending);
+  chatPushPending = setTimeout(function () {
+    void loadChatFeed();
+    if (row && row.chatKey && row.chatKey === chatOpen) void refreshThread();
+  }, 350);
 };
 
 refresh();
