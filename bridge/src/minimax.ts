@@ -219,6 +219,14 @@ export async function generateImage(prompt: string): Promise<Produced> {
  * their reply.
  */
 export async function synthesise(text: string, voiceId: string, language: string): Promise<Produced> {
+  // Resolved once, before the request, so the value sent and the value logged
+  // are the same expression rather than two that agree today.
+  const chosenLanguage = language.trim().length > 0
+    ? language.trim()
+    : env('MINIMAX_LANGUAGE_BOOST', 'English');
+  const chosenVoice = voiceId.trim().length > 0
+    ? voiceId.trim()
+    : env('MINIMAX_VOICE_ID', 'English_engaging_instructor_vv2');
   if (key().length === 0) return { ok: false, error: 'no MINIMAX_API_KEY is configured' };
   const group = env('MINIMAX_GROUP_ID');
 
@@ -260,9 +268,7 @@ export async function synthesise(text: string, voiceId: string, language: string
         // the one setting that decides how a sentence is *pronounced* was
         // invisible at every call site and could only be changed by restarting
         // the container.
-        language_boost: language.trim().length > 0
-          ? language.trim()
-          : env('MINIMAX_LANGUAGE_BOOST', 'English'),
+        language_boost: chosenLanguage,
         /**
          * Opus in an OGG container is what WhatsApp renders as a push-to-talk
          * bubble rather than a file attachment.
@@ -279,9 +285,7 @@ export async function synthesise(text: string, voiceId: string, language: string
           // Configuration first, environment second: the panel is where this is
           // changed now, and an operator who has set one should not have it
           // quietly overridden by a variable set months ago.
-          voice_id: voiceId.trim().length > 0
-            ? voiceId.trim()
-            : env('MINIMAX_VOICE_ID', 'English_engaging_instructor_vv2'),
+          voice_id: chosenVoice,
           speed: 1,
           vol: 1,
           ...emotion(),
@@ -308,7 +312,12 @@ export async function synthesise(text: string, voiceId: string, language: string
   const data = Buffer.from(hex, 'hex');
   if (data.length === 0) return { ok: false, error: 'the speech provider returned empty audio' };
   if (data.length > MAX_BYTES) return { ok: false, error: 'the audio is too large to send' };
-  log('minimax.spoke', { bytes: data.length });
+  // Voice and language, not just a byte count. Which mouth spoke and which
+  // language it was told to speak are the two settings that decide how this
+  // sounds, and neither was recorded — so "it came back with the wrong accent"
+  // could only be answered by reading config, .env and the precedence rules
+  // between them. One line here answers it.
+  log('minimax.spoke', { bytes: data.length, voice: chosenVoice, language: chosenLanguage });
   return { ok: true, data };
 }
 
