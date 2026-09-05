@@ -956,6 +956,45 @@ const SettingsPatch = z
   })
   .strict();
 
+/**
+ * Apply a settings patch to a config-shaped object, in place.
+ *
+ * There are two of these to keep in step — the object the running process holds
+ * and the JSON on disk — and they were separate loops. Both spread one level
+ * deep, which is right for every section except `agent.voices`, a map where a
+ * save carrying one language replaces all of them.
+ *
+ * It was fixed on the file and not in memory, so the file kept nine voices
+ * while the process kept the last one saved: every language but that one fell
+ * back to the default voice, and the panel showed a configuration the bridge
+ * was not using. One function now, because the bug was not the shallow spread
+ * — it was having two copies of it.
+ */
+function applyPatch(
+  target: Record<string, unknown>,
+  data: Readonly<Record<string, Record<string, unknown> | undefined>>,
+): Record<string, unknown> {
+  // Read before the loop writes: the loop is what would overwrite it.
+  const voicesBefore = ((target['agent'] as { voices?: Record<string, string> } | undefined)?.voices
+    ?? {}) as Record<string, string>;
+
+  for (const [section, values] of Object.entries(data)) {
+    if (values === undefined) continue;
+    target[section] = { ...(target[section] as object), ...values };
+  }
+
+  if (data['agent']?.['voices'] !== undefined) {
+    // An empty string is kept rather than deleted: it means "use the default",
+    // and the row stays visible in the panel so an operator who clears one is
+    // not left wondering where it went.
+    target['agent'] = {
+      ...(target['agent'] as object),
+      voices: { ...voicesBefore, ...(data['agent']['voices'] as Record<string, string>) },
+    };
+  }
+  return target;
+}
+
 const CONFIG_FILE = process.env['TULIP_CONFIG'] ?? '/config/config.json';
 
 /**
@@ -976,10 +1015,7 @@ export function updateSettings(deps: ApiDeps, body: unknown): { ok: boolean; mes
 
   // Validate the *result*, not just the patch: a field may be individually
   // valid and still produce a configuration the rest of the system rejects.
-  const merged = structuredClone(deps.config) as Record<string, unknown>;
-  for (const [section, values] of Object.entries(patch.data)) {
-    merged[section] = { ...(merged[section] as object), ...values };
-  }
+  const merged = applyPatch(structuredClone(deps.config) as Record<string, unknown>, patch.data);
   let next;
   try {
     next = parseConfig(merged);
@@ -1023,24 +1059,7 @@ export function updateSettings(deps: ApiDeps, body: unknown): { ok: boolean; mes
     }
     /* genuinely absent: this is the first write */
   }
-  // `agent.voices` is a map and the spread below is one level deep, so a save
-  // carrying one language would replace the whole map and wipe the other seven.
-  // Read before the loop, because the loop is what overwrites it.
-  const voicesBefore = ((raw['agent'] as { voices?: Record<string, string> } | undefined)?.voices
-    ?? {}) as Record<string, string>;
-
-  for (const [section, values] of Object.entries(patch.data)) {
-    raw[section] = { ...(raw[section] as object), ...values };
-  }
-  if (patch.data.agent?.voices !== undefined) {
-    // An empty string is kept rather than deleted: it means "use the default"
-    // and the row stays visible in the panel, which is how an operator unsets
-    // one without wondering where it went.
-    raw['agent'] = {
-      ...(raw['agent'] as object),
-      voices: { ...voicesBefore, ...patch.data.agent.voices },
-    };
-  }
+  applyPatch(raw, patch.data);
   try {
     writeJsonAtomic(CONFIG_FILE, raw, 0o600);
   } catch (err) {

@@ -133,3 +133,56 @@ describe('a valid config.json', () => {
     expect(raw['groups']).toEqual({ enabled: true });
   });
 });
+
+/**
+ * Saving one voice must not erase the others.
+ *
+ * The map is patched a language at a time — an operator sets Catalan, listens,
+ * sets Spanish — and a settings patch spreads one level deep, which replaces a
+ * nested map rather than merging into it.
+ *
+ * There were two copies of that spread: the JSON on disk and the object the
+ * running process holds. Fixing one and not the other produced the worst
+ * version of the bug — the file kept nine voices, the process kept the last one
+ * saved, so every other language fell back to the default while the panel
+ * displayed a configuration the bridge was not using. Both go through one
+ * function now, and this is what holds them together.
+ */
+describe('the voice map is merged, not replaced', () => {
+  it('keeps the languages a save did not mention, on disk and in memory', () => {
+    const d = deps();
+    expect(updateSettings(d, { agent: { voices: { Catalan: 'Catalan_male_1_v1' } } }).ok).toBe(true);
+    expect(updateSettings(d, { agent: { voices: { Spanish: 'Spanish_ThoughtfulMan' } } }).ok).toBe(true);
+
+    const expected = { Catalan: 'Catalan_male_1_v1', Spanish: 'Spanish_ThoughtfulMan' };
+
+    // The file.
+    const onDisk = JSON.parse(readFileSync(configFile, 'utf8')) as { agent: { voices: unknown } };
+    expect(onDisk.agent.voices).toEqual(expected);
+
+    // And the object the outbox actually reads. This is the half that was
+    // wrong: a correct file is no comfort if the process is using something
+    // else, and nothing in the panel would have shown the difference.
+    expect(d.config.agent.voices).toEqual(expected);
+  });
+
+  it('lets a language be cleared to the default without dropping the others', () => {
+    const d = deps();
+    updateSettings(d, { agent: { voices: { Catalan: 'Catalan_male_1_v1', Spanish: 'x_v1' } } });
+    updateSettings(d, { agent: { voices: { Catalan: '' } } });
+
+    // Kept rather than deleted: it means "use the default", and the row stays
+    // visible so an operator who clears one is not left wondering where it went.
+    expect(d.config.agent.voices['Catalan']).toBe('');
+    expect(d.config.agent.voices['Spanish']).toBe('x_v1');
+  });
+
+  it('does not disturb the voice map when another section is saved', () => {
+    const d = deps();
+    updateSettings(d, { agent: { voices: { Filipino: 'Filipino_male_1_v1' } } });
+    updateSettings(d, { delivery: { debounceMs: 1500 } });
+
+    expect(d.config.agent.voices['Filipino']).toBe('Filipino_male_1_v1');
+    expect(d.config.delivery.debounceMs).toBe(1500);
+  });
+});
