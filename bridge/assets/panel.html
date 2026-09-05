@@ -344,10 +344,10 @@
      time, chosen with the same segmented control the rest of the panel uses. */
   .personabody{display:grid;grid-template-columns:220px minmax(0,1fr);gap:36px;margin-top:22px}
   .doctoc{position:sticky;top:28px;align-self:start;display:flex;flex-direction:column;gap:1px;
-          border-left:1px solid var(--line-soft);padding-left:2px;max-height:calc(100dvh - 90px);overflow-y:auto}
+          max-height:calc(100dvh - 90px);overflow-y:auto}
   .doctoc a{font-size:12.5px;line-height:1.4;color:var(--faint);text-decoration:none;
-            padding:6px 10px;border-left:2px solid transparent;margin-left:-2px}
-  .doctoc a:hover{color:var(--ink);border-left-color:var(--accent)}
+            padding:6px 10px;border-radius:8px;transition:background .14s ease,color .14s ease}
+  .doctoc a:hover{color:var(--ink);background:var(--raise)}
   .doctoc a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
   .doccol{min-width:0}
@@ -378,10 +378,9 @@
     .personabody{grid-template-columns:1fr;gap:18px}
     /* Contents first and scrollable sideways: a 30-item column above the text
        would push the document itself off the screen entirely. */
-    .doctoc{position:static;flex-direction:row;overflow-x:auto;border-left:0;
+    .doctoc{position:static;flex-direction:row;overflow-x:auto;
             border-bottom:1px solid var(--line-soft);padding:0 0 8px;max-height:none}
-    .doctoc a{white-space:nowrap;border-left:0;border-bottom:2px solid transparent;margin:0}
-    .doctoc a:hover{border-left-color:transparent;border-bottom-color:var(--accent)}
+    .doctoc a{white-space:nowrap;margin:0}
   }
 
   .field-name{display:block}
@@ -453,13 +452,11 @@
   .convo-head{flex:none;padding:14px 14px 12px;border-bottom:1px solid var(--line-soft)}
   .convo-head input{width:100%}
   .convo-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
-  /* A 2px bar rather than a fill, so the selected row reads at the edge of
-     vision without the list becoming a column of coloured blocks. */
-  .convo-row{display:grid;grid-template-columns:9px minmax(0,1fr) auto;
+  .convo-row{position:relative;display:grid;grid-template-columns:9px minmax(0,1fr) auto;
              gap:2px 9px;align-items:baseline;width:100%;text-align:left;
              font:inherit;color:inherit;cursor:pointer;
-             background:transparent;border:0;border-left:2px solid transparent;
-             border-bottom:1px solid var(--line-soft);padding:11px 14px 12px 12px;
+             background:transparent;border:0;
+             border-bottom:1px solid var(--line-soft);padding:11px 14px 12px 14px;
              transition:background .14s ease}
   .convo-row:hover{background:var(--raise)}
   .convo-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
@@ -470,9 +467,27 @@
   .convo-row .when{font-size:11px;color:var(--faint);white-space:nowrap}
   .convo-row .last{grid-column:2/-1;font-size:12.5px;line-height:1.45;color:var(--faint);
                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .convo-row[aria-current="true"]{background:var(--accent-dim);border-left-color:var(--accent)}
-  .convo-row[aria-current="true"] .name{color:var(--accent)}
-  .convo-row[aria-current="true"]:hover{background:var(--accent-dim)}
+  /* The open conversation becomes a tab.
+     A coloured bar down the left edge is what every admin sidebar does, and it
+     marks a row without saying what it opened. This instead joins the row to
+     the pane beside it: it takes the thread's own ground, reaches one pixel
+     past the column's divider to cover it, and squares the corners on that
+     side. The row and the conversation it opened read as one object, which is
+     what is actually true — and it needs no colour to say so, so the accent
+     stays free to mean "live" on the dot. */
+  .convo-row[aria-current="true"]{
+    background:var(--ground);
+    margin-right:-1px;
+    padding-right:15px;
+    border-bottom-color:transparent;
+    border-radius:11px 0 0 11px;
+    box-shadow:inset 0 1px 0 var(--line-soft), inset 1px 0 0 var(--line-soft),
+               inset 0 -1px 0 var(--line-soft);
+  }
+  .convo-row[aria-current="true"]:hover{background:var(--ground)}
+  /* The row above no longer needs a rule: the tab's own top hairline is there,
+     and two lines a pixel apart read as a seam. */
+  .convo-row:has(+ .convo-row[aria-current="true"]){border-bottom-color:transparent}
   .convo-none{padding:22px 16px;font-size:12.5px;line-height:1.6;color:var(--faint)}
 
   /* ── The thread ─────────────────────────────────────────────────────────────
@@ -520,6 +535,43 @@
           overflow-y:auto;overscroll-behavior:contain;
           display:flex;flex-direction:column;gap:10px;
           padding:20px var(--gut) 24px}
+
+  /* ── The session, opened out ────────────────────────────────────────────────
+     Chat folds the machinery away because a conversation is not a build log.
+     Here the opposite is wanted, so every step gets a line — but a *line*, in
+     three aligned columns, rather than terminal output. The verb column is
+     fixed so the eye runs straight down it and a change of activity is visible
+     without reading any of the detail. */
+  .session{flex:1;min-height:0;overflow-y:auto;padding:16px var(--gut) 22px;
+           display:flex;flex-direction:column;gap:1px}
+  .srow{display:grid;grid-template-columns:52px 132px minmax(0,1fr);gap:12px;
+        align-items:baseline;padding:6px 10px;border-radius:8px;font-size:12.5px}
+  .srow:hover{background:var(--raise)}
+  .sat{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
+       font-size:11px;color:var(--faint);white-space:nowrap}
+  .sverb{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .swhat{color:var(--ink);min-width:0;overflow-wrap:anywhere;line-height:1.5}
+  .swhat code{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);
+              font-size:.88em;background:var(--raise);border-radius:4px;padding:1px 4px}
+  /* What a person said or heard is the spine of the session; everything else is
+     what happened between two of those, and reads quieter. */
+  .srow.k-said .sverb{color:var(--accent)}
+  .srow.k-said .swhat{color:var(--ink)}
+  .srow.k-thought .swhat,.srow.k-note .swhat{color:var(--dim);font-style:italic}
+  .srow.k-prompt .sverb{color:var(--warn)}
+  .srow.k-turn{color:var(--faint)}
+  .srow.k-turn .sverb,.srow.k-turn .swhat{color:var(--faint)}
+  @media (max-width:760px){
+    .srow{grid-template-columns:44px minmax(0,1fr);gap:4px 10px}
+    .srow .swhat{grid-column:2}
+  }
+  .convo-lead{margin:0;font-size:11.5px;line-height:1.5;color:var(--faint)}
+  /* The empty half of a two-pane page, as an invitation rather than a shrug. */
+  .pane-empty{margin:auto;max-width:44ch;padding:24px;text-align:center;
+              display:flex;flex-direction:column;align-items:center;gap:11px}
+  .pane-empty svg{width:22px;height:22px;color:var(--faint)}
+  .pane-empty h3{margin:0;font-size:15px;font-weight:500}
+  .pane-empty p{margin:0;font-size:12.5px;line-height:1.6;color:var(--faint)}
 
   /* ── Speech ─────────────────────────────────────────────────────────────────
      One asymmetric corner on the side the bubble hangs from. It is the whole of
@@ -587,15 +639,20 @@
      rather than a command line. Nothing in it is a raw argument, and the two
      steps that are pure machinery (the typing indicator, the agent asking which
      chat it is in) are not listed at all. */
+  /* A recessed strip rather than a bar down one side: the work Juan did sits
+     *below* the surface of what was said, which is the relationship — it is
+     the machinery under a reply, not a message with a flag on it. */
   .work{align-self:stretch;margin:3px 0;border:1px solid var(--line-soft);
-        border-left:2px solid rgba(255,255,255,.26);border-radius:0 11px 11px 0;
-        background:rgba(255,255,255,.022)}
+        border-radius:11px;background:rgba(255,255,255,.022);
+        box-shadow:inset 0 1px 2px rgba(0,0,0,.28)}
   /* Amber, and only while it is happening: the same yellow the rail's dot uses
-     for a turn in flight, so one colour means one thing across the panel. */
-  .work.busy{border-left-color:var(--warn);background:rgba(240,180,41,.05)}
+     for a turn in flight, so one colour means one thing across the panel. It is
+     carried by the label and the border rather than by an edge marker. */
+  .work.busy{border-color:rgba(240,180,41,.4);background:rgba(240,180,41,.05)}
+  .work.busy .work-open{color:var(--warn)}
   .work-open{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
              font:inherit;font-size:12.5px;color:var(--dim);
-             background:transparent;border:0;border-radius:0 11px 11px 0;
+             background:transparent;border:0;border-radius:11px;
              padding:9px 13px;cursor:pointer}
   .work-open:hover{color:var(--ink)}
   .work-open:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
@@ -627,7 +684,7 @@
               color:var(--faint);background:transparent;border:0;cursor:pointer;text-align:left}
   .step .more:hover{color:var(--dim)}
   .step .more:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .step .thinking{margin-top:5px;padding-left:11px;border-left:2px dotted var(--line);
+  .step .thinking{margin-top:5px;padding-left:11px;
                   font-family:var(--body);font-size:12.5px;line-height:1.55;color:var(--faint);
                   white-space:pre-wrap;overflow-wrap:anywhere}
 
@@ -1061,6 +1118,7 @@
       <section class="page" id="p-chats"></section>
       <section class="page" id="p-chat"></section>
       <section class="page" id="p-media"></section>
+      <section class="page" id="p-terminal"></section>
       <section class="page" id="p-persona"></section>
       <section class="page" id="p-memory"></section>
       <section class="page" id="p-pages"></section>

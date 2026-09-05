@@ -13,6 +13,8 @@ var chatQuery = '';
 var convoQuery = '';
 /** Which conversation the Chat page is showing, or null for none. */
 var chatOpen = null;
+/** Which Claude Code session the Terminal page is showing, if any. */
+var termOpen = null;
 var termWindow = null;
 var booted = false;
 
@@ -131,8 +133,8 @@ function icon(name) {
 
 var PAGES = [
   ['overview', 'Overview'], ['chat', 'Chat'], ['messages', 'Messages'], ['chats', 'Chats'],
-  ['media', 'Media'], ['persona', 'Persona'], ['memory', 'Memory'], ['pages', 'Pages'], ['settings', 'Settings'],
-  ['log', 'Log']
+  ['media', 'Media'], ['terminal', 'Terminal'], ['persona', 'Persona'], ['memory', 'Memory'],
+  ['pages', 'Pages'], ['settings', 'Settings'], ['log', 'Log']
 ];
 
 function buildNav() {
@@ -144,31 +146,18 @@ function buildNav() {
     b.appendChild(icon(p[0]));
     b.appendChild(node('span', null, p[1]));
     if (p[0] === 'chats') { var c = node('span', 'count', '0'); c.id = 'navChats'; b.appendChild(c); }
+    if (p[0] === 'terminal') {
+      var t = node('span', 'count', '');
+      t.id = 'navTermCountRow';
+      t.hidden = true;
+      b.appendChild(t);
+    }
     // Chat keeps whichever conversation is open, so coming back from another
     // page returns to it rather than to an empty picker.
     b.addEventListener('click', function () { go(p[0] === 'chat' && chatOpen ? 'chat/' + chatOpen : p[0]); });
     nav.appendChild(b);
   });
 
-  // Terminal sits with the pages because that is where somebody looks for it,
-  // but it is not one: it opens the pane over whatever you were reading and
-  // gives it back when you close it. Hence a row that looks like the others and
-  // never takes `aria-current` — nothing was navigated to, so nothing is "here".
-  //
-  // It is read-only. The pane carries every conversation at once, so it is for
-  // seeing what the agent actually ran; typing into a conversation is the Chat
-  // page's job, one reviewed line at a time.
-  var term = node('button', 'nav');
-  term.type = 'button';
-  term.id = 'navTerm';
-  term.appendChild(icon('terminal'));
-  term.appendChild(node('span', null, 'Terminal'));
-  var live = node('span', 'count', '');
-  live.id = 'navTermCount';
-  live.hidden = true;
-  term.appendChild(live);
-  term.addEventListener('click', openTerminal);
-  nav.appendChild(term);
 }
 
 /**
@@ -225,6 +214,7 @@ function go(next) {
   var parts = String(next).split('/');
   var page = parts[0] || 'overview';
   if (page === 'chat') chatOpen = /^[0-9a-f]{16}$/.test(parts[1] || '') ? parts[1] : null;
+  if (page === 'terminal') termOpen = /^[0-9a-f]{16}$/.test(parts[1] || '') ? parts[1] : null;
 
   route = page;
   if (location.hash !== '#/' + next) location.hash = '#/' + next;
@@ -249,10 +239,13 @@ function go(next) {
   // their own, which is impossible inside a page that scrolls as a whole. So
   // the wrapper gives up its padding and the page takes the frame.
   var wrap = document.querySelector('.page-wrap');
-  if (wrap) wrap.classList.toggle('chatmode', route === 'chat');
-  document.body.classList.toggle('chatmode', route === 'chat');
+  if (wrap) wrap.classList.toggle('chatmode', route === 'chat' || route === 'terminal');
+  // Both two-pane pages give up the document's padding and scroll internally.
+  var twoPane = route === 'chat' || route === 'terminal';
+  document.body.classList.toggle('chatmode', twoPane);
   stopTerminal();
   if (route !== 'chat') stopChatPoll();
+  if (route !== 'terminal') stopSessionPoll();
   var scroller = document.querySelector('main');
   if (scroller) scroller.scrollTop = 0;
   render();
@@ -280,7 +273,7 @@ function verdict(s) {
   // Hidden rather than "0": an empty pane is a fine thing to open, and a zero
   // badge reads as a warning about nothing.
   var open = (s.agent && s.agent.openChats) ? s.agent.openChats.length : 0;
-  var count = el('navTermCount');
+  var count = el('navTermCountRow');
   if (count) {
     count.textContent = String(open);
     count.hidden = open === 0;
@@ -1435,6 +1428,276 @@ function pinThread() {
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(pin, function () { /* no faces to wait for */ });
   }
+}
+
+// ── The Terminal page ───────────────────────────────────────────────────────
+// The same two-pane shape as Chat, over a different subject. Chat is the
+// conversation: what a person said and what Juan said back, with the machinery
+// folded away. This is the *session* — the Claude Code process answering that
+// conversation — with the machinery opened out, because that is the whole
+// reason to come here.
+//
+// The raw pane is still one click away and still read-only. It carries every
+// conversation at once and wraps at whatever width tmux chose, which is why it
+// is the thing behind a modal rather than the thing on the page.
+
+var termView = null;
+var termTimer = null;
+
+function stopSessionPoll() {
+  if (termTimer) clearTimeout(termTimer);
+  termTimer = null;
+}
+
+function startSessionPoll() {
+  stopSessionPoll();
+  termTimer = setTimeout(function tick() {
+    void refreshSession();
+    termTimer = setTimeout(tick, 4000);
+  }, 4000);
+}
+
+function renderSessions() {
+  var p = frame('terminal');
+  stopSessionPoll();
+  termView = null;
+
+  var app = node('div', 'chatapp');
+  app.id = 'termApp';
+  if (termOpen) app.classList.add('reading');
+  app.appendChild(sessionColumn());
+  app.appendChild(sessionPane());
+  p.appendChild(app);
+
+  if (termOpen) {
+    void refreshSession();
+    startSessionPoll();
+  }
+}
+
+/** Every chat the agent has a window open for, newest first. */
+function liveSessions() {
+  var keys = (state && state.agent && state.agent.openChats) || [];
+  var known = {};
+  ((state && state.chats) || []).forEach(function (c) { known[c.chatKey] = c; });
+  return keys.map(function (k) {
+    return known[k] || { chatKey: k, name: null, isGroup: false, lastSeenAt: 0, messages: 0 };
+  }).sort(function (a, b) { return (b.lastSeenAt || 0) - (a.lastSeenAt || 0); });
+}
+
+function sessionColumn() {
+  var col = node('aside', 'convo');
+  var top = node('div', 'convo-head');
+  var lead = node('p', 'convo-lead',
+    'One Claude Code session per conversation. They cannot see one another.');
+  top.appendChild(lead);
+  col.appendChild(top);
+
+  var list = node('div', 'convo-list');
+  list.id = 'termList';
+  col.appendChild(list);
+  paintSessionList(list);
+  return col;
+}
+
+function paintSessionList(target) {
+  var list = target || el('termList');
+  if (!list) return;
+  if (!target && list.contains(document.activeElement)) return;
+  var was = list.scrollTop;
+  clear(list);
+
+  var rows = liveSessions();
+  if (!rows.length) {
+    list.appendChild(node('p', 'convo-none',
+      state && state.agent && !state.agent.sessions
+        ? 'No session is open. One starts on the next message and appears here.'
+        : 'The agent is not reporting, so there is nothing to list. The container is the thing to look at.'));
+    return;
+  }
+  rows.forEach(function (c) {
+    var b = node('button', 'convo-row');
+    b.type = 'button';
+    b.setAttribute('aria-current', c.chatKey === termOpen ? 'true' : 'false');
+    var dot = node('span', 'dot');
+    dot.style.background = state && state.queue && state.queue.inFlight === c.chatKey
+      ? 'var(--warn)' : 'var(--accent)';
+    b.appendChild(dot);
+    b.appendChild(node('span', 'name', (c.name || 'someone') + (c.isGroup ? ' (group)' : '')));
+    b.appendChild(node('span', 'when',
+      state && state.queue && state.queue.inFlight === c.chatKey ? 'working' : 'idle'));
+    b.appendChild(node('span', 'last', c.chatKey));
+    b.addEventListener('click', function () { go('terminal/' + c.chatKey); });
+    list.appendChild(b);
+  });
+  list.scrollTop = was;
+}
+
+function sessionPane() {
+  var pane = node('section', 'thread-pane');
+  if (!termOpen) {
+    var none = node('div', 'pane-empty');
+    none.appendChild(icon('terminal'));
+    none.appendChild(node('h3', null, 'Pick a session'));
+    none.appendChild(node('p', null,
+      'Every prompt, thought and command that answered one conversation, in order. '
+      + 'Choose one on the left — or open the raw pane, which shows all of them at once.'));
+    var open = node('button', 'sm', 'Open the raw pane');
+    open.type = 'button';
+    open.addEventListener('click', openTerminal);
+    none.appendChild(open);
+    pane.appendChild(none);
+    return pane;
+  }
+
+  var h = node('header', 'thread-head');
+  var cap = node('div', 'cap');
+  h.appendChild(cap);
+
+  var back = node('button', 'sm backrow');
+  back.type = 'button';
+  back.setAttribute('aria-label', 'Back to the sessions');
+  back.appendChild(icon('back'));
+  back.addEventListener('click', function () { go('terminal'); });
+  cap.appendChild(back);
+
+  var who = node('div', 'who');
+  var title = node('h3', null, '…');
+  title.id = 'termWho';
+  who.appendChild(title);
+  var sub = node('p', 'sub');
+  var dot = node('span', 'dot');
+  dot.id = 'termDot';
+  sub.appendChild(dot);
+  var says = node('span', null, 'reading');
+  says.id = 'termState';
+  sub.appendChild(says);
+  sub.appendChild(node('span', 'key', termOpen));
+  who.appendChild(sub);
+  cap.appendChild(who);
+
+  var acts = node('div', 'acts');
+  var raw = node('button', 'sm raw');
+  raw.type = 'button';
+  raw.title = 'The live tmux pane, read-only. It carries every conversation at once.';
+  raw.appendChild(icon('terminal'));
+  raw.appendChild(node('span', null, 'Raw pane'));
+  raw.addEventListener('click', openTerminal);
+  acts.appendChild(raw);
+  cap.appendChild(acts);
+  pane.appendChild(h);
+
+  var wrap = node('div', 'thread-wrap');
+  var body = node('div', 'session');
+  body.id = 'termBody';
+  body.appendChild(node('p', 'thread-note', 'Reading the session…'));
+  wrap.appendChild(body);
+  pane.appendChild(wrap);
+  return pane;
+}
+
+async function refreshSession() {
+  var body = el('termBody');
+  if (!body || !termOpen) return;
+  if (document.hidden) return;
+  var key = termOpen;
+
+  var view;
+  try {
+    view = await api('/api/chat/transcript?key=' + encodeURIComponent(key) + '&n=400');
+  } catch (err) {
+    if (!termView) clear(body).appendChild(node('p', 'empty', err.message));
+    return;
+  }
+  if (key !== termOpen || !body.isConnected) return;
+  termView = view;
+
+  var who = el('termWho');
+  if (who) who.textContent = (view.chat && view.chat.name) || 'someone';
+  var says = el('termState'), dot = el('termDot');
+  var busy = !!(state && state.queue && state.queue.inFlight === key);
+  if (says) says.textContent = busy ? 'answering now' : view.live ? 'session open' : 'session closed';
+  if (dot) dot.style.background = busy ? 'var(--warn)' : view.live ? 'var(--accent)' : 'var(--faint)';
+
+  paintSession(view);
+}
+
+/**
+ * The session, opened out.
+ *
+ * Chat folds tool calls into one collapsed band because a conversation is not a
+ * build log. Here the opposite is wanted: every step in order, with what it
+ * actually did beside it, because the reason to be on this page is that
+ * something went wrong and the machinery is the subject.
+ *
+ * Still masked. A path is a basename and a command is its program name — the
+ * pane behind the modal is where the unmasked version lives, and it is behind a
+ * modal precisely because it carries other people's identifiers.
+ */
+function paintSession(view) {
+  var body = el('termBody');
+  if (!body) return;
+  var pinned = atThreadBottom(body);
+  clear(body);
+
+  if (!view.items.length) {
+    body.appendChild(node('p', 'thread-note', 'Nothing in this session yet.'));
+    return;
+  }
+
+  var day = '';
+  view.items.forEach(function (item) {
+    var stamp = new Date(item.ts).toDateString();
+    if (stamp !== day) {
+      body.appendChild(node('span', 'daymark', dayLabel(item.ts)));
+      day = stamp;
+    }
+    body.appendChild(sessionRow(item));
+  });
+
+  if (pinned) body.scrollTop = body.scrollHeight;
+}
+
+/**
+ * One step, in a fixed column so the verbs line up and the eye runs down them.
+ *
+ * Tool steps go through `stepFor` — the same summariser the Chat page's bands
+ * use — rather than a second mapping written beside it. One place decides what
+ * a command is called and what of it may be shown, so the two views cannot
+ * drift into disagreeing about either.
+ */
+function sessionRow(item) {
+  // `k-` prefixed, because the bare kind names collide: `.said` is already
+  // Juan's prose lane in the Chat thread, and its `display:flex` silently won
+  // over this grid — the time column collapsed to 27px and wrapped mid-digit.
+  var row = node('div', 'srow k-' + item.kind);
+  row.appendChild(node('span', 'sat', hhmm(item.ts)));
+
+  var verb, detail;
+  if (item.kind === 'said') {
+    verb = item.direction === 'out' ? 'Said to them' : 'They said';
+    detail = String(item.text || '');
+  } else if (item.kind === 'prompt') {
+    verb = 'Was prompted';
+    detail = String(item.text || '');
+  } else if (item.kind === 'turn') {
+    verb = 'Turn';
+    detail = String(item.text || '');
+  } else {
+    var step = stepFor(item);
+    // `stepFor` returns null for the two steps that are pure machinery — the
+    // typing indicator, and the agent asking which chat it is in. On this page
+    // they are worth a line: it is the debugging view, and "nothing happened
+    // for ninety seconds" is a different fact from "nothing was recorded".
+    verb = step ? step.verb : (item.kind === 'tool' ? mask(item.tool || 'tool') : item.kind);
+    detail = step ? String(step.detail || '') : mask(item.text || '');
+  }
+
+  row.appendChild(node('span', 'sverb', verb));
+  var what = node('span', 'swhat');
+  inline(detail.slice(0, 400), what);
+  row.appendChild(what);
+  return row;
 }
 
 // ── The composer ────────────────────────────────────────────────────────────
@@ -3343,6 +3606,7 @@ function render() {
   // repainting it every five seconds would restart the one and empty the other.
   // `paintChatLive` is what a poll calls instead.
   else if (route === 'chat') renderChat();
+  else if (route === 'terminal') renderSessions();
   else if (route === 'media') renderMedia();
   else if (route === 'pages') void renderPages();
   else if (route === 'memory') void renderMemory();
@@ -3373,6 +3637,9 @@ async function refresh() {
   // header's state and the typing indicator all move with the snapshot, and
   // none of them is a reason to throw away a half-typed message.
   else if (route === 'chat') paintChatLive();
+  // Same reasoning: this page owns a poll and a selection, and repainting it
+  // every five seconds would restart the one and lose the other.
+  else if (route === 'terminal') paintSessionList();
 }
 
 // ── Shader backdrop ─────────────────────────────────────────────────────────
