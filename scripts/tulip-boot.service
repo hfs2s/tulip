@@ -1,0 +1,27 @@
+# Install on the Pi:
+#   sudo cp scripts/tulip-boot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now tulip-boot
+#
+# Read the header of scripts/tulip-boot.sh for why `restart: unless-stopped` in
+# docker-compose.yml does not already cover this. The short version: that policy
+# restarts a container that exited, and the failure here is a container that
+# never started.
+[Unit]
+Description=Tulip — start the stack once its publish address exists
+Documentation=file:/home/leonora/Repositories/tulip/scripts/tulip-boot.sh
+# tailscaled is Wants, not Requires, on purpose: the script's wait is bounded
+# and it starts the stack regardless. A tailnet that never comes up should cost
+# the panel's reachability, not the whole deployment.
+After=docker.service tailscaled.service network-online.target
+Wants=tailscaled.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/leonora/Repositories/tulip/scripts/tulip-boot.sh
+# Must exceed TULIP_BOOT_WAIT (120s) or systemd kills the wait it is here for.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
