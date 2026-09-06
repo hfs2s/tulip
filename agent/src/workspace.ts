@@ -1,5 +1,15 @@
 /**
- * One workspace per chat.
+ * The agent's workspace.
+ *
+ * HISTORY, because the comment below describes a design this file no longer
+ * implements and the reasoning is still worth having. Tulip keyed a session and
+ * a workspace per chat, which made isolation structural. That was reversed on
+ * 2026-09-06 by operator decision: there is now one session and one workspace,
+ * `chats/main`, and discretion lives in persona/BOUNDARIES.md instead. What the
+ * argument below gets right is the cost of that — an instruction is what a
+ * prompt injection overrides — so it is kept rather than deleted.
+ *
+ * What follows described one workspace per chat.
  *
  * Chat isolation in Tulip is structural rather than instructed. Each chat gets
  * its own directory, its own `CLAUDE.md`, and its own Claude Code session keyed
@@ -225,12 +235,20 @@ function sharedMemory(): string {
 /**
  * Record which turn this chat is answering.
  *
- * This is why a reply cannot be delivered to the wrong conversation. The turn
- * id is written *per chat*, immediately before the prompt is injected, and
- * `tulip-wa` reads it from the workspace it is running in — never from a global
- * "current turn" file. With a global file, a session that finished slowly would
- * stamp its reply with whichever turn happened to be current when it got around
- * to sending, and that reply would be delivered to a different person.
+ * This file IS now the global "current turn" file the paragraph below warns
+ * against — there is one workspace, so there is one `.turn`. The warning was
+ * right, and what answers it is no longer the file's location:
+ *
+ *   - turns are strictly serial (one window, and `waitForTurnEnd` blocks),
+ *   - the Stop hook relays against a copy taken at the START of its turn
+ *     (`.markers/answering`), not against this file, so a hook still running
+ *     when the next chat is dispatched cannot pick up the newer id,
+ *   - an abandoned turn clears this file, so a late `tulip-wa send` refuses.
+ *
+ * The original warning, kept because it is the failure to design against:
+ * with a global file, a session that finished slowly would stamp its reply with
+ * whichever turn happened to be current when it got around to sending, and that
+ * reply would be delivered to a different person.
  */
 export function setTurn(workspace: ChatWorkspace, turnId: string): void {
   writeFileAtomic(workspace.turnFile, turnId, 0o644);

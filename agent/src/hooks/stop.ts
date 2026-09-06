@@ -77,7 +77,7 @@ function relay(input: HookInput): void {
 
   let turnId: string;
   try {
-    turnId = readFileSync(join(chatDir, '.turn'), 'utf8').trim();
+    turnId = readFileSync(join(chatDir, '.markers', 'answering'), 'utf8').trim();
   } catch {
     return; // nothing routed here yet
   }

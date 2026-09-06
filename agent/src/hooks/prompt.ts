@@ -67,6 +67,25 @@ try {
   mkdirSync(markers, { recursive: true });
   writeFileSync(join(markers, 'busy'), String(Date.now()));
   rmSync(join(markers, 'spoke'), { force: true });
+
+  // Bind the turn NOW, at the start, and let the Stop hook relay against this
+  // rather than against `.turn`.
+  //
+  // `.turn` became a single global file when Tulip moved to one shared session,
+  // and the Stop hook reads it when the turn *ends* — so a hook still running
+  // when the supervisor dispatches the next chat would read that chat's id and
+  // deliver this conversation's leftover reply to a different person. Reading a
+  // value captured at the start cannot do that: the worst case is a stale id,
+  // which the bridge resolves back to the conversation it actually belongs to.
+  try {
+    const turnId = readFileSync(join(process.env['TULIP_CHAT_DIR'] ?? '', '.turn'), 'utf8').trim();
+    if (turnId.length > 0) writeFileSync(join(markers, 'answering'), turnId);
+    else rmSync(join(markers, 'answering'), { force: true });
+  } catch {
+    // No turn routed here — an operator typing in the pane. The Stop hook then
+    // finds nothing to relay against and stays quiet, which is correct.
+    rmSync(join(markers, 'answering'), { force: true });
+  }
 } catch {
   /* never block a turn on bookkeeping */
 }

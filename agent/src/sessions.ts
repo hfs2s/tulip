@@ -125,8 +125,19 @@ export class SessionPool {
    * that rather than typing into a window that may not exist.
    */
   async acquire(chatKey: string, generation: number): Promise<Session | null> {
+    const wanted = sessionUuidFor(chatKey, generation);
     const existing = this.live.get(chatKey);
-    if (existing && (await windowExists(existing.window))) {
+    if (existing && existing.uuid !== wanted) {
+      // `!reset` bumps the generation, which changes the derived uuid. Without
+      // this the live window is simply handed back and the reset does nothing —
+      // an operator is told the next message starts fresh, and it does not.
+      // Silent, and worse under one shared session, where the reset would
+      // otherwise take effect at some unrelated later respawn and take every
+      // other conversation's context with it.
+      log('session.generation', { chatKey, note: 'reset — starting a fresh context for the shared session' });
+      await killWindow(existing.window);
+      this.live.delete(chatKey);
+    } else if (existing && (await windowExists(existing.window))) {
       existing.lastUsedAt = Date.now();
       return existing;
     }

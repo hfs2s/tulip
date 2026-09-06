@@ -75,7 +75,7 @@ one-directional volumes and no shared network at all.
                       │  tulip-agent                            │
                       │                                         │
                       │  tmux · claude --dangerously-skip-…     │
-                      │  one Claude session PER CHAT            │
+                      │  ONE shared session, every chat         │
                       │                                         │
                       │  HOLDS: nothing but its own workspace   │
                       │  RUNS:  untrusted input, by design      │
@@ -98,7 +98,7 @@ Docker socket, no `docker exec` from one into the other, and no port either can
 dial on the other. The entire interface between the trusted half and the
 untrusted half is "one process writes a JSON file, the other reads it".
 
-### The seven controls
+### The controls (six, since one was withdrawn)
 
 Each is enforced by the kernel or the filesystem. None depends on the agent
 behaving.
@@ -129,11 +129,18 @@ behaving.
    message to a chat other than the one it is answering. See
    [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md#t4).
 
-6. **One Claude session per chat.** Chat isolation is structural, not
-   prompt-level: stranger A's messages are never in the context window that
-   answers stranger B, because they are different sessions with different
-   derived UUIDs. Iris shares one session across every chat and relies on the
-   persona for discretion; for a public bot that is not good enough.
+6. **~~One Claude session per chat.~~ Withdrawn 2026-09-06.** This was the
+   sixth control, and it read: chat isolation is structural, not prompt-level —
+   stranger A's messages are never in the context window that answers stranger
+   B, because they are different sessions with different derived UUIDs.
+
+   Tulip now runs **one shared session across every chat**, by operator
+   decision, so that it is one person who remembers everyone rather than an
+   amnesiac who meets you fresh in each room. Chat confidentiality is therefore
+   prompt-level, as it is in Iris. Six controls, not seven; the count in the
+   heading above is what it is because this one is gone. See
+   [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md#t4) for what that costs, and
+   `persona/BOUNDARIES.md` for what now stands in its place.
 
 7. **Least-privilege container.** Non-root (uid 1000), `read_only` root
    filesystem, `no-new-privileges`, **all** capabilities dropped, tmpfs `/tmp`,
@@ -362,7 +369,7 @@ And changes what a public audience makes untenable:
 | Deployment | one process on the host | three containers, disjoint networks |
 | WhatsApp credentials | same filesystem as the agent | unreachable from the agent |
 | Egress | unrestricted | deny-by-default proxy, no route, no DNS |
-| Chat isolation | one shared session, persona-level | one session per chat, structural |
+| Chat isolation | one shared session, persona-level | **the same, since 2026-09-06** — was one session per chat, structural |
 | Host privileges | user account with passwordless sudo | uid 1000, all caps dropped, read-only root |
 | Abuse controls | none needed | per-sender token buckets, turn budgets, size caps |
 | Language | JavaScript | TypeScript strict, Zod at every boundary |

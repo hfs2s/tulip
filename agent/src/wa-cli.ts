@@ -49,29 +49,33 @@ function die(message: string): never {
  * working directory is the fallback for a shell started by hand.
  */
 function currentWorkspace(): { dir: string; turnId: string } {
-  const fromEnv = process.env['TULIP_CHAT_DIR'];
-  const candidates = [fromEnv, ...ancestors(process.cwd())].filter((d): d is string => typeof d === 'string');
-
-  for (const dir of candidates) {
-    if (!existsSync(join(dir, '.turn'))) continue;
-    const chatKey = basename(dir);
-    const turnId = readTurn(workspaceFor(chatKey));
+  // The environment variable ONLY. There used to be a fallback that walked up
+  // from the working directory looking for a `.turn`, for the convenience of a
+  // shell started by hand — and that convenience became a way to send a
+  // WhatsApp message as Juan from a session that was never given a chat.
+  //
+  // The console pane runs a real Claude Code session with no TULIP_CHAT_DIR,
+  // which was supposed to be what stopped it sending. It was not: the walk
+  // starts at the working directory, and the console's own brief invites it to
+  // read a chat workspace when an operator asks it to diagnose something. One
+  // `cd` into that directory and the walk finds a live turn. That was survivable
+  // only while chat directories were named by an opaque 16-hex key nobody could
+  // guess; the shared session made the one directory a fixed, published string.
+  //
+  // So the binding is now the variable the supervisor sets per window at spawn,
+  // and nothing else. A hand-started shell cannot send, which is the right
+  // answer for a shell nobody routed a conversation to.
+  const dir = process.env['TULIP_CHAT_DIR'];
+  if (typeof dir !== 'string' || dir.length === 0) {
+    die('tulip-wa: this session is not answering anybody — no conversation has been routed to it.');
+  }
+  if (existsSync(join(dir, '.turn'))) {
+    const turnId = readTurn(workspaceFor(basename(dir)));
     if (turnId !== null) return { dir, turnId };
   }
   die('tulip-wa: no conversation is being answered right now — nothing has been routed to you yet.');
 }
 
-function ancestors(from: string): string[] {
-  const out: string[] = [];
-  let dir = resolve(from);
-  for (let i = 0; i < 8; i++) {
-    out.push(dir);
-    const parent = resolve(dir, '..');
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return out;
-}
 
 /**
  * Refuse a capability the operator has switched off, here rather than silently.

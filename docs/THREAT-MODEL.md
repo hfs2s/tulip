@@ -261,10 +261,19 @@ injects the agent into sending someone else's data anywhere.*
 
 Two independent controls:
 
-- **Session isolation.** One Claude Code session per chat, keyed by a UUIDv5
-  derived from the chat identity. Another user's messages are not in the context
-  window, so there is nothing to leak. Compare Iris, where a single session sees
-  every conversation and only the persona discourages crossing streams.
+- **~~Session isolation.~~ REMOVED 2026-09-06, by operator decision.** Tulip ran
+  one Claude Code session per chat, keyed by a UUIDv5 derived from the chat
+  identity, so another user's messages were not in the context window and there
+  was nothing to leak. It now runs **one shared session across every chat and
+  group** — the Iris design this section used to contrast itself against, where
+  a single session sees every conversation and only the persona discourages
+  crossing streams. The product wanted one person who remembers everyone.
+
+  So this control no longer exists, and what replaced it is an instruction:
+  persona/BOUNDARIES.md tells the agent that what it learns in one conversation
+  does not leave it. That is exactly the kind of mitigation §T6 says a prompt
+  injection overrides. **Read the residual risk table before relying on any
+  bound stated elsewhere in this document.**
 - **Destination pinning.** Outbound actions written by the agent carry a
   `turnId`, never a destination. The bridge holds the only `turnId → chat` map
   and resolves it itself; an action naming an unknown or expired turn is
@@ -287,16 +296,24 @@ What the exception costs, precisely:
 | Can address | the chat whose turn it is answering | that, plus any chat key the bridge has issued |
 | In which media | all of them | all of them |
 | Can name a phone number | **in one action only** — `contact`, refused unless the turn is an operator writing directly. Pinning still holds, so the key it yields addresses nothing | **the same one action, the same gate** — and the key it yields is then addressable. Every *other* destination is still an opaque, deployment-local key |
-| Can read another conversation | no | **still no** — sessions are per chat |
+| Can read another conversation | **yes, since 2026-09-06** — one shared session holds every chat; only the persona restrains it | **yes**, and can now also address where to put it |
 | Recorded | outbound in the chat's feed | that, plus a `crossChat.sent` event naming both chats |
 | Rate limit charged to | the chat being written into | the chat being written into |
 
-The load-bearing observation is that the two controls are independent, and only
-the weaker one moved. Session isolation is what makes exfiltration pointless:
-another person's messages were never in the context window, so a compromised
-agent that gains a destination gains a way to send *its own* conversation
-onward, not a way to fetch somebody else's. `sendTo` widens who can be told
-something; it does not widen what there is to tell.
+**This paragraph used to be the load-bearing one and is now the warning.** The
+argument was that the two controls were independent and only the weaker had
+moved: session isolation made exfiltration pointless, because another person's
+messages were never in the context window, so an agent that gained a destination
+gained a way to send *its own* conversation onward rather than a way to fetch
+somebody else's. `sendTo` widened who could be told something without widening
+what there was to tell.
+
+Both halves of that are now false. There is one session, so everything anyone
+has said is what there is to tell; and with `agent.crossChat` on there is also
+somewhere to send it. The two controls are no longer independent, because one of
+them is gone. Worst case from a successful injection is no longer "one person's
+own data returns to them" — it is any conversation's content reaching any chat
+key the bridge has issued.
 
 Destinations come from `agent.contacts`, curated in the panel, and from chats
 that have written in. The list is deliberately **not** the audience list:
@@ -410,10 +427,13 @@ there is no sender to rate-limit or block.
 
 Three things bound it, and none of them is a prompt:
 
-- **The blast radius is unchanged.** A successful injection still lands in a
-  container with no credentials, no route out except the model endpoint and the
-  search provider, and no access to another conversation (T4). Everything under
-  T1 applies exactly as before.
+- **The blast radius is bounded, but it grew on 2026-09-06.** A successful
+  injection still lands in a container with no credentials and no route out
+  except the model endpoint and the search provider, and everything under T1
+  applies exactly as before. What is no longer true is "no access to another
+  conversation": T4's session isolation was removed, so an injection now lands
+  in a session holding every chat. The container bound is unchanged; the
+  conversational bound is gone.
 - **Results are labelled where they are read**, not only in the persona. The
   text the agent receives is prefixed with a statement that it is data from the
   open internet and that pages sometimes contain text designed to look like
@@ -424,10 +444,13 @@ Three things bound it, and none of them is a prompt:
   in the trusted half parses, follows or branches on what a page says.
 
 Controls are the same as T1 — the payload achieves execution in a container worth
-nothing — plus session isolation (T4), which bounds what a successful injection
-can see to the single chat it arrived in. The persona additionally instructs the
-agent to treat message and file content as data rather than instructions; that is
-defence in depth and is *not* counted on.
+nothing. **Session isolation (T4) used to be listed here too, bounding what a
+successful injection could see to the single chat it arrived in. It was removed
+on 2026-09-06, so that bound is gone: an injection arriving in any chat lands in
+a session holding all of them.** The persona instructs the agent to treat
+message and file content as data rather than instructions, and not to carry what
+it learns between conversations. That was defence in depth and explicitly *not*
+counted on; for cross-chat confidentiality it is now the only thing there is.
 
 ### T7 — Attacks on the bridge itself
 
@@ -495,7 +518,7 @@ been read carefully.
 
 | # | Risk | Why it is accepted |
 |---|---|---|
-| R1 | **The reply channel is an exfiltration channel.** Anything the agent can see, it can say to the person it is talking to. | Irreducible for a conversational agent. Bounded by session isolation (T4): what it can see is one chat. |
+| R1 | **The reply channel is an exfiltration channel.** Anything the agent can see, it can say to the person it is talking to. | Irreducible for a conversational agent. **The bound stated here until 2026-09-06 — session isolation (T4), "what it can see is one chat" — no longer exists.** One shared session now holds every conversation, so what it can see is all of them, and the only thing between a stranger's message and somebody else's business is persona/BOUNDARIES.md. This is the residual risk most changed by that decision, and it is accepted knowingly rather than mitigated: see T4. |
 | R2 | **Container escape.** A Linux kernel or runc vulnerability defeats every control here at once. | Out of scope for an application design. Mitigated operationally: keep the host patched, and treat the host as compromisable — it holds no other production service. |
 | R3 | **Anthropic API key theft** from inside the agent container. | Unavoidable: the agent must authenticate to run. Bounded by using a dedicated, budget-capped key that grants nothing but inference, and by making rotation a one-line operation. |
 | R4 | **Baileys is an unofficial WhatsApp client.** Its protocol handling is reverse-engineered and it may be broken or banned at any time. | Accepted; there is no official self-hosted alternative. Blast radius is one phone number. |

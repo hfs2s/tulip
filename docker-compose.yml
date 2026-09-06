@@ -231,6 +231,12 @@ services:
       TULIP_MODEL: ${TULIP_MODEL:-}
       TULIP_MAX_LIVE_SESSIONS: ${TULIP_MAX_LIVE_SESSIONS:-3}
       TULIP_SESSION_IDLE_MS: ${TULIP_SESSION_IDLE_MS:-1800000}
+      # How long one turn may run before the supervisor interrupts it. It has to
+      # be listed here or it can never reach this container, and the agent sits
+      # on its hardcoded default however the box .env is edited. With a single
+      # shared session this is not a per-chat inconvenience: the wedged turn
+      # holds the only window, so everybody waits it out.
+      TULIP_TURN_TIMEOUT_MS: ${TULIP_TURN_TIMEOUT_MS:-}
 
     volumes:
       # Read-only. The agent may read its batches and the media it was sent; it

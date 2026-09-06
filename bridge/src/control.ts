@@ -27,7 +27,7 @@ const HELP = `*Tulip — operator commands*
 !chats           chats seen recently
 !block <key>     stop answering a chat (use the key from !chats)
 !unblock <key>   answer it again
-!reset <key>     abandon that chat's context; the next message starts fresh
+!reset <key>     start a fresh context — for EVERY chat, not just this one
 !help            this list`;
 
 export interface ControlDeps {

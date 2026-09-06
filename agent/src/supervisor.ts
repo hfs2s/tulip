@@ -60,7 +60,18 @@ const SHARED_CHAT = 'main';
  * is the whole product — one turn stuck on a slow tool call means Juan is
  * silent for every person messaging him, with nothing in the log saying why.
  */
-const TURN_TIMEOUT_MS = Number(process.env['TULIP_TURN_TIMEOUT_MS'] ?? 10 * 60 * 1000);
+const TURN_TIMEOUT_MS = (() => {
+  const raw = Number(process.env['TULIP_TURN_TIMEOUT_MS']);
+  // A minute is the floor, and the floor is the whole protection here.
+  // `stripEmptyEnv` cannot help: it runs inside main(), and this constant is
+  // evaluated when the module is imported, long before. Compose sets the
+  // variable to the empty string when .env does not mention it, and `Number('')`
+  // is 0 — a zero timeout interrupts every turn the instant it begins, which
+  // looks exactly like the model being broken rather than like a
+  // misconfiguration. Same shape as the empty MINIMAX_BASE_URL that silently
+  // disabled pictures and voice notes for weeks.
+  return Number.isFinite(raw) && raw >= 60_000 ? raw : 10 * 60 * 1000;
+})();
 
 const POLL_MS = 500;
 const STATUS_MS = 2000;
@@ -290,9 +301,16 @@ async function sendPrompt(session: Session, line: string): Promise<void> {
 /**
  * Wait for the pane to stop showing a running turn.
  *
- * No timeout here on purpose. The bridge holds the authoritative one and will
- * move on without us; duplicating it would only add a second, differently
- * configured opinion about when a turn is over.
+ * There IS a timeout now, and the paragraph that used to be here said there
+ * deliberately was not: the bridge held the authoritative one and duplicating it
+ * would only add a second, differently configured opinion.
+ *
+ * That reasoning was sound while a wedged turn blocked one chat out of a pool.
+ * With a single shared session the bridge's timeout no longer frees anything —
+ * it advances the bridge's own bookkeeping to the next chat while the one tmux
+ * window is still held by the turn that hung, so every chat after it is cycled
+ * through and answered by nobody. The second opinion is the point: this one can
+ * actually end the turn.
  */
 async function waitForTurnEnd(session: Session): Promise<boolean> {
   // Give the footer a moment to appear before believing the turn is finished.
