@@ -452,8 +452,22 @@ async function main(): Promise<void> {
   });
   // Before anything else: ttyd attaches with `new-session -A`, so if this does
   // not exist yet ttyd builds a bare shell and that is what an operator sees.
+  //
+  // The idle window runs a real Claude Code session rather than a note saying
+  // no chat is live. Same flags a conversation gets — an operator debugging
+  // this container should be looking at the thing they are debugging — but in
+  // the console workspace, which is outside `chats/` and so has no `.turn`
+  // above it. That is what stops anything typed here reaching WhatsApp.
   const { ensureSession } = await import('./tmux.js');
-  await ensureSession();
+  const { ensureConsoleWorkspace } = await import('./workspace.js');
+  await ensureSession({
+    cwd: ensureConsoleWorkspace(),
+    command: [
+      'claude',
+      '--dangerously-skip-permissions',
+      ...(process.env['TULIP_MODEL'] ? ['--model', process.env['TULIP_MODEL'] as string] : []),
+    ],
+  });
 
   publishStatus();
 

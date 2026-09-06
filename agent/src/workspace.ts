@@ -41,6 +41,64 @@ export interface ChatWorkspace {
   readonly claudeMd: string;
 }
 
+/**
+ * The operator's own pane, and why it is a workspace rather than a note.
+ *
+ * ttyd attaches with `new-session -A`, so the session has to exist before
+ * anybody looks at it. It used to be created holding a printed message saying
+ * no conversation was running — honest, and the wrong thing entirely: the pane
+ * is the operator's window into this container, and a paragraph of text is not
+ * a terminal. What belongs there when no chat is live is a working session.
+ *
+ * It is deliberately NOT the persona. Juan is a person answering a specific
+ * conversation, and a Juan with no conversation is a character with nobody to
+ * talk to — it would answer the operator in voice, then try to reply over
+ * WhatsApp and fail. This is the console: it knows what box it is on.
+ *
+ * **It cannot send a message, and that is structural rather than instructed.**
+ * `tulip-wa` resolves its chat by walking up for a `.turn` file, and this
+ * directory is outside `chats/` — so every send verb refuses here, whatever an
+ * operator or an injected instruction asks for.
+ */
+export const CONSOLE_DIR = join(WORKSPACE_ROOT, 'console');
+
+const CONSOLE_BRIEF = `# The Tulip console
+
+This is a Claude Code session inside the \`tulip-agent\` container, attached to
+no conversation. An operator opened the Terminal page and this is what was
+waiting for them.
+
+You are not answering anybody. The persona is not loaded here on purpose — when
+a chat is being answered it gets its own window and this pane follows it.
+
+**You cannot send WhatsApp messages from here.** \`tulip-wa\` finds the chat it
+belongs to by walking up for a \`.turn\` file; there is none above this
+directory, so every send verb will refuse. That is the design, not a fault, and
+it is not worth working around — a message sent from here would arrive in
+whichever conversation happened to be open.
+
+What this pane is good for: looking at the container. Process state, disk, the
+logs under \`/handoff/out\`, what a session actually wrote. Chat workspaces are
+under \`/workspace/chats/<key>\` — read one if an operator asks you to diagnose
+something, but do not go browsing conversations, and never carry what is in one
+into another.
+`;
+
+/**
+ * Create the console workspace.
+ *
+ * No hooks in its settings: both of them key off `TULIP_CHAT_DIR` to find the
+ * conversation they belong to, and here there is not one. Wiring them anyway
+ * would have the prompt hook writing markers into a relative `.markers` path
+ * on every keystroke an operator made.
+ */
+export function ensureConsoleWorkspace(): string {
+  mkdirSync(join(CONSOLE_DIR, '.claude'), { recursive: true });
+  writeFileSync(join(CONSOLE_DIR, '.claude', 'settings.json'), JSON.stringify({}, null, 2));
+  writeFileSync(join(CONSOLE_DIR, 'CLAUDE.md'), CONSOLE_BRIEF);
+  return CONSOLE_DIR;
+}
+
 export function workspaceFor(chatKey: string): ChatWorkspace {
   const dir = join(WORKSPACE_ROOT, 'chats', chatKey);
   return { chatKey, dir, turnFile: join(dir, '.turn'), claudeMd: join(dir, 'CLAUDE.md') };

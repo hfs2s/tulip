@@ -113,29 +113,36 @@ export async function spawnWindow(
 }
 
 /**
- * Make sure the session exists, with something honest in it.
+ * Make sure the session exists, with a real terminal in it.
  *
  * ttyd attaches with `new-session -A`, which *creates* the session when none is
  * running — so an idle deployment served a bare `bash` prompt with no history,
  * and an operator opening the terminal saw an empty shell rather than the agent.
- * Nothing was wrong; there was simply nothing to attach to yet.
+ * Creating it here first means ttyd always attaches rather than creates.
  *
- * Creating it here first means ttyd always attaches rather than creates, and
- * what it attaches to says so. The window stays for the life of the container
- * and costs one sleeping shell.
+ * What it attaches to used to be a printed paragraph saying no conversation was
+ * running, held open by `sleep infinity`. That was accurate and useless: the
+ * Terminal page is the operator's window into this container, and the answer to
+ * "what should it show when nobody is being answered" is a working session, not
+ * an explanation of why there isn't one.
+ *
+ * So the idle window runs Claude Code, in a workspace attached to no chat. It
+ * is respawned if it exits, because a window whose process ends is closed by
+ * tmux — and the last window closing takes the session with it, putting ttyd
+ * straight back to creating a bare shell.
  */
-export async function ensureSession(): Promise<void> {
+export async function ensureSession(idle: IdleWindow): Promise<void> {
   if (await serverRunning()) return;
-  const note =
-    'No conversation is running.\n\n' +
-    'Claude Code starts the first time somebody messages Juan, and this pane ' +
-    'follows whichever chat is active.\n';
   await tmux([
-    'new-session', '-d', '-s', SESSION, '-n', IDLE_WINDOW, '-x', '200', '-y', '50',
-    // %b, not %s: the note is JSON-quoted so it can travel as one argument, and
-    // %s prints its \n escapes literally — which it did, on screen, to an
-    // operator.
-    'sh', '-c', `printf %b ${JSON.stringify(note)}; exec sleep infinity`,
+    'new-session', '-d', '-s', SESSION, '-n', IDLE_WINDOW, '-c', idle.cwd, '-x', '200', '-y', '50',
+    // `"$@"` rather than an interpolated string: the command travels as argv
+    // through `sh -c NAME ARGS`, so nothing in it is re-parsed by the shell and
+    // there is no quoting to get wrong. The pause is what keeps a session that
+    // cannot start — a rejected key, say — from becoming a spawn loop against
+    // the entitlement endpoint.
+    'sh', '-c',
+    'while :; do "$@"; printf "\n[console] session ended — restarting in 15s\n"; sleep 15; done',
+    'tulip-console', ...idle.command,
   ]);
   await tmux(['set-option', '-g', 'history-limit', '20000']);
   // The wheel scrolls the pane into copy-mode, which is how every other
@@ -146,10 +153,17 @@ export async function ensureSession(): Promise<void> {
   // browser's larger client and tmux filled the remainder with dots — the whole
   // right and bottom of the terminal, which is what an operator actually saw.
   await tmux(['set-option', '-w', '-t', paneTarget(IDLE_WINDOW), 'window-size', 'latest']);
+  await tmux(['set-option', '-g', 'window-size', 'latest']);
 }
 
-/** The placeholder window's name. Never a chat, which are all `c-<key>`. */
-export const IDLE_WINDOW = 'waiting';
+/** What to run in the idle window. Built by the supervisor, which owns the flags. */
+export interface IdleWindow {
+  readonly cwd: string;
+  readonly command: readonly string[];
+}
+
+/** The idle window's name. Never a chat, which are all `c-<key>`. */
+export const IDLE_WINDOW = 'console';
 
 export async function killWindow(window: string): Promise<void> {
   await tmux(['kill-window', '-t', paneTarget(window)]);
