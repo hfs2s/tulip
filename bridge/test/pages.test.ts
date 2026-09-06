@@ -17,7 +17,8 @@ process.env['TULIP_STATE_DIR'] = root;
 process.env['TULIP_IN_DIR'] = join(root, 'in');
 process.env['TULIP_OUT_DIR'] = join(root, 'out');
 
-const { publishPage, listPages, deletePage, isPagesRequest, SLUG } = await import('../src/pages.js');
+const { publishPage, listPages, deletePage, isPagesRequest, SLUG, mayChange } = await import('../src/pages.js');
+const { parseConfig } = await import('../src/config.js');
 const { outPaths } = await import('@tulip/shared');
 
 function build(slug: string, files: Record<string, string> = { 'index.html': '<h1>hi</h1>' }): void {
@@ -182,5 +183,49 @@ describe('announcing a page before building it', () => {
     const shouldSpeak = turn.sends === 0;
     if (shouldSpeak) sent.push('Working on a page for you');
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('who may change a page', () => {
+  /** A whole config, so the defaults under test are the ones production loads. */
+  const config = (pages?: Record<string, unknown>) =>
+    parseConfig(pages === undefined ? {} : { pages });
+
+  const GROUP = '18f0cf81c357d261';
+  const OTHER = 'dd3e343bb1641baf';
+
+  it('lets any chat change an unclaimed page, which is what deployments already do', () => {
+    expect(mayChange(config(), 'members', GROUP)).toBe(true);
+    expect(mayChange(config(), 'members', OTHER)).toBe(true);
+  });
+
+  it('answers only the granted chat once a page is claimed', () => {
+    const c = config({ grants: { members: [GROUP] } });
+    expect(mayChange(c, 'members', GROUP)).toBe(true);
+    expect(mayChange(c, 'members', OTHER)).toBe(false);
+  });
+
+  it('leaves every other page alone when one is claimed', () => {
+    const c = config({ grants: { members: [GROUP] } });
+    expect(mayChange(c, 'doomsday', OTHER)).toBe(true);
+  });
+
+  // An empty grant and an absent one are different answers, and conflating them
+  // would make "frozen" and "unclaimed" the same state.
+  it('freezes a page granted to nobody, without deleting it', () => {
+    const c = config({ grants: { members: [] } });
+    expect(mayChange(c, 'members', GROUP)).toBe(false);
+    expect(mayChange(c, 'members', OTHER)).toBe(false);
+  });
+
+  it('refuses every unclaimed page once pages are closed', () => {
+    const c = config({ open: false, grants: { members: [GROUP] } });
+    expect(mayChange(c, 'members', GROUP)).toBe(true);
+    expect(mayChange(c, 'anything-new', GROUP)).toBe(false);
+  });
+
+  it('rejects a grant that is not a chat key, rather than storing it', () => {
+    expect(() => parseConfig({ pages: { grants: { members: ['not a key'] } } })).toThrow();
+    expect(() => parseConfig({ pages: { grants: { 'Not A Slug': [GROUP] } } })).toThrow();
   });
 });

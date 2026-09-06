@@ -338,6 +338,61 @@ const Agent = z
   .strict()
   .default({});
 
+/** A chat's key: the salted, truncated hash the chat registry files it under. */
+const ChatKey = z.string().regex(/^[0-9a-f]{8,64}$/, 'must be a chat key from the Pages view');
+
+/** A page's slug, matching what `pages.ts` will accept as a directory name. */
+const PageSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{2,47}$/, 'must be a page slug');
+
+/**
+ * Who may change which page.
+ *
+ * The agent is one process serving every conversation, and pages are one flat
+ * namespace, so without this any chat that reaches Juan can rewrite any page —
+ * a members directory twenty-one people are named in is editable by whoever
+ * messaged the number last. Naming the chats that may change a page is the only
+ * way to say otherwise, because the agent cannot be trusted to enforce it on
+ * itself: an instruction in a brief is a suggestion a model can be talked out
+ * of, and every inbound message is untrusted input.
+ *
+ * A *chat*, not a person, and deliberately. We rarely know somebody's `@lid` —
+ * WhatsApp increasingly delivers senders under an id that cannot be guessed
+ * from outside — but a chat key exists as soon as a conversation does, and a
+ * group's membership is already maintained in WhatsApp by the people in it. So
+ * granting a group is granting its members, and adding an editor is adding
+ * somebody to a group rather than editing a config file.
+ *
+ * This lives in the config rather than in state because the config is the
+ * authorisation channel the agent cannot write to — the same reason
+ * `delivery.contacts` lives here. It is set from the panel, which sits behind
+ * Cloudflare Access; nothing arriving over WhatsApp can change it.
+ */
+const Pages = z
+  .object({
+    /**
+     * What happens to a page nobody has claimed.
+     *
+     * `true` — today's behaviour, and the default so that turning this on
+     * changes nothing: a page with no entry in `grants` may be changed by any
+     * chat, and pages can still be created freely.
+     *
+     * `false` — a page with no grant may be changed by nobody, and no new page
+     * may be created at all. Worth reaching for once the pages that matter are
+     * granted, and not before: it stops the agent building a page for somebody
+     * who asks, which is most of what it uses pages for.
+     */
+    open: z.boolean().default(true),
+    /**
+     * Slug to the chat keys allowed to create, publish or illustrate it.
+     *
+     * An empty array is a real value and means nobody — a page can be frozen by
+     * granting it to no one, without deleting it.
+     */
+    grants: z.record(PageSlug, z.array(ChatKey).max(20)).default({}),
+  })
+  .strict()
+  .default({});
+
 export const ConfigSchema = z
   .object({
     audience: Audience,
@@ -347,6 +402,7 @@ export const ConfigSchema = z
     limits: Limits,
     panel: Panel,
     delivery: Delivery,
+    pages: Pages,
   })
   .strict();
 

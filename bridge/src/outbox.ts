@@ -38,7 +38,17 @@ import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
 import { retainOutbound } from './mediaStore.js';
 import { claim } from './spend.js';
-import { imageCount, MAX_IMAGES_PER_PAGE, publishPage, scaffoldPage, usesKit, writePageImage } from './pages.js';
+import {
+  imageCount,
+  MAX_IMAGES_PER_PAGE,
+  mayChange,
+  NO_NEW_PAGES,
+  NOT_YOURS,
+  publishPage,
+  scaffoldPage,
+  usesKit,
+  writePageImage,
+} from './pages.js';
 import { addContact } from './contacts.js';
 import { spokenLanguageFor } from '@tulip/shared';
 import { remember } from './memory.js';
@@ -686,6 +696,11 @@ export class Outbox extends EventEmitter {
       }
 
       case 'pageImage': {
+        if (!mayChange(this.deps.config, action.slug, turn.chatKey)) {
+          log('pages.refused', { chatKey: turn.chatKey, slug: action.slug, verb: 'pageImage' });
+          await this.answer(action.id, 'page', { ok: false, error: NOT_YOURS });
+          break;
+        }
         // Answered rather than spoken: this one the agent waits for, so telling
         // it is both possible and better — it can write the page without the
         // picture instead of stopping. The other three are fire-and-forget.
@@ -724,6 +739,16 @@ export class Outbox extends EventEmitter {
       }
 
       case 'pageNew': {
+        // Checked before the holding message below, not after: refusing second
+        // would promise somebody a page and then take it back.
+        if (!mayChange(this.deps.config, action.slug, turn.chatKey)) {
+          log('pages.refused', { chatKey: turn.chatKey, slug: action.slug, verb: 'pageNew' });
+          await this.answer(action.id, 'page', {
+            ok: false,
+            error: this.deps.config.pages.grants[action.slug] === undefined ? NO_NEW_PAGES : NOT_YOURS,
+          });
+          break;
+        }
         // Say something before the silence starts, and say it from here rather
         // than trusting the brief. The brief already asked for this — under
         // "slow work", which the agent did not connect to building a page — and
@@ -752,6 +777,11 @@ export class Outbox extends EventEmitter {
       }
 
       case 'page': {
+        if (!mayChange(this.deps.config, action.slug, turn.chatKey)) {
+          log('pages.refused', { chatKey: turn.chatKey, slug: action.slug, verb: 'page' });
+          await this.answer(action.id, 'page', { ok: false, error: NOT_YOURS });
+          break;
+        }
         // The address comes back as an ordinary result item, so the answer file
         // keeps one shape. A page has no text to carry — the point is the URL.
         const published = publishPage(action.slug);

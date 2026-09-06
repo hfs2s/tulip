@@ -124,6 +124,38 @@ and puts a hostname in front, behind Cloudflare Access with an emailed sign-in
 code. Two independent gates: Access decides *who*, the token decides *what
 holds a session*.
 
+#### Who may change a page
+
+The agent is one process serving every conversation, and pages are one flat
+namespace, so by default any chat that reaches it can rewrite any page. That is
+usually what you want — somebody asks for a page, they get one — and it is
+exactly wrong for a page that belongs to a particular group of people.
+
+The **Pages** view grants a page to one or more conversations. Open *Who can
+change this*, turn **Anyone** off, and switch on the chats that may. From then
+on the three verbs that write a page (`pageNew`, `page`, `pageImage`) refuse
+anywhere else, and the refusal reaches the agent so it can say so rather than
+failing silently.
+
+Grants name a *chat*, not a person, and deliberately. You will rarely know
+somebody's WhatsApp id — it is increasingly a `@lid` that cannot be guessed —
+but a chat key exists as soon as a conversation does. Granting a group therefore
+grants its members, and adding an editor becomes adding somebody to a group
+rather than editing a config file. A chat has to have messaged once before it
+can be granted, because that is when its key comes into existence.
+
+The **Unclaimed pages** switch at the top is the standing rule for everything
+nobody has claimed. Leave it on while the agent is still making pages for
+people; turn it off once the pages that matter are granted, and no new page can
+be created at all.
+
+One limit worth knowing: this governs the verbs, not the filesystem.
+`/handoff/out` is mounted read-write into the agent's container and `servePage`
+reads from disk, so writing `index.html` is publishing. Until the served tree
+moves to a volume the agent cannot reach, a grant is worth what the agent's
+cooperation is worth — which is a great deal against a confused agent and
+nothing against a determined one.
+
 **Settings is editable, and that is a deliberate reversal.** The panel used to
 write no configuration at all, which removed the class of "the panel was
 reachable and someone opened the allowlist". It was traded for a console whose

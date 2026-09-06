@@ -719,12 +719,61 @@ export function deleteMedia(chatKey: string, name: string, direction: string): {
  * thing an operator needs is to know one was made, and the second is to be able
  * to take it down without a shell.
  */
-export function pagesList(): Json {
+export function pagesList(deps: ApiDeps): Json {
   const host = pagesHost();
+  const grants = deps.config.pages.grants;
   return {
     host,
-    items: listPages().map((p: PageSummary) => ({ ...p, url: host === null ? null : `https://${host}/${p.slug}/` })),
+    open: deps.config.pages.open,
+    items: listPages().map((p: PageSummary) => ({
+      ...p,
+      url: host === null ? null : `https://${host}/${p.slug}/`,
+      // null and [] are different answers, and the panel says so: nobody has
+      // claimed this page, versus somebody claimed it for no one.
+      grantedTo: grants[p.slug] ?? null,
+    })),
+    // The chats a grant can name. Sent with the listing rather than fetched
+    // separately so the picker never has to make an operator type a chat key —
+    // and it is a picker precisely because a `@lid` cannot be typed from memory.
+    chats: deps.chats
+      .all()
+      .filter((c) => !c.blocked)
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+      .map((c) => ({
+        chatKey: c.chatKey,
+        name: c.name,
+        isGroup: c.isGroup,
+        messages: c.messages,
+        lastSeenAt: c.lastSeenAt,
+      })),
   };
+}
+
+/**
+ * Set, or clear, who may change one page.
+ *
+ * Routed through `updateSettings` rather than writing the config itself: that
+ * function is where the config-wipe protection, the atomic write and the
+ * write-then-apply ordering live, and a second writer would be a second copy of
+ * all three. The whole grants map is rebuilt here rather than in the browser so
+ * that saving one page's grant can never drop another's — the settings patch
+ * merges a section shallowly, so a partial map would replace the lot.
+ */
+export function pageGrant(deps: ApiDeps, slug: string, body: unknown): { ok: boolean; message: string } {
+  if (slug.length === 0) return { ok: false, message: 'No page named.' };
+  const raw = (body as Record<string, unknown> | null)?.['chats'];
+  if (raw !== null && !Array.isArray(raw)) {
+    return { ok: false, message: 'Expected a list of chats, or null to unclaim the page.' };
+  }
+
+  const grants: Record<string, string[]> = { ...deps.config.pages.grants };
+  if (raw === null) {
+    // Back to unclaimed, which is not the same as granted to nobody.
+    delete grants[slug];
+  } else {
+    grants[slug] = [...new Set(raw.filter((c): c is string => typeof c === 'string'))];
+  }
+  return updateSettings(deps, { pages: { grants } });
 }
 
 export function pageDelete(slug: string): { ok: boolean; message: string } {
@@ -956,6 +1005,14 @@ const SettingsPatch = z
       outboundPerTurn: z.number().int().min(1).max(100).optional(),
       outboundPerChatPerHour: z.number().int().min(1).max(1000).optional(),
       turnTimeoutMs: z.number().int().min(30_000).max(3_600_000).optional(),
+    }).strict().optional(),
+    pages: z.object({
+      open: z.boolean().optional(),
+      // Loose here on purpose: the merged result is validated by `parseConfig`
+      // below against the real slug and chat-key shapes, and that is the check
+      // that matters. Duplicating those regexes here would be a second place to
+      // keep them right.
+      grants: z.record(z.string().max(64), z.array(z.string().max(64)).max(20)).optional(),
     }).strict().optional(),
     delivery: z.object({
       debounceMs: z.number().int().min(0).max(60_000).optional(),

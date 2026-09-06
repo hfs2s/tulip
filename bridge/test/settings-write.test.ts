@@ -29,7 +29,7 @@ process.env['TULIP_STATE_DIR'] = dir;
 process.env['TULIP_IN_DIR'] = join(dir, 'in');
 process.env['TULIP_OUT_DIR'] = join(dir, 'out');
 
-const { updateSettings } = await import('../src/panel-api.js');
+const { updateSettings, pageGrant } = await import('../src/panel-api.js');
 const { parseConfig } = await import('../src/config.js');
 
 function deps() {
@@ -184,5 +184,65 @@ describe('the voice map is merged, not replaced', () => {
 
     expect(d.config.agent.voices['Filipino']).toBe('Filipino_male_1_v1');
     expect(d.config.delivery.debounceMs).toBe(1500);
+  });
+});
+
+/**
+ * Granting a page, which is an authorisation decision and therefore has to
+ * survive the same failure modes as every other setting: a partial save must
+ * not drop another page's grant, and an invalid one must change nothing.
+ */
+describe('page grants', () => {
+  const GROUP = '18f0cf81c357d261';
+  const MIRA = 'dd3e343bb1641baf';
+
+  it('claims a page for one chat and leaves the rest unclaimed', () => {
+    const d = deps();
+    expect(pageGrant(d, 'members', { chats: [GROUP] })).toEqual({ ok: true, message: 'Saved.' });
+    expect(d.config.pages.grants).toEqual({ members: [GROUP] });
+    expect(d.config.pages.grants['doomsday']).toBeUndefined();
+  });
+
+  // The settings patch merges a section shallowly, so a grants map built in the
+  // browser would replace the whole object. It is rebuilt server-side for this
+  // reason, and this is the test that says so.
+  it('keeps other pages granted when one page is changed', () => {
+    const d = deps();
+    pageGrant(d, 'members', { chats: [GROUP] });
+    pageGrant(d, 'doomsday', { chats: [MIRA] });
+    expect(d.config.pages.grants).toEqual({ members: [GROUP], doomsday: [MIRA] });
+  });
+
+  it('unclaims a page with null, which is not the same as granting it to nobody', () => {
+    const d = deps();
+    pageGrant(d, 'members', { chats: [] });
+    expect(d.config.pages.grants['members']).toEqual([]);
+    pageGrant(d, 'members', { chats: null });
+    expect(d.config.pages.grants['members']).toBeUndefined();
+  });
+
+  it('drops a chat listed twice rather than storing it twice', () => {
+    const d = deps();
+    pageGrant(d, 'members', { chats: [GROUP, GROUP] });
+    expect(d.config.pages.grants['members']).toEqual([GROUP]);
+  });
+
+  it('refuses a grant that is not a chat key, and changes nothing', () => {
+    const d = deps();
+    pageGrant(d, 'members', { chats: [GROUP] });
+    const bad = pageGrant(d, 'members', { chats: ['../../etc/passwd'] });
+    expect(bad.ok).toBe(false);
+    expect(d.config.pages.grants['members']).toEqual([GROUP]);
+  });
+
+  it('refuses when no page is named', () => {
+    expect(pageGrant(deps(), '', { chats: [] }).ok).toBe(false);
+  });
+
+  it('persists the grant to the file, so a restart keeps it', () => {
+    const d = deps();
+    pageGrant(d, 'members', { chats: [GROUP] });
+    const saved = JSON.parse(readFileSync(configFile, 'utf8')) as Record<string, never>;
+    expect(saved['pages']).toEqual({ grants: { members: [GROUP] } });
   });
 });

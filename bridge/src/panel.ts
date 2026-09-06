@@ -78,6 +78,7 @@ import {
   type ApiDeps,
   pagesList,
   pageDelete,
+  pageGrant,
   memoryList,
   memoryForget,
   personaDocs,
@@ -569,11 +570,15 @@ export function startPanel(deps: ApiDeps): Server | null {
           return send(res, headers, result.ok ? 200 : 404, result);
         }
         if (url.pathname === '/api/pages' && req.method === 'GET') {
-          return send(res, headers, 200, pagesList());
+          return send(res, headers, 200, pagesList(deps));
         }
         if (url.pathname === '/api/pages/delete' && req.method === 'POST') {
           const result = pageDelete(url.searchParams.get('slug') ?? '');
           return send(res, headers, result.ok ? 200 : 404, result);
+        }
+        if (url.pathname === '/api/pages/grant' && req.method === 'POST') {
+          const result = pageGrant(deps, url.searchParams.get('slug') ?? '', await readBody(req));
+          return send(res, headers, result.ok ? 200 : 400, result);
         }
         if (url.pathname === '/api/settings' && req.method === 'POST') {
           const result = updateSettings(deps, await readBody(req));

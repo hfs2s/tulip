@@ -2870,26 +2870,139 @@ async function renderPages() {
       'No page hostname is configured, so the agent cannot publish. Pages need their own hostname: served from this one, a page’s JavaScript would share an origin with your session here.'));
     return;
   }
+
+  // The standing rule, above the pages it applies to. It is here rather than in
+  // Settings because it only means anything next to a list of pages.
+  var rule = node('div', 'entry');
+  rule.appendChild(node('span', 'value', 'Unclaimed pages'));
+  rule.appendChild(node('span', 'meta', data.open
+    ? 'can be changed by any conversation, and the agent may create new ones'
+    : 'can be changed by nobody, and the agent may not create new ones'));
+  rule.appendChild(liveSwitch(data.open, function (on, input) {
+    input.disabled = true;
+    void saveSettings({ pages: { open: on } }, function () { input.checked = !on; input.disabled = false; });
+  }));
+  card.appendChild(rule);
+
   if (!data.items.length) { card.appendChild(node('p', 'empty', 'Nothing published yet.')); return; }
 
-  data.items.forEach(function (page) {
-    var row = node('div', 'entry');
-    var link = node('a', 'value', page.slug);
-    link.href = page.url;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    row.appendChild(link);
-    row.appendChild(node('span', 'meta', plural(page.files, 'file') + ' · ' + bytes(page.bytes) + ' · ' + ago(Date.now() - page.at)));
-    var bin = node('button', 'sm danger', 'Delete');
-    bin.type = 'button';
-    bin.addEventListener('click', function () {
-      if (!window.confirm('Delete the page “' + page.slug + '”?\n\nThe link stops working immediately, and nothing keeps a copy.')) return;
-      act('pages/delete', null, '?slug=' + encodeURIComponent(page.slug));
-    });
-    row.appendChild(bin);
-    card.appendChild(row);
-  });
+  data.items.forEach(function (page) { appendPageRow(card, page, data); });
 }
+
+/** How a chat is named in the picker. Groups here often have no name at all. */
+function chatLabel(c) {
+  if (c.name) return c.name;
+  return (c.isGroup ? 'Unnamed group' : 'Unnamed chat') + ' · ' + plural(c.messages, 'message');
+}
+
+/** What the row says about who may change a page, in one line. */
+function grantSummary(page, data) {
+  if (page.grantedTo === null) {
+    return data.open ? 'Any conversation can change this' : 'Nobody can change this — unclaimed';
+  }
+  if (!page.grantedTo.length) return 'Nobody can change this';
+  var names = page.grantedTo.map(function (key) {
+    for (var i = 0; i < data.chats.length; i++) if (data.chats[i].chatKey === key) return chatLabel(data.chats[i]);
+    // A grant can outlive the chat it names — say so rather than showing a hash.
+    return 'a conversation the bridge no longer knows';
+  });
+  return 'Only ' + names.join(', ');
+}
+
+/**
+ * One page, and who may change it.
+ *
+ * The picker lists conversations rather than people because a grant is made to a
+ * chat: we rarely know somebody's WhatsApp id, but a chat key exists as soon as
+ * a conversation does, and a group's membership is maintained in WhatsApp by the
+ * people in it. Granting a group is granting its members, and adding an editor
+ * becomes adding somebody to a group rather than editing a config file.
+ */
+function appendPageRow(card, page, data) {
+  var row = node('div', 'entry');
+  var link = node('a', 'value', page.slug);
+  link.href = page.url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  row.appendChild(link);
+  row.appendChild(node('span', 'meta', plural(page.files, 'file') + ' · ' + bytes(page.bytes) + ' · ' + ago(Date.now() - page.at)));
+
+  var open = false;
+  var editor = node('div', 'card');
+  editor.hidden = true;
+
+  var who = node('button', 'sm', 'Who can change this');
+  who.type = 'button';
+  who.setAttribute('aria-expanded', 'false');
+  who.addEventListener('click', function () {
+    open = !open;
+    editor.hidden = !open;
+    who.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  row.appendChild(who);
+
+  var bin = node('button', 'sm danger', 'Delete');
+  bin.type = 'button';
+  bin.addEventListener('click', function () {
+    if (!window.confirm('Delete the page “' + page.slug + '”?\n\nThe link stops working immediately, and nothing keeps a copy.')) return;
+    act('pages/delete', null, '?slug=' + encodeURIComponent(page.slug));
+  });
+  row.appendChild(bin);
+  card.appendChild(row);
+  card.appendChild(node('p', 'meta', grantSummary(page, data)));
+
+  // Claimed or not, first: until a page is claimed the per-chat switches below
+  // have nothing to say.
+  var claim = node('div', 'entry');
+  claim.appendChild(node('span', 'value', 'Anyone'));
+  claim.appendChild(node('span', 'meta', 'leave this page unclaimed'));
+  claim.appendChild(liveSwitch(page.grantedTo === null, function (on, input) {
+    input.disabled = true;
+    void savePageGrant(page.slug, on ? null : [], function () { input.checked = !on; input.disabled = false; });
+  }));
+  editor.appendChild(claim);
+
+  data.chats.forEach(function (c) {
+    var line = node('div', 'entry');
+    line.appendChild(node('span', 'value', chatLabel(c)));
+    line.appendChild(node('span', 'meta', (c.isGroup ? 'group' : 'direct') + ' · ' + ago(Date.now() - c.lastSeenAt)));
+    var granted = page.grantedTo !== null && page.grantedTo.indexOf(c.chatKey) !== -1;
+    line.appendChild(liveSwitch(granted, function (on, input) {
+      input.disabled = true;
+      var next = (page.grantedTo || []).filter(function (k) { return k !== c.chatKey; });
+      if (on) next.push(c.chatKey);
+      void savePageGrant(page.slug, next, function () { input.checked = !on; input.disabled = false; });
+    }));
+    editor.appendChild(line);
+  });
+
+  card.appendChild(editor);
+}
+
+/**
+ * Save one page's grant.
+ *
+ * `null` unclaims the page; an array claims it for exactly those chats, and an
+ * empty array is a real answer meaning nobody — a way to freeze a page without
+ * deleting it. The whole list is sent because the bridge rebuilds the map from
+ * it; sending a delta would make two writers of the same object.
+ */
+async function savePageGrant(slug, chats, revert) {
+  try {
+    var body = await api('/api/pages/grant?slug=' + encodeURIComponent(slug), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chats: chats })
+    });
+    toast(body.message || 'Saved.');
+  } catch (err) {
+    toast(err.message, true);
+    if (revert) revert();
+    return;
+  }
+  refresh();
+}
+
 
 // The Terminal page is gone. The raw pane carries every open conversation at
 // once, so it is not a destination of its own any more — it opens from the
