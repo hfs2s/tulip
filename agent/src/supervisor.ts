@@ -30,6 +30,7 @@ import { log } from './log.js';
 import { UsageMeter } from './usage.js';
 import { SessionPool, type Session } from './sessions.js';
 import { keysToApply } from './terminal.js';
+import { startTtyd } from './ttyd.js';
 import { setTurn } from './workspace.js';
 
 const POLL_MS = 500;
@@ -338,7 +339,7 @@ async function stopStreaming(): Promise<void> {
  * the agent happens to redraw.
  */
 async function followWindow(window: string): Promise<void> {
-  const { captureAnsi, startPipe, stopPipe } = await import('./tmux.js');
+  const { captureAnsi, selectWindow, startPipe, stopPipe } = await import('./tmux.js');
 
   let repaint = window !== pipedWindow;
   try {
@@ -363,6 +364,12 @@ async function followWindow(window: string): Promise<void> {
     pipedWindow = window;
     pipeAssertedAt = 0;
   }
+
+  // ttyd attaches to the session, so the window it shows is tmux's active one.
+  // Following the busy chat is therefore a `select-window` rather than anything
+  // heavier — and it is cosmetic to the supervisor, which addresses every
+  // target as `session:window`.
+  if (repaint) await selectWindow(window);
 
   // `-o` opens a pipe only if the pane has none, so re-asserting is both free
   // and how the stream comes back if the pane was replaced under us. It is a
@@ -443,6 +450,11 @@ async function main(): Promise<void> {
     thinking: process.env['MAX_THINKING_TOKENS'] === '0' ? 'disabled' : 'default',
   });
   publishStatus();
+
+  // Started once and supervised. Idle it costs nothing, and the socket is
+  // reachable only through the bridge, so there is no window during which a
+  // terminal exists but the gate does not.
+  startTtyd();
 
   setInterval(publishStatus, STATUS_MS).unref();
   publishUsage();

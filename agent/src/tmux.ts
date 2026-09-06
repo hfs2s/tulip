@@ -172,6 +172,23 @@ export async function sendLine(window: string, line: string): Promise<void> {
  * operator at a keyboard, where Enter is a keystroke they make themselves. A
  * terminal that submitted on every character would be unusable.
  */
+/**
+ * Point every attached client at one window.
+ *
+ * ttyd attaches to the *session*, so what a viewer sees is whichever window
+ * tmux considers active. Following the busy chat therefore means selecting a
+ * window rather than restarting anything.
+ *
+ * Safe despite the pane parser: the supervisor addresses every target as
+ * `session:window`, so which window is *active* is cosmetic to it. What would
+ * not be safe is a client resizing the window, which is why `spawnWindow` pins
+ * `window-size manual` — verified on the box: attaching a client of a different
+ * size leaves a pinned window at 200x50.
+ */
+export async function selectWindow(window: string): Promise<void> {
+  await tmux(['select-window', '-t', paneTarget(window)]);
+}
+
 export async function sendText(window: string, text: string): Promise<void> {
   await tmux(['send-keys', '-t', paneTarget(window), '-l', text]);
 }
