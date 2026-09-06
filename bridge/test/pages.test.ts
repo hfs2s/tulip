@@ -193,39 +193,76 @@ describe('who may change a page', () => {
 
   const GROUP = '18f0cf81c357d261';
   const OTHER = 'dd3e343bb1641baf';
+  /** A direct chat, as the registry files one. */
+  const direct = (jid: string, altJid: string | null = null) => ({ jid, altJid, isGroup: false });
+  const group = { jid: '120363000000000000@g.us', altJid: null, isGroup: true };
 
   it('lets any chat change an unclaimed page, which is what deployments already do', () => {
-    expect(mayChange(config(), 'members', GROUP)).toBe(true);
-    expect(mayChange(config(), 'members', OTHER)).toBe(true);
+    expect(mayChange(config(), 'members', GROUP, group)).toBe(true);
+    expect(mayChange(config(), 'members', OTHER, null)).toBe(true);
   });
 
   it('answers only the granted chat once a page is claimed', () => {
     const c = config({ grants: { members: [GROUP] } });
-    expect(mayChange(c, 'members', GROUP)).toBe(true);
-    expect(mayChange(c, 'members', OTHER)).toBe(false);
+    expect(mayChange(c, 'members', GROUP, group)).toBe(true);
+    expect(mayChange(c, 'members', OTHER, null)).toBe(false);
   });
 
   it('leaves every other page alone when one is claimed', () => {
     const c = config({ grants: { members: [GROUP] } });
-    expect(mayChange(c, 'doomsday', OTHER)).toBe(true);
+    expect(mayChange(c, 'doomsday', OTHER, null)).toBe(true);
   });
 
   // An empty grant and an absent one are different answers, and conflating them
   // would make "frozen" and "unclaimed" the same state.
   it('freezes a page granted to nobody, without deleting it', () => {
     const c = config({ grants: { members: [] } });
-    expect(mayChange(c, 'members', GROUP)).toBe(false);
-    expect(mayChange(c, 'members', OTHER)).toBe(false);
+    expect(mayChange(c, 'members', GROUP, group)).toBe(false);
+    expect(mayChange(c, 'members', OTHER, null)).toBe(false);
   });
 
   it('refuses every unclaimed page once pages are closed', () => {
     const c = config({ open: false, grants: { members: [GROUP] } });
-    expect(mayChange(c, 'members', GROUP)).toBe(true);
-    expect(mayChange(c, 'anything-new', GROUP)).toBe(false);
+    expect(mayChange(c, 'members', GROUP, group)).toBe(true);
+    expect(mayChange(c, 'anything-new', GROUP, group)).toBe(false);
   });
 
-  it('rejects a grant that is not a chat key, rather than storing it', () => {
-    expect(() => parseConfig({ pages: { grants: { members: ['not a key'] } } })).toThrow();
+  describe('granted by number, for somebody who has never written', () => {
+    const MIRA = '34666861142';
+    const c = () => config({ grants: { members: [MIRA] } });
+
+    it('matches the phone jid the chat arrived under', () => {
+      expect(mayChange(c(), 'members', 'anykey', direct(MIRA + '@s.whatsapp.net'))).toBe(true);
+    });
+
+    // The case the whole feature turns on: WhatsApp hands most modern clients
+    // over as an opaque linked id, and the number is only known as the alt.
+    it('matches when only the linked id arrived and the number is the alt', () => {
+      expect(mayChange(c(), 'members', 'anykey', direct('221133445566778@lid', MIRA + '@s.whatsapp.net'))).toBe(true);
+    });
+
+    it('matches a linked id granted directly', () => {
+      const byLid = config({ grants: { members: ['221133445566778@lid'] } });
+      expect(mayChange(byLid, 'members', 'anykey', direct('221133445566778@lid'))).toBe(true);
+    });
+
+    it('does not match somebody else', () => {
+      expect(mayChange(c(), 'members', 'anykey', direct('34600000000@s.whatsapp.net'))).toBe(false);
+    });
+
+    // A group's jid belongs to the room, not to a member, so a number must never
+    // authorise everybody in it.
+    it('never authorises a group, whatever its jid looks like', () => {
+      expect(mayChange(c(), 'members', 'anykey', { jid: MIRA + '@g.us', altJid: null, isGroup: true })).toBe(false);
+    });
+
+    it('refuses when the chat is not known at all', () => {
+      expect(mayChange(c(), 'members', 'anykey', null)).toBe(false);
+    });
+  });
+
+  it('rejects a grant that is not an identifier, rather than storing it', () => {
+    expect(() => parseConfig({ pages: { grants: { members: ['../../etc/passwd'] } } })).toThrow();
     expect(() => parseConfig({ pages: { grants: { 'Not A Slug': [GROUP] } } })).toThrow();
   });
 });

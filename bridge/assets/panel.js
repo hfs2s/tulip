@@ -2908,10 +2908,8 @@ function grantSummary(page, data) {
     return data.open ? 'Any conversation can change this' : 'Nobody can change this — unclaimed';
   }
   if (!page.grantedTo.length) return 'Nobody can change this';
-  var names = page.grantedTo.map(function (key) {
-    for (var i = 0; i < data.chats.length; i++) if (data.chats[i].chatKey === key) return chatLabel(data.chats[i]);
-    // A grant can outlive the chat it names — say so rather than showing a hash.
-    return 'a conversation the bridge no longer knows';
+  var names = (page.grantedLabels || []).map(function (g) {
+    return g.pending ? g.label + ' (not seen yet)' : g.label;
   });
   return 'Only ' + names.join(', ');
 }
@@ -2982,6 +2980,45 @@ function appendPageRow(card, page, data) {
     }));
     editor.appendChild(line);
   });
+
+  // Anyone the bridge has not seen. A chat key only exists once somebody has
+  // written, so without this a page cannot be handed to a named person until
+  // they happen to message first — which is backwards when the grant is the
+  // thing meant to invite them.
+  (page.grantedLabels || []).filter(function (g) { return g.pending; }).forEach(function (g) {
+    var line = node('div', 'entry');
+    line.appendChild(node('span', 'value', g.label));
+    line.appendChild(node('span', 'meta', 'not seen yet — applies as soon as they message'));
+    var off = node('button', 'sm', 'Remove');
+    off.type = 'button';
+    off.addEventListener('click', function () {
+      off.disabled = true;
+      var next = page.grantedTo.filter(function (k) { return k !== g.entry; });
+      void savePageGrant(page.slug, next, function () { off.disabled = false; });
+    });
+    line.appendChild(off);
+    editor.appendChild(line);
+  });
+
+  var add = node('div', 'entry');
+  var box = document.createElement('input');
+  box.type = 'text';
+  box.placeholder = 'Phone number or linked id';
+  box.setAttribute('aria-label', 'Grant this page to a phone number or linked id');
+  box.className = 'value';
+  add.appendChild(box);
+  var go = node('button', 'sm', 'Add');
+  go.type = 'button';
+  go.addEventListener('click', function () {
+    var raw = box.value.replace(/[^0-9a-z@]/gi, '');
+    if (!raw) { toast('Enter a phone number in full, without + or spaces.', true); return; }
+    go.disabled = true;
+    var next = (page.grantedTo || []).slice();
+    if (next.indexOf(raw) === -1) next.push(raw);
+    void savePageGrant(page.slug, next, function () { go.disabled = false; });
+  });
+  add.appendChild(go);
+  editor.appendChild(add);
 
   card.appendChild(editor);
 }

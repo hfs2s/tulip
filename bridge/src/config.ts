@@ -338,8 +338,21 @@ const Agent = z
   .strict()
   .default({});
 
-/** A chat's key: the salted, truncated hash the chat registry files it under. */
-const ChatKey = z.string().regex(/^[0-9a-f]{8,64}$/, 'must be a chat key from the Pages view');
+/**
+ * One entry in a page's grant.
+ *
+ * Either a chat key — the salted hash the registry files a conversation under,
+ * offered by the Pages view for every chat the bridge has seen — or a phone
+ * number or linked id, which is how somebody is granted *before* they have ever
+ * written. Nobody has a chat key until they message once, and waiting for that
+ * is not an option when the whole point is to hand a page to a named person.
+ *
+ * The two shapes overlap (a sixteen-digit string is a valid chat key and a valid
+ * number), which costs nothing: both are checked, and matching either is enough.
+ */
+const GrantEntry = z
+  .string()
+  .regex(/^[0-9a-f]{5,64}(@lid)?$/, 'must be a chat key, a phone number, or a linked id');
 
 /** A page's slug, matching what `pages.ts` will accept as a directory name. */
 const PageSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{2,47}$/, 'must be a page slug');
@@ -383,12 +396,12 @@ const Pages = z
      */
     open: z.boolean().default(true),
     /**
-     * Slug to the chat keys allowed to create, publish or illustrate it.
+     * Slug to the conversations allowed to create, publish or illustrate it.
      *
      * An empty array is a real value and means nobody — a page can be frozen by
      * granting it to no one, without deleting it.
      */
-    grants: z.record(PageSlug, z.array(ChatKey).max(20)).default({}),
+    grants: z.record(PageSlug, z.array(GrantEntry).max(20)).default({}),
   })
   .strict()
   .default({});

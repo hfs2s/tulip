@@ -696,7 +696,7 @@ export class Outbox extends EventEmitter {
       }
 
       case 'pageImage': {
-        if (!mayChange(this.deps.config, action.slug, turn.chatKey)) {
+        if (!mayChange(this.deps.config, action.slug, turn.chatKey, this.deps.chats.get(turn.chatKey))) {
           log('pages.refused', { chatKey: turn.chatKey, slug: action.slug, verb: 'pageImage' });
           await this.answer(action.id, 'page', { ok: false, error: NOT_YOURS });
           break;
@@ -741,7 +741,7 @@ export class Outbox extends EventEmitter {
       case 'pageNew': {
         // Checked before the holding message below, not after: refusing second
         // would promise somebody a page and then take it back.
-        if (!mayChange(this.deps.config, action.slug, turn.chatKey)) {
+        if (!mayChange(this.deps.config, action.slug, turn.chatKey, this.deps.chats.get(turn.chatKey))) {
           log('pages.refused', { chatKey: turn.chatKey, slug: action.slug, verb: 'pageNew' });
           await this.answer(action.id, 'page', {
             ok: false,
@@ -777,7 +777,7 @@ export class Outbox extends EventEmitter {
       }
 
       case 'page': {
-        if (!mayChange(this.deps.config, action.slug, turn.chatKey)) {
+        if (!mayChange(this.deps.config, action.slug, turn.chatKey, this.deps.chats.get(turn.chatKey))) {
           log('pages.refused', { chatKey: turn.chatKey, slug: action.slug, verb: 'page' });
           await this.answer(action.id, 'page', { ok: false, error: NOT_YOURS });
           break;
