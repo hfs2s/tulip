@@ -105,6 +105,10 @@ export async function spawnWindow(
   // when no chat is live *it* creates the session and the per-session options
   // above never ran. Without this the pane has no scrollback to reach.
   await tmux(['set-option', '-g', 'history-limit', '20000']);
+  // Server-wide: a window created while a client is already attached does not
+  // otherwise pick this up, and tmux pads the difference with dots down the
+  // right and along the bottom.
+  await tmux(['set-option', '-g', 'window-size', 'latest']);
   return true;
 }
 
