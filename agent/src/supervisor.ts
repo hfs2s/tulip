@@ -460,8 +460,14 @@ async function main(): Promise<void> {
   // above it. That is what stops anything typed here reaching WhatsApp.
   const { ensureSession } = await import('./tmux.js');
   const { ensureConsoleWorkspace } = await import('./workspace.js');
+  const { seedClaudeConfig } = await import('./claude-config.js');
+  const consoleDir = ensureConsoleWorkspace();
+  // Same reason a chat spawn does this: without it Claude Code opens on the
+  // trust-this-folder dialog and waits, which is a blocked prompt rather than
+  // a terminal — the exact failure this window exists to stop.
+  seedClaudeConfig(consoleDir);
   await ensureSession({
-    cwd: ensureConsoleWorkspace(),
+    cwd: consoleDir,
     command: [
       'claude',
       '--dangerously-skip-permissions',
