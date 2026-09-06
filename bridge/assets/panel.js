@@ -1472,10 +1472,20 @@ function renderSessions() {
 
   var pane = node('section', 'sessionpage');
   pane.appendChild(sessionHead());
+
+  // The page called Terminal shows the terminal. It used to show a readable
+  // summary with the pane a button away, and the button was named "Raw
+  // terminal" — so the one thing somebody comes to this page for was the one
+  // thing not on it. The summary is still worth having and still is: it lives
+  // on Chat, over the conversation it describes.
+  //
+  // Read-only here exactly as it is in the modal. Steering stays in the
+  // composer below, which is the whole reason ttyd runs without --writable.
+  pane.appendChild(terminalPanel(null).modal);
+
   var body = node('div', 'session');
   body.id = 'termBody';
-  if (termOpen) body.appendChild(node('p', 'thread-note', 'Reading the session…'));
-  else body.appendChild(neverRanNote());
+  if (!termOpen) body.appendChild(neverRanNote());
   pane.appendChild(body);
   // The same box the Chat page uses, writing into the same place by the same
   // path. This page is where an operator steers Claude Code — the raw pane is
@@ -2818,19 +2828,22 @@ async function renderPages() {
  * than a convenience. Same-origin is what makes them possible at all — the
  * proxy is why this page can reach into the frame and talk to xterm directly.
  */
-function openTerminal() {
-  var opener = document.activeElement;
-  var stage = node('div', 'termstage');
-  stage.setAttribute('role', 'dialog');
-  stage.setAttribute('aria-modal', 'true');
-  stage.setAttribute('aria-label', 'The agent’s terminal');
-
-  // The panel the terminal lives in. The stage is only the scrim behind it, so
-  // a click that lands on the stage is a click outside the dialog and closes.
+/**
+ * The terminal itself — the frame, and the controls that float over it.
+ *
+ * Extracted so the Terminal *page* can be the terminal while the Chat page goes
+ * on opening it over a conversation. Same element either way; only the wrapper
+ * differs, and only the modal has a Close.
+ *
+ * Read-only, and that is ttyd's flag rather than this file's decision: steering
+ * belongs in the composer, one reviewed line at a time, because loose
+ * keystrokes here land in a live conversation with a real person.
+ */
+function terminalPanel(onClose) {
   var modal = node('div', 'termmodal');
   var bar = node('div', 'termbar');
   bar.appendChild(node('h2', null, 'Terminal'));
-  bar.appendChild(node('span', 'termwhere', 'The agent’s live tmux session — anything typed goes to a real person.'));
+  bar.appendChild(node('span', 'termwhere', 'The agent’s live tmux session — read-only. Use the box below to steer it.'));
   modal.appendChild(bar);
 
   var frame = document.createElement('iframe');
@@ -2838,15 +2851,11 @@ function openTerminal() {
   frame.className = 'ptyframe';
   frame.src = '/pty/';
   frame.title = 'The agent’s terminal';
-  // ttyd installs its own "are you sure you want to leave" handler, which turns
-  // closing this into a browser prompt. Same-origin, so it can simply go.
   frame.addEventListener('load', function () {
     try { if (frame.contentWindow) frame.contentWindow.onbeforeunload = null; } catch (err) { /* nothing to do */ }
   });
   modal.appendChild(frame);
-  stage.appendChild(modal);
 
-  /** xterm itself, or null while the frame is still starting. */
   function term() {
     try { return frame.contentWindow && frame.contentWindow.term; } catch (err) { return null; }
   }
@@ -2869,18 +2878,24 @@ function openTerminal() {
     try { await navigator.clipboard.writeText(text); toast('Copied.'); }
     catch (err) { toast('The browser would not let me use the clipboard.', true); }
   });
-
-  control('Paste', '⎘', async function () {
-    var t = term();
-    if (!t || !t.paste) { toast('The terminal is still starting.'); return; }
-    try { t.paste(await navigator.clipboard.readText()); }
-    catch (err) { toast('The browser would not let me read the clipboard.', true); }
-  });
-
   control('Scroll up', '↑', function () { var t = term(); if (t && t.scrollLines) t.scrollLines(-12); });
   control('Scroll down', '↓', function () { var t = term(); if (t && t.scrollLines) t.scrollLines(12); });
-  control('Close', '✕', dismiss).className = 'termclose';
+  if (onClose) control('Close', '✕', onClose).className = 'termclose';
   bar.appendChild(controls);
+
+  return { modal: modal, frame: frame };
+}
+
+function openTerminal() {
+  var opener = document.activeElement;
+  var stage = node('div', 'termstage');
+  stage.setAttribute('role', 'dialog');
+  stage.setAttribute('aria-modal', 'true');
+  stage.setAttribute('aria-label', 'The agent’s terminal');
+
+  var built = terminalPanel(function () { dismiss(); });
+  var frame = built.frame;
+  stage.appendChild(built.modal);
 
   // Clicking the scrim closes; a click anywhere inside the panel does not.
   stage.addEventListener('mousedown', function (ev) {

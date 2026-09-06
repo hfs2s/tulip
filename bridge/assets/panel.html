@@ -945,6 +945,11 @@
         width:min(1180px,96vw);height:min(720px,88vh);
         background:#0d0d0f;border:1px solid var(--line);border-radius:0;
         box-shadow:0 24px 80px rgba(0,0,0,.6)}
+  /* Inline on the Terminal page, where there is no scrim to size against. The
+     modal takes its height from the viewport; here it takes a share of the page
+     and leaves the composer below it visible, because steering happens there. */
+  .sessionpage > .termmodal{width:auto;height:min(560px,58vh);margin-bottom:16px;
+        border-radius:12px;box-shadow:none}
   .termbar{display:flex;align-items:center;gap:12px;flex:none;
         padding:10px 10px 10px 16px;border-bottom:1px solid var(--line);
         background:rgba(255,255,255,.02)}
