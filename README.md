@@ -290,7 +290,7 @@ knowing before you need them:
 | `egress/` | The deny-by-default CONNECT proxy. |
 | `shared/` | Types and schemas describing the handoff contract, used by both halves. |
 | `persona/` | Tulip's identity, assembled into the agent's `CLAUDE.md`. No personal data. |
-| `docs/` | Threat model, architecture notes, operations runbook. |
+| `docs/` | Deployment guide, a deploy prompt for an agent, the threat model, and the operations runbook. |
 | `scripts/` | Docker installation, health checks, the host-side terminal, and the systemd units that bring the stack back after a reboot. |
 
 Inside `bridge/src`, the files that carry an argument rather than a feature:
@@ -309,6 +309,14 @@ Inside `bridge/src`, the files that carry an argument rather than a feature:
 
 ## Quickstart
 
+**The full procedure is [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** — an empty
+machine to an answering number, including pairing, verifying the containment and
+surviving a reboot. [`docs/DEPLOY-PROMPT.md`](docs/DEPLOY-PROMPT.md) is the same
+thing written to be handed to an agent with shell access, which stops and asks
+at each point a human decision is needed.
+
+What follows is the short version.
+
 Requires Docker with the Compose plugin. `scripts/install-docker.sh` sets that up
 on Debian/Raspberry Pi OS.
 
@@ -325,6 +333,14 @@ docker compose up -d
 scripts/verify-containment.sh        # 17 assertions against the running containers
 
 docker compose logs -f bridge        # a QR code appears on first run
+```
+
+Then make it survive a reboot, which `restart: unless-stopped` does not do on
+its own — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#9--make-it-survive-a-reboot):
+
+```bash
+sudo scripts/install-units.sh
+sudo systemctl start tulip-boot tulip-ttyd
 ```
 
 `preflight.sh` checks what the host must provide and the compose file merely

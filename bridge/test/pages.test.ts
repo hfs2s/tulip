@@ -114,14 +114,28 @@ describe('the root of the pages host', () => {
     return { status, location };
   };
 
-  it('redirects away rather than listing what has been published', async () => {
-    // A directory here would make every page discoverable by anyone who finds
-    // the hostname, when the point of a page is that its author hands somebody
-    // the link. The operator's listing is in the panel, behind the token.
+  // A directory here would make every page discoverable by anyone who finds the
+  // hostname, when the point of a page is that its author hands somebody the
+  // link. The operator's listing is in the panel, behind the token. So the root
+  // never lists — the only question is where it sends people instead.
+
+  it('sends them to the configured destination', async () => {
+    process.env['TULIP_PAGES_ROOT_REDIRECT'] = 'https://example.com/';
     build('party-plan');
     const out = await hit();
     expect(out.status).toBe(302);
-    expect(out.location).toBe('https://hfs2s.app/');
+    expect(out.location).toBe('https://example.com/');
+  });
+
+  it('answers 404 when no destination is configured, rather than guessing one', () => {
+    // This was one deployment's own marketing site, hardcoded. Anybody else
+    // running Tulip would have been redirecting their visitors to a stranger.
+    delete process.env['TULIP_PAGES_ROOT_REDIRECT'];
+    build('party-plan');
+    return hit().then((out) => {
+      expect(out.status).toBe(404);
+      expect(out.location).toBe('');
+    });
   });
 });
 

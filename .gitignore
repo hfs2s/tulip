@@ -30,3 +30,7 @@ coverage/
 *.log
 logs/
 .DS_Store
+
+# Workspace-local: one contributor's own subagents and settings, tied to their
+# own MCP servers. Useful to them, meaningless in a clone.
+.claude/

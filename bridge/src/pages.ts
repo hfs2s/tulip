@@ -286,8 +286,20 @@ export function deletePage(slug: string): boolean {
  * resolver uses, and for the same reason: a name that passed a check is not the
  * same object as a name opened a moment later.
  */
-/** Where the pages host sends anyone who arrives at its root. */
-const ROOT_REDIRECT = 'https://hfs2s.app/';
+/**
+ * Where the pages host sends anyone who arrives at its root.
+ *
+ * Configurable, and unset is a valid answer. This was one deployment's own
+ * marketing site, hardcoded — which is fine for that deployment and wrong for
+ * anybody else who runs this, who would be quietly redirecting their visitors
+ * to a stranger's homepage.
+ *
+ * With nothing set, the root answers 404 rather than sending anyone anywhere.
+ * The pages host exists to serve `/<slug>/`; its root is not a landing page.
+ */
+function rootRedirect(): string {
+  return (process.env['TULIP_PAGES_ROOT_REDIRECT'] ?? '').trim();
+}
 
 /**
  * The design kit, served from a reserved prefix.
@@ -348,7 +360,14 @@ export function servePage(res: ServerResponse, url: URL): void {
   // that its author hands somebody the link. The operator's own listing lives
   // in the panel, behind the token, where it belongs.
   if (parts.length === 0) {
-    res.writeHead(302, { ...common, location: ROOT_REDIRECT }).end();
+    // 404 rather than a redirect when nothing is configured. A deployment that
+    // has not named a destination should not be sending its visitors to one.
+    const destination = rootRedirect();
+    if (destination.length === 0) {
+      res.writeHead(404, { ...common, 'content-type': 'text/plain; charset=utf-8' }).end('Not found\n');
+      return;
+    }
+    res.writeHead(302, { ...common, location: destination }).end();
     return;
   }
 

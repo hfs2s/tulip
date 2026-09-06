@@ -127,6 +127,10 @@ services:
       # would carry your cookie. Unset means the agent cannot publish at all,
       # which is the correct behaviour rather than a degraded one.
       TULIP_PAGES_HOST: ${TULIP_PAGES_HOST:-}
+      # Where the pages host sends anyone arriving at its root. Unset answers
+      # 404, which is right: the root is not a landing page, and a deployment
+      # that has not named a destination should not send visitors to one.
+      TULIP_PAGES_ROOT_REDIRECT: ${TULIP_PAGES_ROOT_REDIRECT:-}
       TULIP_ACCESS_TEAM_DOMAIN: ${TULIP_ACCESS_TEAM_DOMAIN:-}
       TULIP_ACCESS_AUD: ${TULIP_ACCESS_AUD:-}
     volumes:
