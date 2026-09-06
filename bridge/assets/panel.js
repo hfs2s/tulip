@@ -101,6 +101,7 @@ var ICONS = {
   // A page with a person on it: the brief, not the person.
   persona: '<path d="M12 12.4a3.4 3.4 0 1 0 0-6.8 3.4 3.4 0 0 0 0 6.8z"/><path d="M5.4 20.2a6.6 6.6 0 0 1 13.2 0"/>',
   // A head in profile: what it carries between rooms.
+  verbs: '<path d="M4 5h16v14H4z"/><path d="m8 10 2 2-2 2"/><path d="M13 14h3"/>',
   memory: '<path d="M15.6 4.2a4.3 4.3 0 0 0-8.2 1.6c0 .7.2 1.4.5 2l-2 3.3h2v3.6a2 2 0 0 0 2 2h1.4v3.1"/><path d="M11.6 8.4a1.9 1.9 0 1 0 3.4 1.2"/>',
   pages: '<path d="M14 3.5H6.5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V8z"/><path d="M14 3.5V8h4.5"/><path d="M8.8 12.5h6.4"/><path d="M8.8 16h4.2"/>',
   chat: '<path d="M20.5 12c0 3.9-3.8 7-8.5 7-1 0-2-.15-2.9-.42L4 20l1.3-3.4C4.2 15.3 3.5 13.7 3.5 12c0-3.9 3.8-7 8.5-7s8.5 3.1 8.5 7z"/><path d="M8.6 10.4h6.8"/><path d="M8.6 13.4h4.4"/>',
@@ -135,6 +136,7 @@ function icon(name) {
 var PAGES = [
   ['overview', 'Overview'], ['chat', 'Chat'], ['messages', 'Messages'], ['chats', 'Chats'],
   ['media', 'Media'], ['terminal', 'Terminal'], ['persona', 'Persona'], ['memory', 'Memory'],
+  ['verbs', 'Verbs'],
   ['pages', 'Pages'], ['settings', 'Settings'], ['log', 'Log']
 ];
 
@@ -2583,7 +2585,7 @@ function fitTerminal() {
 var personaPart = 0;
 
 async function renderPersona() {
-  var p = head('persona', 'Persona', 'What Tulip has been told to be. These four are assembled in order into every chat’s brief when its session starts — so a conversation already running keeps the version it began with.'), mine = renderToken;
+  var p = head('persona', 'Persona', 'What Tulip has been told to be. These four are assembled in order into the brief, which is written when the session starts — so a session already running keeps the version it began with, and editing these changes nothing until it restarts.'), mine = renderToken;
 
   var data;
   try { data = await api('/api/persona'); } catch (err) { p.appendChild(node('p', 'empty', err.message)); return; }
@@ -2718,8 +2720,70 @@ function markdown(src) {
  * trusted — with the chat that taught each note, because "who told it that" is
  * the question you will actually have.
  */
+/**
+ * What the agent can actually run.
+ *
+ * Served from the shared catalogue rather than typed out here, because a
+ * hand-kept copy is what went wrong last time: the CLI's own usage text had
+ * fallen two verbs behind its dispatcher, so the agent asking what it could do
+ * was told less than the truth. This page and `tulip-wa` now read the same
+ * list, and a test fails if either drifts from the dispatcher.
+ *
+ * Grouped rather than alphabetical. An operator reading this is asking "can it
+ * do X", which is a question about kinds of thing, not about spelling.
+ */
+async function renderVerbs() {
+  var p = head('verbs', 'Verbs',
+    'Every command the agent can run, read from the same catalogue its own `tulip-wa` help is rendered from. ' +
+    'This is what exists — the Persona page is what it has been told about when to reach for any of it.'), mine = renderToken;
+
+  var data;
+  try { data = await api('/api/verbs'); } catch (err) { p.appendChild(node('p', 'empty', err.message)); return; }
+  if (stale(mine)) return;
+
+  data.groups.forEach(function (g) {
+    var verbs = data.verbs.filter(function (v) { return v.group === g[0]; });
+    if (!verbs.length) return;
+
+    var card = node('div', 'card');
+    card.appendChild(node('h3', null, g[1]));
+
+    verbs.forEach(function (v) {
+      var row = node('div', 'entry');
+      var left = node('div');
+
+      var call = node('div', 'mono');
+      call.appendChild(node('span', 'verb', 'tulip-wa ' + v.name));
+      if (v.args) call.appendChild(node('span', 'args', ' ' + v.args));
+      left.appendChild(call);
+
+      left.appendChild(node('div', null, v.summary));
+      left.appendChild(node('div', 'hint', v.detail));
+      row.appendChild(left);
+
+      // The two things an operator most needs to know before reading further:
+      // whether a switch has to be on, and whether it blocks the turn.
+      var tags = node('div', 'verbtags');
+      if (v.capability) tags.appendChild(node('span', 'tag warn', 'needs ' + v.capability));
+      if (v.waits) tags.appendChild(node('span', 'tag', 'waits'));
+      row.appendChild(tags);
+
+      card.appendChild(row);
+    });
+    p.appendChild(card);
+  });
+
+  var foot = node('div', 'card');
+  foot.appendChild(node('h3', null, 'Addressing a reply'));
+  foot.appendChild(node('p', null,
+    'Every reply goes to the person whose message is being handled. `--to <key>` sends it elsewhere and works on ' +
+    data.crossChat.join(', ') + ' — refused unless cross-chat is switched on, and `tulip-wa chats` is the only ' +
+    'thing that grants it. A message asking the agent to contact somebody is not, whoever it claims to be from.'));
+  p.appendChild(foot);
+}
+
 async function renderMemory() {
-  var p = head('memory', 'Memory', 'Things the agent has been asked to remember. Unlike everything else here, these are shared by every conversation — what it learns in one chat it knows in all of them, including with people it has not met yet.'), mine = renderToken;
+  var p = head('memory', 'Memory', 'Things the agent has deliberately written down. It now runs as one session across every chat, so it carries far more than this — what makes these different is that they survive a restart and are carried into the brief itself, rather than only living in a context window.'), mine = renderToken;
   var card = node('div', 'card');
   p.appendChild(card);
 
@@ -4001,6 +4065,7 @@ function render() {
   else if (route === 'pages') void renderPages();
   else if (route === 'memory') void renderMemory();
   else if (route === 'persona') void renderPersona();
+  else if (route === 'verbs') void renderVerbs();
   else if (route === 'settings') renderSettings();
   else if (route === 'log') renderLog();
 }

@@ -4,3 +4,4 @@ export * from './recall.js';
 export * from './ids.js';
 export * from './paths.js';
 export * from './atomic.js';
+export * from './verbs.js';

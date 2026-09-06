@@ -204,6 +204,18 @@
   .when{font-size:12.5px;color:var(--faint)}
   .tag{font-size:11.5px;color:var(--faint)}
   .tag.out{color:var(--accent)} .tag.refused{color:var(--warn)} .tag.in{color:var(--ink)}
+  .tag.warn{color:var(--warn)}
+
+  /* ── Verbs ──────────────────────────────────────────────────────────────────
+     A reference table, so the command itself is the thing the eye lands on:
+     monospaced and full-strength, with its arguments beside it in the faint
+     colour because they are a shape rather than something to type verbatim. */
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;margin-bottom:3px}
+  .verb{color:var(--ink)}
+  .args{color:var(--faint)}
+  /* The tags sit at the end of the row rather than under the text, so a scan
+     down the right-hand edge answers "what needs switching on" on its own. */
+  .verbtags{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex:none;padding-left:12px}
   .said{white-space:pre-wrap;overflow-wrap:anywhere}
   .why{font-size:12.5px;color:var(--warn);margin-top:3px}
 
@@ -1210,6 +1222,7 @@
       <section class="page" id="p-terminal"></section>
       <section class="page" id="p-persona"></section>
       <section class="page" id="p-memory"></section>
+      <section class="page" id="p-verbs"></section>
       <section class="page" id="p-pages"></section>
       <section class="page" id="p-settings"></section>
       <section class="page" id="p-log"></section>

@@ -49,7 +49,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeFileAtomic } from '@tulip/shared';
+import { CROSS_CHAT_VERBS, VERBS, VERB_GROUPS, writeFileAtomic } from '@tulip/shared';
 import { feed } from './feed.js';
 import { accessConfig, verifiedEmail } from './access.js';
 import { PTY_PREFIX, proxyRequest, proxyUpgrade, ptyAvailable } from './pty.js';
@@ -555,6 +555,11 @@ export function startPanel(deps: ApiDeps): Server | null {
         // silently returns the current values instead of applying the change.
         if (url.pathname === '/api/persona' && req.method === 'GET') {
           return send(res, headers, 200, personaDocs());
+        }
+        // Static, and served from the shared catalogue the agent's own CLI
+        // renders its help from. One list, three readers — see shared/src/verbs.ts.
+        if (url.pathname === '/api/verbs' && req.method === 'GET') {
+          return send(res, headers, 200, { verbs: VERBS, groups: VERB_GROUPS, crossChat: CROSS_CHAT_VERBS });
         }
         if (url.pathname === '/api/memory' && req.method === 'GET') {
           return send(res, headers, 200, memoryList());
