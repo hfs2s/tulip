@@ -149,12 +149,10 @@ function buildNav() {
     b.appendChild(icon(p[0]));
     b.appendChild(node('span', null, p[1]));
     if (p[0] === 'chats') { var c = node('span', 'count', '0'); c.id = 'navChats'; b.appendChild(c); }
-    if (p[0] === 'terminal') {
-      var t = node('span', 'count', '');
-      t.id = 'navTermCountRow';
-      t.hidden = true;
-      b.appendChild(t);
-    }
+    // Terminal used to carry a count of the conversations the pane held. It was
+    // removed with the session pool: one shared session answers every chat, so
+    // the number was 1 whenever the agent was up and 0 when it was not — which
+    // the dot beside the persona's name already says, and says better.
     // Chat keeps whichever conversation is open, so coming back from another
     // page returns to it rather than to an empty picker.
     b.addEventListener('click', function () { go(p[0] === 'chat' && chatOpen ? 'chat/' + chatOpen : p[0]); });
@@ -271,15 +269,6 @@ function verdict(s) {
   agentStatus(s);
   var badge = el('navChats');
   if (badge) badge.textContent = String(s.chats.length);
-  // How many conversations the pane is carrying, on the row that opens it.
-  // Hidden rather than "0": an empty pane is a fine thing to open, and a zero
-  // badge reads as a warning about nothing.
-  var open = (s.agent && s.agent.openChats) ? s.agent.openChats.length : 0;
-  var count = el('navTermCountRow');
-  if (count) {
-    count.textContent = String(open);
-    count.hidden = open === 0;
-  }
 }
 
 /**
@@ -716,11 +705,18 @@ function paintConvoList(target) {
   list.scrollTop = was;
 }
 
-/** Whether the agent has a tmux window open for this chat. */
-function chatIsLive(key) {
-  return !!(state && state.agent && state.agent.openChats
-    && state.agent.openChats.indexOf(key) >= 0);
-}
+/**
+ * Removed: whether the agent had a tmux window open for THIS chat.
+ *
+ * It tested `openChats.indexOf(key)`, and one shared session answers every
+ * conversation now — so the only key ever reported is the shared one and this
+ * returned false for every real chat. Each row in the list was claiming "no
+ * session open" while that chat was being answered.
+ *
+ * There is no honest per-chat replacement, because a session is no longer a
+ * per-chat thing. What remains true per chat is whether it is the one being
+ * answered right now, which the queue already says.
+ */
 
 function convoRow(c) {
   var b = node('button', 'convo-row');
@@ -728,9 +724,8 @@ function convoRow(c) {
   b.setAttribute('aria-current', c.chatKey === chatOpen ? 'true' : 'false');
 
   var busy = !!(state && state.queue && state.queue.inFlight === c.chatKey);
-  var live = chatIsLive(c.chatKey);
-  var dot = node('span', 'dot' + (busy ? ' busy' : live ? ' live' : ''));
-  var says = busy ? 'replying now' : live ? 'session open' : 'no session open';
+  var dot = node('span', 'dot' + (busy ? ' busy' : ''));
+  var says = busy ? 'replying now' : 'not being answered right now';
   dot.setAttribute('role', 'img');
   dot.setAttribute('aria-label', says);
   dot.setAttribute('title', says);
@@ -1464,11 +1459,11 @@ function renderSessions() {
   stopSessionPoll();
   termView = null;
 
-  // Juan's Claude Code, not a directory of anybody's. There is one agent; it
-  // opens a window per conversation because that is how the chats are kept from
-  // seeing each other, but that is an implementation of isolation rather than
-  // something to browse. So this shows the session that is running — the one
-  // being answered now, or the last one used — and never asks which.
+  // The agent's Claude Code, not a directory of anybody's. There is one agent
+  // and, since the session pool was removed, one session answering every
+  // conversation — so there is nothing to pick between. This shows what is
+  // running, headed by the chat being answered now or the one answered last,
+  // and never asks which.
   termOpen = currentSession();
   sessionKeys = liveSessions().map(function (c) { return c.chatKey; }).join(',');
 
@@ -1500,10 +1495,12 @@ function renderSessions() {
  * Null means genuinely nothing: no chat has ever run a session here.
  */
 function currentSession() {
+  // The chat being answered, if there is one. `liveSessions()` used to answer
+  // this too, and must not any more: the only key it reports is the shared
+  // session's own, which is not a conversation and resolves to nothing
+  // downstream — an empty header over somebody's live transcript.
   var busy = state && state.queue && state.queue.inFlight;
-  var live = liveSessions();
-  for (var i = 0; i < live.length; i++) if (live[i].chatKey === busy) return busy;
-  if (live.length) return live[0].chatKey;
+  if (busy) return busy;
 
   // Nothing open. The most recently active conversation is the one whose
   // session ended last, and its transcript is still on disk.
