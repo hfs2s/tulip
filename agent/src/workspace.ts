@@ -77,6 +77,12 @@ export function ensureWorkspace(chatKey: string): ChatWorkspace {
 
   writeFileSync(join(workspace.dir, '.claude', 'settings.json'), JSON.stringify(settings(), null, 2));
 
+  // The brief below carries the memory as it stands now, so the prompt hook
+  // starts from here and sends only what arrives later. Written together with
+  // the brief, deliberately: two writes that could disagree would either repeat
+  // the whole memory into the first turn or skip a note entirely.
+  markMemorySeen(workspace);
+
   const persona = composePersona();
   writeFileSync(
     workspace.claudeMd,
@@ -85,6 +91,25 @@ export function ensureWorkspace(chatKey: string): ChatWorkspace {
   );
 
   return workspace;
+}
+
+/**
+ * Record how much of the memory the brief already contains.
+ *
+ * The hook tops up from this point on every turn. Absent, it would resend the
+ * entire store into the first turn of every session — the brief's copy and the
+ * hook's copy, one after the other.
+ */
+function markMemorySeen(workspace: ChatWorkspace): void {
+  try {
+    const raw = readFileSync(inPaths.memory, 'utf8');
+    const notes = (JSON.parse(raw) as { notes?: Array<{ id?: unknown }> }).notes ?? [];
+    const tip = notes[notes.length - 1]?.id;
+    mkdirSync(join(workspace.dir, '.markers'), { recursive: true });
+    writeFileSync(join(workspace.dir, '.markers', 'memory-seen'), typeof tip === 'string' ? tip : '');
+  } catch {
+    /* nothing remembered yet, or unreadable — the hook then sends what it finds */
+  }
 }
 
 /**
