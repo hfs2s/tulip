@@ -12,7 +12,7 @@
  * once: a stale marker pins delivery shut forever, and a missing one lets the
  * supervisor type into a session that is still thinking.
  */
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MemoryFile, inPaths } from '@tulip/shared';
 import { catchUpText, notesSince } from '../memory-delta.js';
@@ -71,8 +71,71 @@ try {
   /* never block a turn on bookkeeping */
 }
 
+/**
+ * Notice when the last turn wrote to the *wrong* memory.
+ *
+ * Claude Code has a memory tool of its own, and its store is per project —
+ * which here means per chat. So a note written with it is invisible in every
+ * other conversation, while feeling exactly like remembering something. That is
+ * a trap rather than a mistake: the built-in tool is frictionless and always
+ * there, `tulip-wa remember` has to be chosen, and nothing about the first
+ * announces that it does not cross.
+ *
+ * Telling it so in the brief is not enough — it has been told, and it reached
+ * for the native tool anyway. So the reminder arrives where it is actionable:
+ * the turn immediately after, naming what it wrote, while it still knows why.
+ */
+function nudgeIfPrivateMemoryWritten(): void {
+  const chatDir = process.env['TULIP_CHAT_DIR'] ?? '';
+  const config = process.env['CLAUDE_CONFIG_DIR'] ?? '';
+  if (chatDir.length === 0 || config.length === 0) return;
+
+  // Claude Code names a project directory after its working directory, with the
+  // separators replaced. Derived rather than configured, so it follows the
+  // workspace wherever that moves.
+  const slug = chatDir.replace(/\//g, '-');
+  const dir = join(config, 'projects', slug, 'memory');
+
+  let latest = 0;
+  try {
+    for (const entry of readdirSync(dir)) {
+      const at = statSync(join(dir, entry)).mtimeMs;
+      if (at > latest) latest = at;
+    }
+  } catch {
+    return; // the tool has never been used here
+  }
+  if (latest === 0) return;
+
+  const stampFile = join(markers, 'private-memory-seen');
+  let seen = 0;
+  try {
+    seen = Number(readFileSync(stampFile, 'utf8').trim()) || 0;
+  } catch {
+    /* first time */
+  }
+  writeFileSync(stampFile, String(latest));
+  // Only when it changed, so this is silent on every turn that did not write.
+  if (seen === 0 || latest <= seen) return;
+
+  process.stdout.write(
+    `${JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext:
+          'Last turn you wrote to your own memory tool. That store is per conversation — ' +
+          'nothing there is visible in any other chat, however it felt at the time. If any ' +
+          'of it should be known everywhere, record it again with `tulip-wa remember "…"`, ' +
+          'which is the only memory that crosses. If it was specific to this conversation, ' +
+          'leave it where it is and carry on.',
+      },
+    })}\n`,
+  );
+}
+
 try {
   catchUp();
+  nudgeIfPrivateMemoryWritten();
 } catch {
   /* the memory is a courtesy; a turn must happen regardless */
 }
