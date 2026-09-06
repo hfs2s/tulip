@@ -12,6 +12,28 @@
 
 set -uo pipefail
 
+# Talking to the Docker daemon needs either membership of the `docker` group or
+# root, and a Raspberry Pi set up by following the official install notes often
+# has neither for the login account. That is not an exotic configuration, and
+# what it produced here was actively misleading: every `docker` call failed with
+# "permission denied", the container check below read that as absence, and the
+# script reported the agent was not running while it was answering people.
+#
+# So resolve the command once, and keep the two failures distinct — "I cannot
+# reach Docker" is a different problem from "the container is not there", and
+# only one of them means the threat model is unverified.
+DOCKER="docker"
+if ! docker info >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1; then
+    DOCKER="sudo docker"
+  fi
+fi
+# No hard exit here, unlike verify-containment.sh: preflight is what an operator
+# runs BEFORE anything works, and it already reports a missing Docker further
+# down in the same format as everything else it checks. Failing early here would
+# replace that with a bare error and hide every other problem on the host.
+
+
 fail=0
 warn=0
 
@@ -31,13 +53,13 @@ echo
 
 # ── Docker ────────────────────────────────────────────────────────────────────
 if command -v docker >/dev/null 2>&1; then
-  ok "docker $(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  ok "docker $($DOCKER --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 else
   bad "docker is not installed — run scripts/install-docker.sh"
 fi
 
-if docker compose version >/dev/null 2>&1; then
-  ok "compose plugin $(docker compose version --short 2>/dev/null)"
+if $DOCKER compose version >/dev/null 2>&1; then
+  ok "compose plugin $($DOCKER compose version --short 2>/dev/null)"
 else
   bad "the docker compose plugin is missing; Tulip's containment is expressed in docker-compose.yml"
 fi

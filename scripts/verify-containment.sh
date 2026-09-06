@@ -13,6 +13,29 @@
 
 set -uo pipefail
 
+# Talking to the Docker daemon needs either membership of the `docker` group or
+# root, and a Raspberry Pi set up by following the official install notes often
+# has neither for the login account. That is not an exotic configuration, and
+# what it produced here was actively misleading: every `docker` call failed with
+# "permission denied", the container check below read that as absence, and the
+# script reported the agent was not running while it was answering people.
+#
+# So resolve the command once, and keep the two failures distinct — "I cannot
+# reach Docker" is a different problem from "the container is not there", and
+# only one of them means the threat model is unverified.
+DOCKER="docker"
+if ! docker info >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1; then
+    DOCKER="sudo docker"
+  fi
+fi
+if ! $DOCKER info >/dev/null 2>&1; then
+  echo "$(basename "$0"): cannot reach the Docker daemon (tried 'docker' and 'sudo docker')." >&2
+  echo "  Containment is UNVERIFIED. That is not a pass — fix access and run it again." >&2
+  exit 2
+fi
+
+
 AGENT=${TULIP_AGENT_CONTAINER:-tulip-agent}
 BRIDGE=${TULIP_BRIDGE_CONTAINER:-tulip-bridge}
 
@@ -27,7 +50,7 @@ check() {
   local description=$1 expectation=$2
   shift 2
   local output status
-  output=$(docker exec "$AGENT" sh -lc "$*" 2>&1)
+  output=$($DOCKER exec "$AGENT" sh -lc "$*" 2>&1)
   status=$?
 
   local ok=1
@@ -45,7 +68,7 @@ check() {
   fi
 }
 
-if ! docker inspect "$AGENT" >/dev/null 2>&1; then
+if ! $DOCKER inspect "$AGENT" >/dev/null 2>&1; then
   echo "containment check: $AGENT is not running. Start it with 'docker compose up -d'." >&2
   exit 2
 fi
@@ -112,13 +135,13 @@ check "CAP_SYS_ADMIN is not held" fails \
 
 echo
 echo "Bridge — hardened too, being the side that holds the credentials"
-if docker inspect "$BRIDGE" >/dev/null 2>&1; then
-  if [ "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$BRIDGE")" = true ]; then
+if $DOCKER inspect "$BRIDGE" >/dev/null 2>&1; then
+  if [ "$($DOCKER inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$BRIDGE")" = true ]; then
     printf '  %s bridge root filesystem is read-only\n' "$(green '✓')"; pass=$((pass + 1))
   else
     printf '  %s bridge root filesystem is writable\n' "$(red '✗')"; fail=$((fail + 1))
   fi
-  if docker inspect -f '{{.HostConfig.CapDrop}}' "$BRIDGE" | grep -qi all; then
+  if $DOCKER inspect -f '{{.HostConfig.CapDrop}}' "$BRIDGE" | grep -qi all; then
     printf '  %s bridge drops all capabilities\n' "$(green '✓')"; pass=$((pass + 1))
   else
     printf '  %s bridge does not drop all capabilities\n' "$(red '✗')"; fail=$((fail + 1))
