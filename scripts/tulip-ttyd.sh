@@ -61,6 +61,23 @@ rm -f "$SOCKET"
 #
 # `mouse on` is set by the agent, so the wheel scrolls the pane into copy-mode
 # the way it does everywhere else — that only works because input reaches tmux.
+# ONE CLIENT AT A TIME (`-D`), which is load-bearing rather than tidy. ttyd runs
+# one `docker exec` per websocket, and a closed browser tab does not reliably
+# take the in-container tmux client with it — dockerd leaves the exec'd process
+# running, so the client stays attached with nothing behind it. Measured after
+# three page loads: three tmux clients, only two with a live `docker exec` on
+# the host, one a pure orphan.
+#
+# That matters because the window is `window-size latest`. Two attached clients
+# of different sizes mean the window fits the newest and tmux pads the
+# difference for everyone else — the field of dots down the right and along the
+# bottom this pane has already been fixed for once. The orphans brought it back
+# on the second visit to the page.
+#
+# `-D` detaches whatever else is attached, so the size is always the size of the
+# only viewer. The cost is that a second operator opening the terminal takes it
+# from the first, which is the right trade for one shared console and is how
+# `attach -d` is normally used.
 exec ttyd \
   --interface "$SOCKET" \
   --ping-interval 30 \
@@ -68,4 +85,4 @@ exec ttyd \
   --client-option 'theme={"background":"#0d0d0f","foreground":"#fafafa","cursor":"#21d2ed"}' \
   --writable \
   --client-option 'enableClipboard=true' \
-  docker exec -it "$CONTAINER" tmux new-session -A -s "$SESSION"
+  docker exec -it "$CONTAINER" tmux new-session -A -D -s "$SESSION"
