@@ -483,7 +483,7 @@ async function renderMessages() {
 }
 
 function renderChats(s) {
-  var p = head('chats', 'Chats', 'Each conversation runs as its own Claude Code session. They cannot see one another.');
+  var p = head('chats', 'Chats', 'One Claude Code session answers all of these, so it carries every conversation at once. What keeps one out of another is the persona, not the architecture — see Persona, and docs/THREAT-MODEL.md §T4.');
   var controls = node('div', 'controls');
   var search = node('input', 'search');
   search.type = 'search';
@@ -802,8 +802,8 @@ function emptyPane() {
   box.appendChild(icon('chat'));
   box.appendChild(node('h3', null, 'Pick a conversation'));
   box.appendChild(node('p', null,
-    'Each one runs as its own Claude Code session and they cannot see one another. '
-    + 'Choose somebody on the left to read what Juan has been saying, and to type into it.'));
+    'One session answers all of them, so it remembers everyone across every chat. '
+    + 'Choose somebody on the left to read what has been said, and to type into the conversation being answered.'));
   return box;
 }
 
@@ -2712,10 +2712,11 @@ function markdown(src) {
 /**
  * What the agent remembers, and where each note came from.
  *
- * The one page that shows state crossing conversations. Everything else in
- * Tulip is sealed per chat; this is the exception, so it is listed rather than
- * trusted — with the chat that taught each note, because "who told it that" is
- * the question you will actually have.
+ * This was the one page showing state that crossed conversations, back when
+ * everything else was sealed per chat. It is no longer the exception — one
+ * session now carries every conversation — but it is still the only crossing
+ * that is *written down*, which is why each note is listed with the chat that
+ * taught it: "who told it that" is the question you will actually have.
  */
 /**
  * What the agent can actually run.
@@ -3766,7 +3767,7 @@ async function renderSettings() {
   primer.appendChild(node('h2', null, 'Before you change anything'));
   primer.appendChild(node('p', 'sub', 'Three words used throughout this page.'));
   [['A turn', 'One reply the agent works on, from reading a message to finishing its answer. It is the expensive unit: each turn is a request to Claude that somebody pays for. Several messages that arrive together are answered in a single turn.'],
-   ['A chat', 'One conversation, with one person or one group. Each chat runs as its own separate session, and they cannot see each other.'],
+   ['A chat', 'One conversation, with one person or one group. A single Claude Code session answers all of them, so it carries every chat at once — what keeps one out of another is the persona rather than the architecture.'],
    ['Refused silently', 'When Tulip turns a message away it sends nothing back — no reply, no error. Telling an unknown number that this line is live is itself information, so refusals are invisible from the outside. If somebody says they messaged and got nothing, the Log page is where you find out why.']
   ].forEach(function (row) {
     var d = node('dl', 'define');
@@ -3913,7 +3914,7 @@ async function renderSettings() {
     }));
 
   field(reach, 'Read other chats',
-    'Lets you ask Tulip to read a conversation back to you — the one thing that reaches inward rather than outward. Normally there is nothing to read: each chat is a separate session, so the isolation is a property rather than a rule. This makes it a rule. It answers only you, only in a direct message, and never in a group, where the reply would be somebody’s private messages read out to a room. Every use is written to the feed. Leave it off unless you are actively using it.',
+    'Lets you ask Tulip to read a conversation back to you, on demand. This used to be the one exception to chat isolation, when a chat it had not been handed was genuinely unreadable. That is no longer the shape of things — one session carries every conversation, so what this switch adds is the ability to fetch a transcript deliberately rather than the ability to know anything new. It answers only you, only in a direct message, and never in a group, where the reply would be somebody’s private messages read out to a room. Every use is written to the feed. Leave it off unless you are actively using it.',
     liveSwitch(s.agent && s.agent.recall, function (on, input) {
       saveSettings({ agent: { recall: on } }, function () { input.checked = !on; });
     }));
