@@ -228,6 +228,16 @@ export const CurrentTurn = z
         images: z.boolean().default(true),
         search: z.boolean().default(true),
         crossChat: z.boolean().default(true),
+        /**
+         * Defaults to *false*, unlike everything above it.
+         *
+         * The others default true so an older `current.json` still lets the
+         * agent try and be refused by the bridge, which reads the real config.
+         * That direction is safe for a capability that sends something. It is
+         * not safe for one that reads somebody else's conversation, so this one
+         * defaults closed and an older file means "no".
+         */
+        recall: z.boolean().default(false),
       })
       .strict()
       .default({}),
@@ -304,6 +314,30 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       turnId: TurnId,
       /** List the chats the agent may message. Also gated on `agent.crossChat`. */
       kind: z.literal('chats'),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
+       * Read another conversation's recent messages.
+       *
+       * The one action that fetches inward, and the only one that can put
+       * somebody else's words in front of the person being answered. Every
+       * other capability here carries the current chat outward.
+       *
+       * Refused unless the operator has switched recall on, the turn carries
+       * operator authority, and the asking chat is not a group — see
+       * `canRecall` in shared/src/recall.ts, which is where the reasoning
+       * lives. The check is on the bridge, not here: this schema describes what
+       * may be *asked*, and the agent is hostile input.
+       */
+      kind: z.literal('history'),
+      /** Whose conversation to read. A key from `tulip-wa chats`, never a number. */
+      chatKey: ChatKey,
+      /** How far back. Capped low: this is for recall, not for bulk reading. */
+      limit: z.number().int().min(1).max(50).default(20),
     })
     .strict(),
   z
@@ -571,7 +605,7 @@ export const MemoryFile = z.object({ notes: z.array(MemoryNote).max(200) }).stri
 export const ToolResult = z
   .object({
     actionId: z.string().uuid(),
-    kind: z.enum(['search', 'fetch', 'chats', 'page', 'contact', 'sent']),
+    kind: z.enum(['search', 'fetch', 'chats', 'page', 'contact', 'sent', 'history']),
     at: z.string().datetime(),
     ok: z.boolean(),
     /** Present when ok is false. Short, and safe to show a person. */

@@ -240,6 +240,18 @@ const Agent = z
     crossChat: z.boolean().default(false),
 
     /**
+     * May the agent read another conversation when an operator asks?
+     *
+     * Off by default and deliberately separate from `crossChat`, which governs
+     * the opposite direction. That one lets Tulip carry this conversation
+     * outward to somebody else; this one lets it fetch somebody else's inward,
+     * and the two are not the same permission wearing different names. An
+     * operator who wants Tulip to introduce itself to a new contact should not
+     * thereby let it read every chat it has.
+     */
+    recall: z.boolean().default(false),
+
+    /**
      * People the agent may approach who have not written to it first.
      *
      * Without this, `crossChat` is close to decorative. A chat key only exists

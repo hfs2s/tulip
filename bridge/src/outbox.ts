@@ -30,7 +30,7 @@ import {
 import { basename, join, resolve, sep } from 'node:path';
 import { mkdirSync, statSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { OutboxAction, ToolResult, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
+import { OutboxAction, ToolResult, inPaths, outPaths, writeJsonAtomic, canRecall } from '@tulip/shared';
 import type { OutboxAction as OutboxActionType } from '@tulip/shared';
 import { feed } from './feed.js';
 import { fetchPage, search, type ExaOutcome } from './exa.js';
@@ -42,6 +42,7 @@ import { imageCount, MAX_IMAGES_PER_PAGE, publishPage, scaffoldPage, usesKit, wr
 import { addContact } from './contacts.js';
 import { spokenLanguageFor } from '@tulip/shared';
 import { remember } from './memory.js';
+import { recentMessages } from './history.js';
 import type { Limiter } from './ratelimit.js';
 import type { Cost, Turn, TurnRegistry } from './turns.js';
 import type { Config } from './config.js';
@@ -479,7 +480,7 @@ export class Outbox extends EventEmitter {
 
   private async answer(
     actionId: string,
-    kind: 'search' | 'fetch' | 'chats' | 'page' | 'contact' | 'sent',
+    kind: 'search' | 'fetch' | 'chats' | 'page' | 'contact' | 'sent' | 'history',
     outcome: ExaOutcome,
   ): Promise<void> {
     const result = ToolResult.safeParse({
@@ -842,6 +843,57 @@ export class Outbox extends EventEmitter {
             url: e.detail ?? 'text',
             published: null,
             text: (e.text ?? '').slice(0, 200),
+          })),
+        });
+        break;
+      }
+
+      case 'history': {
+        // The one action that reads inward. The gate is a shared function
+        // rather than three conditions written here, because "who may read
+        // whose conversation" is the sort of rule that ends up subtly different
+        // in its second copy — and it is tested on its own.
+        //
+        // `isGroup` is read from the chat record for the chat that *asked*, not
+        // the one being read. `carriesOperatorAuthority` deliberately allows a
+        // group, which is right for minting a contact and wrong here: the
+        // answer is somebody's private messages, spoken into whatever room the
+        // question came from.
+        const verdict = canRecall({
+          enabled: this.deps.config.agent.recall,
+          fromOperator: turn.fromOperator,
+          askedInGroup: this.deps.chats.get(turn.chatKey)?.isGroup === true,
+        });
+        if (!verdict.allowed) {
+          log('outbox.recallRefused', { chatKey: turn.chatKey, reason: verdict.reason.slice(0, 60) });
+          feed.event('recall.refused', 'a chat asked to read another conversation and was refused');
+          await this.answer(action.id, 'history', { ok: false, error: verdict.reason });
+          break;
+        }
+
+        const target = this.deps.chats.get(action.chatKey);
+        if (target === undefined || target === null) {
+          await this.answer(action.id, 'history', {
+            ok: false,
+            error: 'No conversation with that key. Use `tulip-wa chats` to see the keys you can name.',
+          });
+          break;
+        }
+
+        const messages = recentMessages(action.chatKey, action.limit);
+        // Loud on success too, not only on refusal. A capability that reads
+        // private messages should leave a trail an operator scrolls past even
+        // when it worked, which is the same argument memory.ts makes for notes.
+        log('recall.read', { asked: turn.chatKey, read: action.chatKey, messages: messages.length });
+        feed.event('recall.read', `an operator asked to read ${target?.name ?? 'a conversation'} (${messages.length} messages)`);
+
+        await this.answer(action.id, 'history', {
+          ok: true,
+          items: messages.map((m) => ({
+            title: m.from,
+            url: m.at,
+            published: null,
+            text: m.text.slice(0, 400),
           })),
         });
         break;

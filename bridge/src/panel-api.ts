@@ -920,6 +920,7 @@ const SettingsPatch = z
     /** Cross-chat sending. Off by default; see THREAT-MODEL §T4. */
     agent: z.object({
       crossChat: z.boolean().optional(),
+      recall: z.boolean().optional(),
       search: z.boolean().optional(),
       images: z.boolean().optional(),
       voice: z.boolean().optional(),

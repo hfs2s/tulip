@@ -3714,9 +3714,15 @@ async function renderSettings() {
   var reach = node('div', 'card');
   reach.appendChild(node('h2', null, 'Reach'));
   reach.appendChild(node('p', 'sub', 'Whether Tulip can start a conversation, or only ever answer one. By default a reply can go nowhere except back to the person who just wrote — the agent is never told who it is talking to, so it cannot name a different destination even if somebody talks it into trying. This card is where you relax that.'));
-  field(reach, 'Message other chats', 'Lets Tulip write to the contacts below, and pass something on to a conversation it already knows. It still cannot read anyone else’s chat — every conversation is a separate session — but it can carry what it was told here into somewhere else. Worth thinking about before turning on: anything somebody tells Tulip can then be repeated elsewhere, and the person who said it will not know.',
+  field(reach, 'Message other chats', 'Lets Tulip write to the contacts below, and pass something on to a conversation it already knows. It carries what it was told here into somewhere else; it does not fetch anything back — that is the setting below. Worth thinking about before turning on: anything somebody tells Tulip can then be repeated elsewhere, and the person who said it will not know.',
     liveSwitch(s.agent && s.agent.crossChat, function (on, input) {
       saveSettings({ agent: { crossChat: on } }, function () { input.checked = !on; });
+    }));
+
+  field(reach, 'Read other chats',
+    'Lets you ask Tulip to read a conversation back to you — the one thing that reaches inward rather than outward. Normally there is nothing to read: each chat is a separate session, so the isolation is a property rather than a rule. This makes it a rule. It answers only you, only in a direct message, and never in a group, where the reply would be somebody’s private messages read out to a room. Every use is written to the feed. Leave it off unless you are actively using it.',
+    liveSwitch(s.agent && s.agent.recall, function (on, input) {
+      saveSettings({ agent: { recall: on } }, function () { input.checked = !on; });
     }));
 
   contactsField(reach, s.agent && s.agent.contacts ? s.agent.contacts : [],

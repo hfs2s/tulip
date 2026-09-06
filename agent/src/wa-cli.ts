@@ -128,7 +128,7 @@ function ancestors(from: string): string[] {
  * Read from `current.json`, which the bridge writes for this turn. Missing or
  * unreadable means carry on: the bridge is the authority and will say no.
  */
-function requireCapability(name: 'voice' | 'images' | 'search' | 'crossChat', verb: string): void {
+function requireCapability(name: 'voice' | 'images' | 'search' | 'crossChat' | 'recall', verb: string): void {
   let can: Record<string, unknown>;
   try {
     const current = JSON.parse(readFileSync(inPaths.current, 'utf8')) as { can?: Record<string, unknown> };
@@ -389,6 +389,28 @@ switch (command) {
     const text = words.join(' ').trim() || readFileSync(0, 'utf8').trim();
     if (text.length === 0) die('tulip-wa voice: need something to say');
     queue({ kind: 'voice', chatKey, text: text.slice(0, 2000), language });
+    break;
+  }
+
+  case 'history': {
+    requireCapability('recall', 'history');
+    const key = (rest[0] ?? '').trim();
+    if (!/^[0-9a-f]{16}$/.test(key)) {
+      die('tulip-wa history: `tulip-wa history <chat key> [how many]` — keys come from `tulip-wa chats`');
+    }
+    const howMany = Number(rest[1] ?? 20);
+    const id = queue({
+      kind: 'history',
+      chatKey: key,
+      limit: Number.isFinite(howMany) ? Math.min(Math.max(Math.trunc(howMany), 1), 50) : 20,
+    });
+    const result = await awaitResult(id, 20_000);
+    if (result === null) { process.stdout.write('history: no answer from the bridge within 20s.\n'); break; }
+    if (!result.ok) { process.stdout.write(`${result.error ?? 'history: refused'}\n`); break; }
+    for (const item of result.items ?? []) {
+      process.stdout.write(`${item.url} ${item.title}: ${item.text}\n`);
+    }
+    if ((result.items ?? []).length === 0) process.stdout.write('history: nothing on record for that chat.\n');
     break;
   }
 

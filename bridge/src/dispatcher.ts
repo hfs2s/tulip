@@ -463,6 +463,7 @@ export class Dispatcher extends EventEmitter {
       images: this.deps.config.agent.images,
       search: this.deps.config.agent.search,
       crossChat: this.deps.config.agent.crossChat,
+      recall: this.deps.config.agent.recall,
     },
     // What `!reset` moves. Read per turn rather than held, so a reset taken
     // while a chat is idle applies to its very next message.
