@@ -138,8 +138,10 @@ export async function ensureSession(): Promise<void> {
   // terminal in this family behaves. It needs input to reach tmux, so it works
   // only because ttyd runs --writable.
   await tmux(['set-option', '-g', 'mouse', 'on']);
-  await tmux(['set-option', '-w', '-t', paneTarget(IDLE_WINDOW), 'window-size', 'manual']);
-  await tmux(['resize-window', '-t', paneTarget(IDLE_WINDOW), '-x', '200', '-y', '50']);
+  // `latest`, matching a chat window. Pinned, this sat at 200x50 inside a
+  // browser's larger client and tmux filled the remainder with dots — the whole
+  // right and bottom of the terminal, which is what an operator actually saw.
+  await tmux(['set-option', '-w', '-t', paneTarget(IDLE_WINDOW), 'window-size', 'latest']);
 }
 
 /** The placeholder window's name. Never a chat, which are all `c-<key>`. */
@@ -221,10 +223,7 @@ export async function sendLine(window: string, line: string): Promise<void> {
  * window rather than restarting anything.
  *
  * Safe despite the pane parser: the supervisor addresses every target as
- * `session:window`, so which window is *active* is cosmetic to it. What would
- * not be safe is a client resizing the window, which is why `spawnWindow` pins
- * `window-size manual` — verified on the box: attaching a client of a different
- * size leaves a pinned window at 200x50.
+ * `session:window`, so which window is *active* is cosmetic to it.
  */
 export async function selectWindow(window: string): Promise<void> {
   await tmux(['select-window', '-t', paneTarget(window)]);

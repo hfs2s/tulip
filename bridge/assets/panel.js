@@ -2827,7 +2827,7 @@ function terminalPanel(onClose) {
   var modal = node('div', 'termmodal');
   var bar = node('div', 'termbar');
   bar.appendChild(node('h2', null, 'Terminal'));
-  bar.appendChild(node('span', 'termwhere', 'The agent’s live tmux session — read-only. Use the box below to steer it.'));
+  bar.appendChild(node('span', 'termwhere', 'The agent’s live tmux session. Anything typed here goes to a real person.'));
   modal.appendChild(bar);
 
   var frame = document.createElement('iframe');
