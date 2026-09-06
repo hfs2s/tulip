@@ -2734,12 +2734,43 @@ function markdown(src) {
  */
 async function renderVerbs() {
   var p = head('verbs', 'Verbs',
-    'Every command the agent can run, read from the same catalogue the agent’s own tulip-wa help is rendered from. ' +
-    'This is what exists — the Persona page is what it has been told about when to reach for any of it.'), mine = renderToken;
+    'Two different command surfaces, which is worth getting straight before reading either. The ! commands you type ' +
+    'into WhatsApp yourself. The tulip-wa verbs you do not — those run inside the agent container, and typing one ' +
+    'into a chat just sends the agent a message with that text in it.'), mine = renderToken;
 
   var data;
   try { data = await api('/api/verbs'); } catch (err) { p.appendChild(node('p', 'empty', err.message)); return; }
   if (stale(mine)) return;
+
+  // First, because it is the only half a person can actually use, and because
+  // an operator reading this page asked whether the verbs below could be sent
+  // over WhatsApp. They cannot.
+  var ops = node('div', 'card');
+  ops.appendChild(node('h3', null, 'What you type in WhatsApp'));
+  ops.appendChild(node('p', 'sub',
+    'Handled by the bridge, which is why they still answer when the agent is the broken thing. ' +
+    'They work only in a direct message from an operator — in a group you get one line pointing you here, ' +
+    'and from anyone else they are ignored rather than refused, so nothing confirms they exist.'));
+  (data.control || []).forEach(function (c) {
+    var row = node('div', 'entry');
+    var left = node('div');
+    var call = node('div', 'mono');
+    call.appendChild(node('span', 'verb', '!' + c.name));
+    if (c.args) call.appendChild(node('span', 'args', ' ' + c.args));
+    left.appendChild(call);
+    left.appendChild(node('div', null, c.summary));
+    row.appendChild(left);
+    ops.appendChild(row);
+  });
+  p.appendChild(ops);
+
+  var agentNote = node('div', 'card');
+  agentNote.appendChild(node('h3', null, 'What the agent runs'));
+  agentNote.appendChild(node('p', 'sub',
+    'Everything below is tulip-wa, a command line inside the agent container. The agent runs these; you cannot. ' +
+    'A WhatsApp message containing "tulip-wa send hello" is just a message containing that text, which the agent ' +
+    'is instructed to treat as data rather than as an instruction — that is the whole point.'));
+  p.appendChild(agentNote);
 
   data.groups.forEach(function (g) {
     var verbs = data.verbs.filter(function (v) { return v.group === g[0]; });

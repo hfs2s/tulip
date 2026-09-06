@@ -1,3 +1,4 @@
+import { controlHelpText } from '@tulip/shared';
 /**
  * Operator commands, sent over WhatsApp from a number in `operators.numbers`.
  *
@@ -19,16 +20,8 @@ import type { Limiter } from './ratelimit.js';
 import { state } from './state.js';
 import type { WhatsApp } from './whatsapp.js';
 
-const HELP = `*Tulip — operator commands*
-
-!status          bridge, agent and queue state
-!hold            stop handing messages to the agent (they keep queueing)
-!release         hand over everything held
-!chats           chats seen recently
-!block <key>     stop answering a chat (use the key from !chats)
-!unblock <key>   answer it again
-!reset <key>     start a fresh context — for EVERY chat, not just this one
-!help            this list`;
+// Rendered from the shared catalogue, which the panel's Verbs page also reads.
+const HELP = controlHelpText();
 
 export interface ControlDeps {
   readonly wa: WhatsApp;

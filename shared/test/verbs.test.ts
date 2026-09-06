@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CROSS_CHAT_VERBS, VERB_GROUPS, VERBS, usageText } from '../src/verbs.js';
+import { CONTROL_COMMANDS, CROSS_CHAT_VERBS, VERB_GROUPS, VERBS, controlHelpText, usageText } from '../src/verbs.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = readFileSync(join(here, '..', '..', 'agent', 'src', 'wa-cli.ts'), 'utf8');
@@ -74,5 +74,40 @@ describe('usageText', () => {
 
   it('still says how a reply is addressed', () => {
     expect(usageText()).toContain('--to <key>');
+  });
+});
+
+/**
+ * The other command surface, tested the same way and for the same reason.
+ *
+ * `!help` is what an operator reads when something is wrong, so a command that
+ * exists but is not listed is a recovery lever nobody knows about.
+ */
+describe('the control commands match their dispatcher', () => {
+  const control = readFileSync(join(here, '..', '..', 'bridge', 'src', 'control.ts'), 'utf8');
+  const dispatched = [...control.matchAll(/^\s*case '([a-z]+)':/gm)].map((m) => m[1] as string);
+
+  it('documents every control command that can be run', () => {
+    const listed = CONTROL_COMMANDS.map((c) => c.name);
+    const missing = dispatched.filter((c) => !listed.includes(c));
+    expect(missing, `dispatched but not in !help: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('lists no command that cannot be run', () => {
+    const invented = CONTROL_COMMANDS.map((c) => c.name).filter((c) => !dispatched.includes(c));
+    expect(invented, `in !help but not dispatched: ${invented.join(', ')}`).toEqual([]);
+  });
+
+  it('renders a help text naming every one of them', () => {
+    const text = controlHelpText();
+    for (const c of CONTROL_COMMANDS) expect(text, c.name).toContain(`!${c.name}`);
+  });
+
+  it('keeps the two surfaces distinct — no verb is also a control command', () => {
+    // `chats` and `reset` exist on both sides with different meanings, which is
+    // exactly why the page has to say which is which. This asserts the overlap
+    // is known rather than accidental.
+    const both = VERBS.map((v) => v.name).filter((n) => CONTROL_COMMANDS.some((c) => c.name === n));
+    expect(both.sort()).toEqual(['chats']);
   });
 });

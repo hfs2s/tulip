@@ -192,3 +192,46 @@ export function usageText(): string {
   );
   return lines.join('\n');
 }
+
+/**
+ * The operator's control commands — the OTHER command surface, and the one a
+ * person actually types.
+ *
+ * Worth stating plainly because the distinction is not obvious from either
+ * list, and an operator reading the verb catalogue reasonably asked whether
+ * those could be sent over WhatsApp. They cannot. `tulip-wa` is a CLI inside
+ * the agent container: the agent runs it, and a message containing that text is
+ * just message text, which the agent is instructed to treat as data.
+ *
+ * These are the opposite. They are typed into WhatsApp by an operator, handled
+ * by the bridge, and never reach the agent at all — which is what makes them
+ * useful when the agent is the thing that is broken. They run only in a direct
+ * message from an operator; in a group they get one line pointing elsewhere,
+ * and from anybody else they are ignored rather than refused, because answering
+ * would confirm they exist.
+ */
+export interface ControlCommand {
+  readonly name: string;
+  readonly args: string;
+  readonly summary: string;
+}
+
+export const CONTROL_COMMANDS: readonly ControlCommand[] = [
+  { name: 'status', args: '', summary: 'bridge, agent and queue state' },
+  { name: 'hold', args: '', summary: 'stop handing messages to the agent (they keep queueing)' },
+  { name: 'release', args: '', summary: 'hand over everything held' },
+  { name: 'chats', args: '', summary: 'chats seen recently' },
+  { name: 'block', args: '<key>', summary: 'stop answering a chat (use the key from !chats)' },
+  { name: 'unblock', args: '<key>', summary: 'answer it again' },
+  { name: 'reset', args: '<key>', summary: 'start a fresh context — for EVERY chat, not just this one' },
+  { name: 'help', args: '', summary: 'this list' },
+];
+
+/** The `!help` reply, rendered from the catalogue so it cannot drift. */
+export function controlHelpText(): string {
+  const lines = ['*Tulip — operator commands*', ''];
+  for (const c of CONTROL_COMMANDS) {
+    lines.push(`!${c.name}${c.args ? ` ${c.args}` : ''}`.padEnd(17) + c.summary);
+  }
+  return lines.join('\n');
+}
