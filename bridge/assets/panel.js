@@ -2734,7 +2734,7 @@ function markdown(src) {
  */
 async function renderVerbs() {
   var p = head('verbs', 'Verbs',
-    'Every command the agent can run, read from the same catalogue the agent's own tulip-wa help is rendered from. ' +
+    'Every command the agent can run, read from the same catalogue the agent’s own tulip-wa help is rendered from. ' +
     'This is what exists — the Persona page is what it has been told about when to reach for any of it.'), mine = renderToken;
 
   var data;

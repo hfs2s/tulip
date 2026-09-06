@@ -25,7 +25,8 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "check:secrets": "node scripts/check-secrets.mjs",
-    "verify": "npm run check:secrets && npm run typecheck && npm test"
+    "verify": "npm run check:secrets && npm run check:panel && npm run typecheck && npm test",
+    "check:panel": "node --check bridge/assets/panel.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
