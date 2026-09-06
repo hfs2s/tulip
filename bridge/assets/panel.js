@@ -1470,34 +1470,18 @@ function renderSessions() {
   termOpen = currentSession();
   sessionKeys = liveSessions().map(function (c) { return c.chatKey; }).join(',');
 
-  var pane = node('section', 'sessionpage');
-  pane.appendChild(sessionHead());
-
-  // The page called Terminal shows the terminal. It used to show a readable
-  // summary with the pane a button away, and the button was named "Raw
-  // terminal" — so the one thing somebody comes to this page for was the one
-  // thing not on it. The summary is still worth having and still is: it lives
-  // on Chat, over the conversation it describes.
-  //
-  // Read-only here exactly as it is in the modal. Steering stays in the
-  // composer below, which is the whole reason ttyd runs without --writable.
+  // The page called Terminal is the terminal, and nothing else. It used to
+  // carry a readable summary of the session and a composer, with the pane
+  // itself behind a button named "Raw terminal" — so the one thing somebody
+  // opens this page for was the one thing not on it. Both of those belong on
+  // Chat, over the conversation they describe, and that is where they are.
+  var pane = node('section', 'sessionpage bare');
   pane.appendChild(terminalPanel(null).modal);
-
-  var body = node('div', 'session');
-  body.id = 'termBody';
-  if (!termOpen) body.appendChild(neverRanNote());
-  pane.appendChild(body);
   // The same box the Chat page uses, writing into the same place by the same
   // path. This page is where an operator steers Claude Code — the raw pane is
   // read-only precisely so that steering happens here, one reviewed line at a
   // time, instead of as loose keystrokes into a live conversation.
-  if (termOpen) pane.appendChild(composer());
   p.appendChild(pane);
-
-  if (termOpen) {
-    void refreshSession();
-    startSessionPoll();
-  }
 }
 
 /**
@@ -2878,8 +2862,14 @@ function terminalPanel(onClose) {
     try { await navigator.clipboard.writeText(text); toast('Copied.'); }
     catch (err) { toast('The browser would not let me use the clipboard.', true); }
   });
-  control('Scroll up', '↑', function () { var t = term(); if (t && t.scrollLines) t.scrollLines(-12); });
-  control('Scroll down', '↓', function () { var t = term(); if (t && t.scrollLines) t.scrollLines(12); });
+  // These drive tmux, not xterm. An attached session keeps its history in tmux,
+  // so the emulator's own buffer is empty and `scrollLines` moved nothing —
+  // which is exactly what it looked like. Reaching the scrollback means
+  // copy-mode, and the pane is read-only, so it goes over the authenticated key
+  // path instead. Scrolling is not steering: none of it reaches a conversation.
+  control('Scroll up', '↑', function () { sendKeys([{ text: '@scroll-up', literal: false }]); });
+  control('Scroll down', '↓', function () { sendKeys([{ text: '@scroll-down', literal: false }]); });
+  control('Back to live', '⤓', function () { sendKeys([{ text: '@scroll-live', literal: false }]); });
   if (onClose) control('Close', '✕', onClose).className = 'termclose';
   bar.appendChild(controls);
 

@@ -948,7 +948,11 @@
   /* Inline on the Terminal page, where there is no scrim to size against. The
      modal takes its height from the viewport; here it takes a share of the page
      and leaves the composer below it visible, because steering happens there. */
-  .sessionpage > .termmodal{width:auto;height:min(560px,58vh);margin-bottom:16px;
+  /* The Terminal page is only the terminal, so it takes the height rather than
+     sharing it. `min-height:0` is what lets the frame shrink inside the column
+     instead of pushing the page into a scroll of its own. */
+  .sessionpage.bare{display:flex;flex-direction:column;min-height:0;flex:1}
+  .sessionpage.bare > .termmodal{width:auto;flex:1;min-height:0;height:auto;
         border-radius:12px;box-shadow:none}
   .termbar{display:flex;align-items:center;gap:12px;flex:none;
         padding:10px 10px 10px 16px;border-bottom:1px solid var(--line);
