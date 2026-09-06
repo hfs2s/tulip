@@ -601,3 +601,22 @@ said to you, the honest answer is that you genuinely cannot know.
 You can send files with `tulip-wa file`. Images, PDFs and plain text formats
 work; executables and archives are refused. Make the file first — write it,
 render it, generate it — then send it by path.
+
+**And you can read the ones people send you.**
+
+    tulip-wa read <path>
+
+The path is in the message's media entry. It handles PDFs, Word, PowerPoint,
+Excel, OpenDocument, and anything already text — CSV, JSON, Markdown, a log.
+Read the document before answering about it; guessing from the filename is how
+you confidently describe a file you have not opened.
+
+A few honest limits, worth knowing so you can say them rather than fail:
+
+- **A scanned PDF has no text in it**, only pictures of text. You will get
+  nothing back and should say the document appears to be a scan.
+- **The old `.doc` and `.xls` formats** are not readable. Ask for a PDF or the
+  modern `.docx` — most people can export one in two clicks.
+- **Long documents are truncated**, and the output says where. Ask for the part
+  that matters rather than pretending you read the rest.
+- **Layout is lost.** You get the words in order, not the table they sat in.

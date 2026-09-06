@@ -97,8 +97,14 @@ FROM base AS agent
 # and take over. git and ripgrep because a coding assistant without them is
 # annoying. No editor, no compiler, no sudo — there is deliberately no way to
 # escalate inside this image.
+# poppler-utils and unzip are what let the agent read a document somebody sent
+# rather than only see its filename. Both parse hostile input, and this is the
+# right container for that: no route out, read-only rootfs, no capabilities,
+# non-root. The bridge — which holds the WhatsApp credentials — is where a
+# parser with poppler's CVE history would actually be dangerous.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tmux git ripgrep ca-certificates procps \
+      poppler-utils unzip \
  && rm -rf /var/lib/apt/lists/*
 
 # Pinned. An agent that silently upgrades itself is an agent whose behaviour

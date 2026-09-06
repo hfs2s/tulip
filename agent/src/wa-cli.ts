@@ -20,6 +20,8 @@
  * There is still no way to name a number.
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { cap, planFor, xmlToText } from './doc-read.js';
 import { takeDestination as liftDestination, takeLanguage as liftLanguage, strayFlag } from './cli-args.js';
 import { LANGUAGE_ALIASES, LANGUAGE_BOOSTS } from '@tulip/shared';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -389,6 +391,46 @@ switch (command) {
     const text = words.join(' ').trim() || readFileSync(0, 'utf8').trim();
     if (text.length === 0) die('tulip-wa voice: need something to say');
     queue({ kind: 'voice', chatKey, text: text.slice(0, 2000), language });
+    break;
+  }
+
+  case 'read': {
+    const target = (rest[0] ?? '').trim();
+    if (target.length === 0) die('tulip-wa read: `tulip-wa read <path>` — a file somebody sent, or one you made');
+    if (!existsSync(target)) die(`tulip-wa read: no file at ${target}`);
+
+    const plan = planFor(target);
+    if (!plan.ok) { process.stdout.write(`${plan.reason}\n`); break; }
+
+    try {
+      if (plan.how === 'text') {
+        process.stdout.write(`${cap(readFileSync(target, 'utf8'))}\n`);
+        break;
+      }
+      if (plan.how === 'run') {
+        // The tool and its flags come from a fixed table; only the path is
+        // variable, and it travels as one argument rather than through a shell.
+        const [bin, ...args] = plan.argv;
+        const out = execFileSync(bin as string, args, { maxBuffer: 64 << 20, encoding: 'utf8' });
+        process.stdout.write(`${cap(out.trim())}\n`);
+        break;
+      }
+      // zipXml: pull the parts that hold the words and strip the markup.
+      let text = '';
+      for (const part of plan.parts) {
+        try {
+          text += `${xmlToText(execFileSync('unzip', ['-p', target, part], { maxBuffer: 64 << 20, encoding: 'utf8' }))}\n`;
+        } catch {
+          /* a part this format does not have — .xlsx without shared strings, say */
+        }
+      }
+      const trimmed = text.trim();
+      process.stdout.write(trimmed.length > 0
+        ? `${cap(trimmed)}\n`
+        : 'That file opened but held no readable text — it may be a scan, or empty.\n');
+    } catch (err) {
+      process.stdout.write(`Could not read it: ${String((err as Error).message).slice(0, 200)}\n`);
+    }
     break;
   }
 
