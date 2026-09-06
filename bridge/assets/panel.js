@@ -2889,9 +2889,16 @@ async function renderPages() {
   data.items.forEach(function (page) { appendPageRow(card, page, data); });
 }
 
-/** How a chat is named in the picker. Groups here often have no name at all. */
+/**
+ * How a chat is named in the picker.
+ *
+ * WhatsApp often gives us no group subject at all, and "unnamed group" three
+ * times over is not something an operator can choose between — so an unnamed
+ * group is described by the people talking in it instead.
+ */
 function chatLabel(c) {
   if (c.name) return c.name;
+  if (c.faces && c.faces.length) return c.faces.join(', ') + ' and others';
   return (c.isGroup ? 'Unnamed group' : 'Unnamed chat') + ' · ' + plural(c.messages, 'message');
 }
 

@@ -719,6 +719,30 @@ export function deleteMedia(chatKey: string, name: string, direction: string): {
  * thing an operator needs is to know one was made, and the second is to be able
  * to take it down without a shell.
  */
+/**
+ * A readable label for a group nobody named.
+ *
+ * `groupMetadata` is best-effort in envelope.ts and quietly fails on this
+ * deployment, so most groups reach the registry with `name: null`. That is
+ * survivable in a listing and not in a picker: choosing which conversation may
+ * rewrite a page from three rows all reading "unnamed group" is how the wrong
+ * one gets granted. So a group with no name is described by the people talking
+ * in it, which is how anyone identifies a group anyway.
+ */
+function groupFaces(chatKey: string, limit = 3): string[] {
+  const seen = new Map<string, number>();
+  for (const entry of feed.recent(1500)) {
+    if (entry.kind !== 'in' || entry.chatKey !== chatKey) continue;
+    const who = entry.from;
+    if (typeof who !== 'string' || who.length === 0) continue;
+    seen.set(who, (seen.get(who) ?? 0) + 1);
+  }
+  return [...seen.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([who]) => who);
+}
+
 export function pagesList(deps: ApiDeps): Json {
   const host = pagesHost();
   const grants = deps.config.pages.grants;
@@ -745,6 +769,7 @@ export function pagesList(deps: ApiDeps): Json {
         isGroup: c.isGroup,
         messages: c.messages,
         lastSeenAt: c.lastSeenAt,
+        faces: c.isGroup && c.name === null ? groupFaces(c.chatKey) : [],
       })),
   };
 }
