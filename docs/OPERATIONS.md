@@ -47,6 +47,42 @@ hold — and that matters whether the audience is a short allow list or the whol
 internet, because an injection needs a borrowed phone or a forwarded document,
 not a hostile sender.
 
+### Surviving a reboot
+
+Two systemd units, both installed once and then forgotten:
+
+```bash
+sudo cp scripts/tulip-boot.service scripts/tulip-ttyd.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now tulip-boot tulip-ttyd
+```
+
+`tulip-ttyd` is the agent's terminal. `tulip-boot` is the one that is easy to
+think you do not need, because `docker-compose.yml` already sets `restart:
+unless-stopped` on every service and `docker.service` is enabled — which reads
+like the reboot case is covered.
+
+It is not, and the gap is specific: **Docker restarts a container that has
+*exited*. A container whose port bind failed has never started, so there is no
+exit to react to** — it is left in `created`, and nothing touches it again, not
+even once the address it wanted appears.
+
+That is reachable whenever `TULIP_PANEL_BIND` is not loopback. Docker restores
+containers the moment the daemon is up; if the address is assigned by something
+slower — tailscaled, a VPN, a DHCP lease — the bind fails with EADDRNOTAVAIL and
+nothing orders the two. What makes it worth a unit rather than a shrug is which
+container loses: `tulip-bridge` holds the WhatsApp connection, so the symptom is
+not a missing panel, it is the number never coming back, with the other two
+containers healthy either side of it and nothing in `docker ps` looking wrong.
+
+So `tulip-boot` waits for the address (bounded, then proceeds anyway) and starts
+the stack. `docker start` on a running container is a successful no-op, which is
+what makes it safe on every boot and by hand:
+
+```bash
+sudo systemctl start tulip-boot     # also the fastest way to bring the stack back up
+```
+
 ---
 
 ## Day to day
