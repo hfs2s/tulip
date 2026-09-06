@@ -107,6 +107,22 @@ RUN apt-get update \
       poppler-utils unzip \
  && rm -rf /var/lib/apt/lists/*
 
+# ttyd, so the panel can show the real terminal rather than a rendering of one.
+#
+# **It listens on a UNIX socket, never a port.** That is the whole reason this
+# is acceptable: the socket lives on the handoff volume both containers already
+# mount, so the bridge connects to it and the agent gains no way to dial the
+# bridge. This container keeps `internal: true`, no route, no published port and
+# no DNS — adding a terminal does not add a network.
+#
+# Statically linked and version-pinned, from upstream: it is not in Debian for
+# this base, and an agent whose terminal silently changes version is one whose
+# behaviour changed without a commit.
+ARG TTYD_VERSION=1.7.7
+ADD --chmod=755 \
+  https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.aarch64 \
+  /usr/local/bin/ttyd
+
 # Pinned. An agent that silently upgrades itself is an agent whose behaviour
 # changed without a commit.
 ARG CLAUDE_CODE_VERSION=2.1.259
