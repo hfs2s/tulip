@@ -236,6 +236,19 @@ export function setTurn(workspace: ChatWorkspace, turnId: string): void {
   writeFileAtomic(workspace.turnFile, turnId, 0o644);
 }
 
+/**
+ * Say that no turn is being answered.
+ *
+ * The safe failure for an abandoned turn. `tulip-wa` refuses outright when
+ * there is no turn to stamp a reply with, and a refusal is the correct outcome
+ * here — the alternative is a reply from an interrupted turn arriving stamped
+ * with whichever turn started next, which is a message delivered to the wrong
+ * person. Losing a late reply costs one message; misdelivering it costs trust.
+ */
+export function clearTurn(workspace: ChatWorkspace): void {
+  writeFileAtomic(workspace.turnFile, '', 0o644);
+}
+
 export function readTurn(workspace: ChatWorkspace): string | null {
   try {
     const value = readFileSync(workspace.turnFile, 'utf8').trim();
