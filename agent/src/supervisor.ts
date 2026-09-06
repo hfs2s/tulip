@@ -179,6 +179,14 @@ async function runTurn(current: CurrentTurnType): Promise<void> {
     return;
   }
 
+  // Point the terminal at this conversation. Here rather than in the watch
+  // loop, which is where it used to live: that loop only runs while something
+  // is polling for pane bytes, and the panel stopped doing that when it moved
+  // to the ttyd iframe. So the pane sat on the waiting window while Claude Code
+  // answered somebody in a window nobody was being shown.
+  const { selectWindow } = await import('./tmux.js');
+  await selectWindow(session.window);
+
   // Per chat, immediately before injection. This is what binds a reply to the
   // conversation it belongs to; see workspace.setTurn.
   setTurn(session.workspace, current.turnId);
@@ -338,7 +346,7 @@ async function stopStreaming(): Promise<void> {
  * the agent happens to redraw.
  */
 async function followWindow(window: string): Promise<void> {
-  const { captureAnsi, selectWindow, startPipe, stopPipe } = await import('./tmux.js');
+  const { captureAnsi, startPipe, stopPipe } = await import('./tmux.js');
 
   let repaint = window !== pipedWindow;
   try {
@@ -363,12 +371,6 @@ async function followWindow(window: string): Promise<void> {
     pipedWindow = window;
     pipeAssertedAt = 0;
   }
-
-  // ttyd attaches to the session, so the window it shows is tmux's active one.
-  // Following the busy chat is therefore a `select-window` rather than anything
-  // heavier — and it is cosmetic to the supervisor, which addresses every
-  // target as `session:window`.
-  if (repaint) await selectWindow(window);
 
   // `-o` opens a pipe only if the pane has none, so re-asserting is both free
   // and how the stream comes back if the pane was replaced under us. It is a
