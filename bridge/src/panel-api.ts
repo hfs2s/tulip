@@ -28,6 +28,7 @@ import type { ServerResponse } from 'node:http';
 import { CurrentTurn, SHARED_WINDOW, TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
 import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES, parseConfig, Contact } from './config.js';
 import { deletePage, listPages, pagesHost, type PageSummary } from './pages.js';
+import { identities, matchesList } from './jid.js';
 import { forget, forgetAll, readMemory } from './memory.js';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
@@ -743,6 +744,29 @@ function groupFaces(chatKey: string, limit = 3): string[] {
     .map(([who]) => who);
 }
 
+/**
+ * What one grant entry should be called in the panel.
+ *
+ * An entry is a chat key or an identifier, and an identifier may name somebody
+ * who has never written — that being the whole point of allowing one. Such an
+ * entry is real and enforced, it simply has no conversation behind it yet, and
+ * saying "not seen yet" is the difference between a grant that is waiting and
+ * one that is broken.
+ */
+function describeGrant(deps: ApiDeps, entry: string): { entry: string; label: string; pending: boolean } {
+  const byKey = deps.chats.get(entry);
+  if (byKey !== null) {
+    return { entry, label: byKey.name ?? (byKey.isGroup ? groupFaces(byKey.chatKey).join(', ') : entry), pending: false };
+  }
+  for (const c of deps.chats.all()) {
+    if (c.isGroup) continue;
+    if (matchesList({ jids: [entry] }, identities(c.jid, c.altJid))) {
+      return { entry, label: c.name ?? entry, pending: false };
+    }
+  }
+  return { entry, label: entry, pending: true };
+}
+
 export function pagesList(deps: ApiDeps): Json {
   const host = pagesHost();
   const grants = deps.config.pages.grants;
@@ -755,6 +779,9 @@ export function pagesList(deps: ApiDeps): Json {
       // null and [] are different answers, and the panel says so: nobody has
       // claimed this page, versus somebody claimed it for no one.
       grantedTo: grants[p.slug] ?? null,
+      // Resolved here rather than in the browser, because only this side can
+      // match a granted phone number against the jids a chat arrived under.
+      grantedLabels: (grants[p.slug] ?? []).map((entry) => describeGrant(deps, entry)),
     })),
     // The chats a grant can name. Sent with the listing rather than fetched
     // separately so the picker never has to make an operator type a chat key —

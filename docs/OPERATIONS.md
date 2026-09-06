@@ -137,12 +137,18 @@ on the three verbs that write a page (`pageNew`, `page`, `pageImage`) refuse
 anywhere else, and the refusal reaches the agent so it can say so rather than
 failing silently.
 
-Grants name a *chat*, not a person, and deliberately. You will rarely know
-somebody's WhatsApp id — it is increasingly a `@lid` that cannot be guessed —
-but a chat key exists as soon as a conversation does. Granting a group therefore
-grants its members, and adding an editor becomes adding somebody to a group
-rather than editing a config file. A chat has to have messaged once before it
-can be granted, because that is when its key comes into existence.
+Grants name a *conversation*, not a person, and deliberately. Granting a group
+therefore grants its members, and adding an editor becomes adding somebody to a
+group rather than editing a config file.
+
+A chat key only exists once somebody has written, so the picker can only offer
+conversations the bridge has seen. To hand a page to somebody before they ever
+message — which is the usual case, since the grant is often the invitation — type
+their **phone number** (bare international digits) or **linked id** into the box
+at the bottom of the picker. It shows as *not seen yet* and starts applying the
+moment they write. Identifiers match direct chats only: a group's jid belongs to
+the room rather than to any member, so a number can never quietly authorise
+everybody in one.
 
 The **Unclaimed pages** switch at the top is the standing rule for everything
 nobody has claimed. Leave it on while the agent is still making pages for
