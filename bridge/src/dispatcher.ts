@@ -22,6 +22,7 @@ import { inPaths, transcriptFor } from '@tulip/shared';
 import type { InboundMedia, InboundMessage } from '@tulip/shared';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
+import { controlDisposition, WRONG_ROOM } from './control.js';
 import { feed } from './feed.js';
 import { gate, isOperator } from './gate.js';
 import { publishTurn, readStatus, retireBatch } from './handoff.js';
@@ -212,10 +213,25 @@ export class Dispatcher extends EventEmitter {
     };
 
     // Operator control commands are handled before anything else and never
-    // reach the agent.
-    if (operator && envelope.text.trimStart().startsWith('!')) {
+    // reach the agent — in a direct message. In a room they are refused with
+    // one line and go no further: they answer in the chat they were sent from,
+    // so `!chats` in a group printed every chat key and name into it.
+    const disposition = controlDisposition({
+      text: envelope.text,
+      isOperator: operator,
+      isGroup: envelope.isGroup,
+    });
+    if (disposition === 'run') {
       feed.inbound({ ...summary, accepted: true, reason: 'operator command' });
       await this.deps.onControl(envelope, chatKey);
+      return;
+    }
+    if (disposition === 'wrongRoom') {
+      log('control.wrongRoom', { chatKey });
+      feed.inbound({ ...summary, accepted: false, reason: 'operator command, not in a group' });
+      // Answered rather than dropped: silence here is indistinguishable from
+      // the bridge being down, which is when somebody types `!status`.
+      await this.deps.wa.sendText(envelope.chatJid, WRONG_ROOM);
       return;
     }
 

@@ -48,6 +48,42 @@ export function isControlCommand(text: string): boolean {
   return /^!\w[\w-]*/.test(text.trim());
 }
 
+/** The one-line answer to a control command sent into a room. */
+export const WRONG_ROOM =
+  'Control commands only work in a direct message. Send it to me privately and I will run it.';
+
+export type ControlDisposition = 'run' | 'wrongRoom' | 'ignore';
+
+/**
+ * Whether to act on a message that looks like a control command.
+ *
+ * Split out from the dispatcher because it is three conditions with a real
+ * consequence attached to each, and because the group rule is new: these
+ * commands used to run wherever an operator typed them, so `!chats` in a room
+ * printed every chat key and name into it. The commands answer in the chat they
+ * were sent from — that is what makes them useful when the agent is broken, and
+ * it is also what made a room the wrong place for them.
+ *
+ * `wrongRoom` rather than `ignore` for an operator in a group, deliberately.
+ * Silence there is indistinguishable from the bridge being down, which is
+ * exactly the moment somebody is typing `!status`. The reply says where to go
+ * and nothing else: no command list, no state, no acknowledgement of what was
+ * asked for.
+ *
+ * A non-operator is always `ignore`, in a room or out of it. Answering them at
+ * all — even to refuse — confirms that the commands exist and that this number
+ * has an operator, which is the one thing worth not handing out.
+ */
+export function controlDisposition(input: {
+  text: string;
+  isOperator: boolean;
+  isGroup: boolean;
+}): ControlDisposition {
+  if (!isControlCommand(input.text)) return 'ignore';
+  if (!input.isOperator) return 'ignore';
+  return input.isGroup ? 'wrongRoom' : 'run';
+}
+
 export async function handleControl(deps: ControlDeps, envelope: Envelope, chatKey: string): Promise<void> {
   const say = (text: string): Promise<void> => deps.wa.sendText(envelope.chatJid, text);
   const [word, ...rest] = envelope.text.trim().split(/\s+/);
