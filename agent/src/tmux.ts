@@ -108,6 +108,36 @@ export async function spawnWindow(
   return true;
 }
 
+/**
+ * Make sure the session exists, with something honest in it.
+ *
+ * ttyd attaches with `new-session -A`, which *creates* the session when none is
+ * running — so an idle deployment served a bare `bash` prompt with no history,
+ * and an operator opening the terminal saw an empty shell rather than the agent.
+ * Nothing was wrong; there was simply nothing to attach to yet.
+ *
+ * Creating it here first means ttyd always attaches rather than creates, and
+ * what it attaches to says so. The window stays for the life of the container
+ * and costs one sleeping shell.
+ */
+export async function ensureSession(): Promise<void> {
+  if (await serverRunning()) return;
+  const note =
+    'No conversation is running.\n\n' +
+    'Claude Code starts the first time somebody messages Juan, and this pane ' +
+    'follows whichever chat is active.\n';
+  await tmux([
+    'new-session', '-d', '-s', SESSION, '-n', IDLE_WINDOW, '-x', '200', '-y', '50',
+    'sh', '-c', `printf %s ${JSON.stringify(note)}; exec sleep infinity`,
+  ]);
+  await tmux(['set-option', '-g', 'history-limit', '20000']);
+  await tmux(['set-option', '-w', '-t', paneTarget(IDLE_WINDOW), 'window-size', 'manual']);
+  await tmux(['resize-window', '-t', paneTarget(IDLE_WINDOW), '-x', '200', '-y', '50']);
+}
+
+/** The placeholder window's name. Never a chat, which are all `c-<key>`. */
+export const IDLE_WINDOW = 'waiting';
+
 export async function killWindow(window: string): Promise<void> {
   await tmux(['kill-window', '-t', paneTarget(window)]);
 }

@@ -455,6 +455,11 @@ async function main(): Promise<void> {
     provider: process.env['ANTHROPIC_BASE_URL'] ?? 'anthropic',
     thinking: process.env['MAX_THINKING_TOKENS'] === '0' ? 'disabled' : 'default',
   });
+  // Before anything else: ttyd attaches with `new-session -A`, so if this does
+  // not exist yet ttyd builds a bare shell and that is what an operator sees.
+  const { ensureSession } = await import('./tmux.js');
+  await ensureSession();
+
   publishStatus();
 
   setInterval(publishStatus, STATUS_MS).unref();
