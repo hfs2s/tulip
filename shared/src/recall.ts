@@ -22,13 +22,13 @@
  *     the trusted boundary from WhatsApp's own sender ids, which a sender
  *     cannot change by picking a display name. A stranger asking Tulip to
  *     recall a chat is refused however they phrase it.
- *   - **The asking chat is not a group.** This one is *not* inherited from the
- *     `contact` action, which deliberately does allow groups — an operator
- *     saying "message this number" in a room they are in is a reasonable thing
- *     to do, and minting a key tells the room nothing. Recall is the opposite:
- *     the answer is somebody else's private messages, read aloud into whatever
- *     room the question was asked in. `carriesOperatorAuthority` does not check
- *     for a group, so this must.
+ *   - **The asking chat is not a group.** `fromOperator` is now false in a
+ *     group anyway — `carriesOperatorAuthority` refuses a room outright — so
+ *     this condition is redundant, and deliberately kept. It was written when
+ *     that was not true, it is the condition this capability most depends on,
+ *     and a check that costs nothing is worth more than an assumption about
+ *     another module's current behaviour. If the room rule is ever relaxed
+ *     again, recall does not quietly relax with it.
  *
  * The residual risk that remains, stated rather than engineered away: an
  * operator's own direct chat can still be prompt-injected — by a message

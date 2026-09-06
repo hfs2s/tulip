@@ -39,7 +39,9 @@ export interface Turn {
    *
    * A group is never an operator turn even when an operator is in it: the point
    * of the flag is that one identified person chose to do this, and a room with
-   * strangers in it cannot carry that.
+   * strangers in it cannot carry that. Enforced in `carriesOperatorAuthority`,
+   * which is where the reasoning lives — this comment described the intent for
+   * a while before the code matched it, so do not read it as the guarantee.
    */
   readonly fromOperator: boolean;
   /** Sends already performed for this turn, against `limits.outboundPerTurn`. */

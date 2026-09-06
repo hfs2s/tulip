@@ -855,10 +855,10 @@ export class Outbox extends EventEmitter {
         // in its second copy — and it is tested on its own.
         //
         // `isGroup` is read from the chat record for the chat that *asked*, not
-        // the one being read. `carriesOperatorAuthority` deliberately allows a
-        // group, which is right for minting a contact and wrong here: the
-        // answer is somebody's private messages, spoken into whatever room the
-        // question came from.
+        // the one being read. `fromOperator` is already false in a group, so
+        // this is a second lock on the same door — kept because it is the
+        // condition this capability most depends on, and because that rule has
+        // been reversed once already.
         const verdict = canRecall({
           enabled: this.deps.config.agent.recall,
           fromOperator: turn.fromOperator,

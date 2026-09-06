@@ -38,14 +38,37 @@ describe('operator authority', () => {
   });
 
   /**
-   * The change this file was written for. Excluding groups was over-cautious
-   * and broke the real use — an operator saying "message this number" in the
-   * group they are already in, refused for being in a room. The control is the
-   * sender's id, which WhatsApp assigns; the shape of the room is not evidence
-   * about who spoke.
+   * Decided twice, in opposite directions, and this is the second.
+   *
+   * Groups began excluded; that was relaxed as over-cautious, because it broke
+   * an operator saying "message this number" in the group they are already in.
+   * The argument was that `senderIds` identify the speaker and the room does
+   * not change who spoke — true, and beside the point. Identity is not the only
+   * thing an operator turn settles; the other is who is standing there when the
+   * agent acts on it. `history` reads a conversation back, and in a room that
+   * is somebody's private messages read aloud to strangers.
+   *
+   * The cost is that use, which now has to happen in a direct message.
    */
-  it('is carried in a group, because the sender is still identified', () => {
-    expect(carriesOperatorAuthority([from(OPERATOR, true)], config)).toBe(true);
+  it('is not carried in a group, whoever spoke', () => {
+    expect(carriesOperatorAuthority([from(OPERATOR, true)], config)).toBe(false);
+  });
+
+  it('is not carried in a group even when every message is the operator’s', () => {
+    // The batch rule and the room rule are separate: satisfying one does not
+    // satisfy the other.
+    expect(carriesOperatorAuthority([from(OPERATOR, true), from(OPERATOR, true)], config)).toBe(false);
+  });
+
+  it('is still carried when the same operator writes directly', () => {
+    // The tightening must not cost the ordinary case.
+    expect(carriesOperatorAuthority([from(OPERATOR), from(OPERATOR)], config)).toBe(true);
+  });
+
+  it('is not carried by a batch that mixes a direct message with a group one', () => {
+    // Not reachable today — a batch is one chat — but the predicate is a
+    // security rule and should not lean on a caller's invariant.
+    expect(carriesOperatorAuthority([from(OPERATOR), from(OPERATOR, true)], config)).toBe(false);
   });
 
   it('is not carried by a stranger, in a group or out of one', () => {

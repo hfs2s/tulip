@@ -95,20 +95,36 @@ export interface DispatcherDeps {
  * the agent reads the batch as a whole: a number sitting in a stranger's
  * message would otherwise be picked up as though an operator had given it.
  *
- * **Groups count.** They used to be excluded and that was over-cautious — it
- * broke the actual use, an operator saying "message this number" in the group
- * they are already in and being refused for being in a room. What makes this
- * safe is not the shape of the room, it is `senderIds`: WhatsApp assigns those,
- * and a sender cannot change them by picking a display name. A stranger in the
- * group still fails, and one of their messages in the batch fails it for
- * everybody in that batch.
+ * **A group is never an operator turn**, whoever spoke. This has been decided
+ * twice, in opposite directions, and the second decision is the one that holds:
+ *
+ *   - It began excluded. That was relaxed as over-cautious, because it broke a
+ *     real use — an operator saying "message this number" in the group they are
+ *     already in, refused for being in a room. The argument was that the
+ *     control is `senderIds`, which WhatsApp assigns and a sender cannot change
+ *     by picking a display name, and that the shape of the room is not evidence
+ *     about who spoke.
+ *   - That argument is sound about *identity* and beside the point about
+ *     *consequence*. Identifying the speaker is not the only question an
+ *     operator turn settles; the other is who is standing there when the agent
+ *     acts on it. Authority granted in a room is exercised in front of the
+ *     room, and what these actions do has grown since — `history` reads a
+ *     conversation back, and doing that in a group reads somebody's private
+ *     messages aloud to strangers.
+ *
+ * So the room is part of the credential now, not merely the sender. The cost is
+ * the use above: an operator in a group is refused and has to say it in a
+ * direct message instead. That is a real cost and was accepted deliberately.
  *
  * An empty batch is not authority. `every` returns true for one, and a turn is
  * never opened without messages — but this is a security predicate and it
  * should not depend on a caller's invariant to be safe.
  */
 export function carriesOperatorAuthority(envelopes: readonly Envelope[], config: Config): boolean {
-  return envelopes.length > 0 && envelopes.every((e) => isOperator(config, e.senderIds));
+  return (
+    envelopes.length > 0 &&
+    envelopes.every((e) => e.isGroup !== true && isOperator(config, e.senderIds))
+  );
 }
 
 export class Dispatcher extends EventEmitter {

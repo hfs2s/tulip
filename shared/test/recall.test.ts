@@ -7,11 +7,11 @@
  * hole in that means the gate is the whole of the protection, and a gate is
  * exactly the sort of thing that is subtly wrong in one of eight cases.
  *
- * The case that matters most is the group. `carriesOperatorAuthority`
- * deliberately allows one — an operator saying "message this number" in a room
- * they are in is reasonable, and minting a key tells the room nothing. Recall
- * inverts that: the answer is somebody else's private messages, spoken into
- * whatever room the question was asked in.
+ * The case that matters most is the group. `carriesOperatorAuthority` now
+ * refuses one outright, so `fromOperator` is already false there and this
+ * condition is a second lock on the same door. It is kept, and tested, because
+ * that rule has been reversed once already: recall must not silently reopen if
+ * it is reversed again.
  */
 import { describe, expect, it } from 'vitest';
 import { canRecall } from '../src/recall.js';
