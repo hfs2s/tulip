@@ -128,7 +128,10 @@ export async function ensureSession(): Promise<void> {
     'follows whichever chat is active.\n';
   await tmux([
     'new-session', '-d', '-s', SESSION, '-n', IDLE_WINDOW, '-x', '200', '-y', '50',
-    'sh', '-c', `printf %s ${JSON.stringify(note)}; exec sleep infinity`,
+    // %b, not %s: the note is JSON-quoted so it can travel as one argument, and
+    // %s prints its \n escapes literally — which it did, on screen, to an
+    // operator.
+    'sh', '-c', `printf %b ${JSON.stringify(note)}; exec sleep infinity`,
   ]);
   await tmux(['set-option', '-g', 'history-limit', '20000']);
   // The wheel scrolls the pane into copy-mode, which is how every other
