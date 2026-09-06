@@ -44,12 +44,34 @@ beforeEach(() => {
 
 afterAll(() => rmSync(box, { recursive: true, force: true }));
 
+/**
+ * The agent is up and answering the first of these.
+ *
+ * Two files, because `sendToChat` now needs both: the status says a session
+ * exists at all, and `current.json` says which conversation it is on. That
+ * second check is what stops an operator's line being typed into a shared
+ * session that is answering somebody else — see chat-send.test.ts, which is
+ * where that behaviour is actually tested. Here it is only setup: this file is
+ * about how an attachment is named.
+ */
 function agentReports(chatKeys: readonly string[]): void {
   writeFileSync(join(box, 'out', 'status.json'), JSON.stringify({
     at: new Date(T0).toISOString(), busyTurn: null, fatal: null,
-    sessions: chatKeys.map((chatKey) => ({
-      chatKey, startedAt: new Date(T0).toISOString(), lastUsedAt: new Date(T0).toISOString(), turns: 1,
-    })),
+    // One shared session, which reports itself under the shared key.
+    sessions: [{
+      chatKey: 'main', startedAt: new Date(T0).toISOString(), lastUsedAt: new Date(T0).toISOString(), turns: 1,
+    }],
+  }));
+  const on = chatKeys[0];
+  if (on === undefined) return;
+  writeFileSync(join(box, 'in', 'current.json'), JSON.stringify({
+    turnId: '00000000-0000-4000-8000-000000000000',
+    chatKey: on,
+    chatName: 'a chat',
+    isGroup: false,
+    batch: 'batches/00000000-0000-4000-8000-000000000000.json',
+    startedAt: new Date(T0).toISOString(),
+    generation: 0,
   }));
 }
 

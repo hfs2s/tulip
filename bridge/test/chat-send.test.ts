@@ -24,6 +24,8 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 const KEY = 'abcdef0123456789';
 const ASLEEP = 'fedcba9876543210';
+/** What the one shared session calls itself in its status report. */
+const SHARED = 'main';
 /** 2009, not now: a thirteen-digit millisecond stamp reads as a phone number. */
 const T0 = 1234567890000;
 
@@ -60,6 +62,38 @@ afterAll(() => {
 });
 
 /** What the agent publishes about itself. Advisory everywhere but here. */
+/**
+ * Which conversation the bridge has dispatched.
+ *
+ * Load-bearing since the session became shared: an operator's line goes into
+ * the one window, and whatever the agent says back is delivered to the turn
+ * that window is answering. So `sendToChat` refuses unless this says the
+ * conversation being typed into is the one on the other end.
+ */
+function answering(chatKey: string | null): void {
+  const path = join(box, 'in', 'current.json');
+  if (chatKey === null) {
+    try {
+      unlinkSync(path);
+    } catch {
+      /* already absent */
+    }
+    return;
+  }
+  writeFileSync(
+    path,
+    JSON.stringify({
+      turnId: '00000000-0000-4000-8000-000000000000',
+      chatKey,
+      chatName: 'a chat',
+      isGroup: false,
+      batch: 'batches/00000000-0000-4000-8000-000000000000.json',
+      startedAt: new Date(T0).toISOString(),
+      generation: 0,
+    }),
+  );
+}
+
 function agentReports(chatKeys: readonly string[]): void {
   writeFileSync(
     join(box, 'out', 'status.json'),
@@ -145,25 +179,44 @@ describe('sendToChat — what it refuses', () => {
   });
 
   /**
-   * The one that matters. Without it the supervisor's fallback would type this
-   * into whichever conversation happened to be awake.
+   * The one that matters, and it matters more than it used to.
+   *
+   * There is now ONE session answering every conversation, so the window is
+   * always open and "is this chat live" can no longer be the question. A line
+   * typed here is input to the agent, and the agent's answer leaves stamped
+   * with the turn it is currently on — so typing into a sleeping chat while
+   * somebody else is being answered delivers the operator's words to that
+   * somebody else.
    */
-  it('refuses a chat with no session open, rather than letting it land elsewhere', () => {
-    agentReports([KEY]);
+  it('refuses a chat the agent is not currently answering', () => {
+    agentReports([SHARED]);
+    answering(KEY);
     const result = api.sendToChat(deps(), ASLEEP, 'are you there');
     expect(result.ok).toBe(false);
-    expect(result.message).toContain('no session open');
+    expect(result.message).toContain('different conversation');
+    expect(request()).toBeNull();
+  });
+
+  it('refuses when the agent is answering nobody, so a reply has nowhere to go', () => {
+    agentReports([SHARED]);
+    answering(null);
+    const result = api.sendToChat(deps(), KEY, 'are you there');
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('not answering anyone');
     expect(request()).toBeNull();
   });
 });
 
 describe('sendToChat — what it does', () => {
-  it('types the line into that chat’s own window, and submits it separately', () => {
-    agentReports([KEY]);
+  it('types the line into the shared window, and submits it separately', () => {
+    agentReports([SHARED]);
+    answering(KEY);
     expect(api.sendToChat(deps(), KEY, 'be a bit warmer').ok).toBe(true);
 
     const written = request();
-    expect(written?.window).toBe(`c-${KEY}`);
+    // The one window, not `c-<chatKey>`. Naming the chat's own window was right
+    // when it had one, and named nothing once the session became shared.
+    expect(written?.window).toBe('c-main');
     // Literal text, then Enter as a *key*. A newline inside the text would be
     // typed as a character where the TUI is watching for the keypress.
     expect(written?.keys.slice(-2)).toEqual([
@@ -177,14 +230,16 @@ describe('sendToChat — what it does', () => {
     // the agent's 250ms tick collects it the Terminal page renews its watch with
     // `window: null` and the same still-unapplied keys. The agent would resolve
     // null to whichever chat is busy and type A's message into B's conversation.
-    agentReports([KEY]);
+    agentReports([SHARED]);
+    answering(KEY);
     expect(api.sendToChat(deps(), KEY, 'hold this').ok).toBe(true);
     api.terminalWatch(null, 90);
-    expect(request()?.window).toBe(`c-${KEY}`);
+    expect(request()?.window).toBe('c-main');
   });
 
   it('lets the terminal follow the active chat again once the agent has typed it', () => {
-    agentReports([KEY]);
+    agentReports([SHARED]);
+    answering(KEY);
     api.sendToChat(deps(), KEY, 'hold this');
     const seq = (api.terminalScreen() as { pendingSeq: number }).pendingSeq;
 

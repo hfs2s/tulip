@@ -14,17 +14,7 @@
  */
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  AgentStatus,
-  UsageReport,
-  CurrentTurn,
-  InboxBatch,
-  TerminalRequest,
-  TerminalScreen,
-  inPaths,
-  outPaths,
-  writeJsonAtomic,
-} from '@tulip/shared';
+import { AgentStatus, CurrentTurn, InboxBatch, SHARED_CHAT, TerminalRequest, TerminalScreen, UsageReport, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
 import type { CurrentTurn as CurrentTurnType } from '@tulip/shared';
 import { log } from './log.js';
 import { UsageMeter } from './usage.js';
@@ -50,7 +40,7 @@ import { clearTurn, setTurn } from './workspace.js';
  * stable uuid — which is what makes the session survive a container restart, a
  * reboot, or the image being rebuilt. It resumes rather than starts.
  */
-const SHARED_CHAT = 'main';
+// Defined in shared/src/ids.ts, because the bridge names the same window.
 
 /**
  * How long a single turn may run before it is interrupted.

@@ -567,7 +567,17 @@ export const AgentStatus = z
       .array(
         z
           .object({
-            chatKey: ChatKey,
+            /**
+             * Display only, and deliberately NOT `ChatKey`.
+             *
+             * It was, and that broke the moment sessions stopped being per chat:
+             * the agent reports the shared session as `main`, which is not 16 hex
+             * characters, so every status write failed validation and the agent
+             * silently stopped reporting at all. Nothing routes on this value —
+             * delivery is resolved from `turnId` — so a loose string is right,
+             * and a strict one bought nothing but an outage.
+             */
+            chatKey: z.string().min(1).max(64),
             startedAt: z.string().datetime(),
             lastUsedAt: z.string().datetime(),
             turns: z.number().int().nonnegative(),

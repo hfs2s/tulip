@@ -25,7 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
-import { TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
+import { CurrentTurn, SHARED_WINDOW, TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
 import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES, parseConfig, Contact } from './config.js';
 import { deletePage, listPages, pagesHost, type PageSummary } from './pages.js';
 import { forget, forgetAll, readMemory } from './memory.js';
@@ -205,9 +205,11 @@ export function chatTranscript(deps: ApiDeps, chatKey: string, limit: number): J
       messages: record.messages,
       lastSeenAt: record.lastSeenAt,
     },
-    // Whether a tmux window exists for this chat right now. Without one there
-    // is nothing to type into — see `sendToChat`.
-    live: status?.sessions.some((s) => s.chatKey === chatKey) ?? false,
+    // Whether there is a window to type into. One shared session answers every
+    // chat now, so this is no longer a per-chat question — matching on chatKey
+    // here made every chat report dead, because the only session reports itself
+    // as `main`.
+    live: (status?.sessions.length ?? 0) > 0,
     reporting: status !== null,
     items: mergeTimeline(said, sessionTranscript(chatKey), limit),
   };
@@ -449,10 +451,35 @@ export function sendToChat(
 
   const status = readStatus();
   if (status === null) return { ok: false, message: 'The agent is not reporting. Nothing would be typed.' };
-  if (!status.sessions.some((s) => s.chatKey === chatKey)) {
+  // Same correction as `live` above: one session serves every chat, so the
+  // question is whether it is up, not whether one exists for this key.
+  if (status.sessions.length === 0) {
     return {
       ok: false,
-      message: 'This chat has no session open, so there is nowhere to type. It wakes on their next message.',
+      message: 'The agent has no session open, so there is nowhere to type. It starts on the next message.',
+    };
+  }
+
+  // And then the harder question, which the shared session created.
+  //
+  // A line typed here is input to the agent, and whatever the agent says back
+  // goes out stamped with `.turn` — the conversation it is currently answering.
+  // With a window per chat those were always the same thing. With one window
+  // they are not: typing into chat B while the session is answering chat A puts
+  // the operator's words in front of the agent and delivers the reply to A.
+  //
+  // So the rule is that you may only type into the conversation the agent is
+  // actually on. That is narrower than before and it is the honest bound; the
+  // alternative is a message arriving at the wrong person, which is the one
+  // failure this panel must never cause.
+  const current = readCurrentTurn();
+  if (current === null || current.chatKey !== chatKey) {
+    return {
+      ok: false,
+      message:
+        current === null
+          ? 'The agent is not answering anyone right now, so a reply would have nowhere to go. Wait for their next message.'
+          : 'The agent is answering a different conversation right now. Anything typed here would be delivered there instead.',
     };
   }
 
@@ -467,7 +494,9 @@ export function sendToChat(
         attached.length === 1 ? 'it' : 'them'
       } if it helps]`;
 
-  const window = `c-${chatKey}`;
+  // The one shared window. `c-${chatKey}` was right when each chat had its own;
+  // it now names a window that does not exist, so every keystroke failed.
+  const window = SHARED_WINDOW;
   const result = terminalKeys(window, [
     { text: said, literal: true },
     { text: 'Enter', literal: false },
@@ -477,6 +506,22 @@ export function sendToChat(
   log('chat.typed', { chatKey, window, chars: said.length, attached: attached.length });
   feed.event('operator.typed', `${chatKey} — ${line.slice(0, 160)}`);
   return { ok: true, message: 'Typed into the session.' };
+}
+
+/**
+ * Which conversation the agent is on, as the bridge itself recorded it.
+ *
+ * Read from the file rather than from the agent's status: `current.json` is
+ * written by the trusted side, and this decides where an operator's words end
+ * up. The agent's own report is advisory and must not be what answers that.
+ */
+function readCurrentTurn(): { chatKey: string } | null {
+  try {
+    const parsed = CurrentTurn.safeParse(JSON.parse(readFileSync(inPaths.current, 'utf8')));
+    return parsed.success ? { chatKey: parsed.data.chatKey } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Matches `TerminalRequest`'s own per-key cap, so nothing is silently trimmed. */

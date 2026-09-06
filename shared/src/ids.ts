@@ -72,3 +72,17 @@ export function uuidV5(name: string): string {
 export function sessionUuidFor(chatKey: string, generation = 0): string {
   return uuidV5(generation > 0 ? `tulip:${chatKey}#${generation}` : `tulip:${chatKey}`);
 }
+
+/**
+ * The single conversation key, since Tulip stopped keying a session per chat.
+ *
+ * Lives here because both halves need it and they must not disagree: the agent
+ * derives its session uuid and its tmux window name from it, and the bridge
+ * names that same window when an operator types into a conversation. It was
+ * briefly a string literal in each, which is how the panel came to be typing
+ * into `c-<16 hex>` — a window that no longer exists.
+ */
+export const SHARED_CHAT = 'main';
+
+/** The tmux window the shared session runs in. */
+export const SHARED_WINDOW = `c-${SHARED_CHAT}`;

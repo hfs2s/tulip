@@ -36,11 +36,20 @@ Run naively on a home server, one hostile message reaches:
 | `sudo` | most home-server accounts have it, passwordless | root |
 | Private network / VPN | the host is on it | lateral movement to everything else you own |
 | Unrestricted egress | nothing stops outbound connections | silent exfiltration of all of the above |
-| Other people's conversations | one agent session serves every chat | every user's messages leak to every other user |
+| Other people's conversations | one agent session serves every chat | every user's messages leak to every other user — **and this is the one Tulip no longer closes: see the note below** |
 
-Tulip closes each of these structurally — at the kernel and the filesystem, not
-in the prompt. A persona that asks an agent nicely not to leak things is not a
-security control; it is a hope.
+Tulip closes all but the last of these structurally — at the kernel and the
+filesystem, not in the prompt. A persona that asks an agent nicely not to leak
+things is not a security control; it is a hope.
+
+**The last row is the exception, and it is deliberate.** Until 2026-09-06 Tulip
+kept a separate Claude Code session per chat, so that row was closed the same
+way as the others. It now runs one shared session across every conversation, by
+operator decision, so that it is one person who remembers everyone rather than
+an amnesiac who meets you fresh in each room. Cross-chat confidentiality is
+therefore exactly the hope the paragraph above dismisses. That trade is written
+up in [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md#t4) — read it before
+assuming any bound stated elsewhere here still holds.
 
 ---
 
@@ -170,7 +179,7 @@ never entering the container an attacker is assumed to own.
 | **Voice notes out** | Spoken with a configurable MiniMax voice. Four round-bracket sound tags — `(laughs) (chuckle) (sighs) (breath)` — are performed; anything else is read aloud, so the set is closed and one per message is enforced. |
 | **Pictures** | Generated on request and sent. |
 | **GIFs, web search** | Both bridge-side: the agent names what it wants, the bridge fetches it. |
-| **Cross-chat** | Off by default. When on, the agent may write to a named contact list and may still never read another conversation — sessions are separate per chat. |
+| **Cross-chat** | Off by default. When on, the agent may write to a named contact list. It *can* read other conversations — one shared session holds them all — so what stops it is the persona, not the architecture. |
 
 ### Pages
 
@@ -192,7 +201,7 @@ would be the agent reaching it through a visitor's browser.
 
 ### The control panel
 
-Eight surfaces, behind a bearer token and whatever authenticates in front of it.
+Twelve surfaces, behind a bearer token and whatever authenticates in front of it.
 
 | Page | What it is for |
 |---|---|
@@ -202,6 +211,9 @@ Eight surfaces, behind a bearer token and whatever authenticates in front of it.
 | **Media** | Every attachment both directions. Pictures and video first; voice notes below as a list that leads with the transcript and opens a player when clicked. |
 | **Chat** | One conversation rendered as a conversation, and a box to type into that session. |
 | **Terminal** | The agent's live tmux, full-bleed. A real pty over ttyd, not a rendering of one. |
+| **Persona** | The four files assembled into the agent's brief, as the running session received them. Editing them changes nothing until it restarts. |
+| **Memory** | What the agent has deliberately written down to carry between conversations, with a Forget button. |
+| **Verbs** | Both command surfaces: the `!` commands an operator types into WhatsApp, and the `tulip-wa` verbs the agent runs inside its container. Rendered from the same catalogue the CLI's own help comes from. |
 | **Pages** | What the agent has published, with sizes and a delete button. |
 | **Settings** | Everything below, live — no restart, and every change written to the log and the feed. |
 | **Log** | The bridge's structured events for the day, credentials masked. |
@@ -243,9 +255,16 @@ person it has made as many as it can today, rather than going quiet.
 
 ## Operating it
 
-The runbook is [`docs/OPERATIONS.md`](docs/OPERATIONS.md). Three things worth
+The runbook is [`docs/OPERATIONS.md`](docs/OPERATIONS.md). Four things worth
 knowing before you need them:
 
+- **Two systemd units carry a reboot**, and `restart: unless-stopped` is not
+  enough on its own: Docker restarts a container that *exited*, and one whose
+  port bind failed never started, so it sits in `created` and nothing retries
+  it. That is reachable whenever the panel publishes on an address something
+  slower assigns — a tailnet, a VPN. `scripts/tulip-boot.service` waits for the
+  address and starts the stack; `scripts/tulip-ttyd.service` runs the terminal.
+  See the runbook's *Surviving a reboot*.
 - **A `panel.*` or `bridge/src` change needs `docker compose build bridge` only.**
   Recreating the agent kills every live tmux session; they resume with full
   context on the next message, but the terminal empties meanwhile.
@@ -254,8 +273,11 @@ knowing before you need them:
   pull that fetches nothing, a rebuild that yields an identical image, and an
   `up -d` that does not recreate — every step reporting success while the old
   code keeps answering.
-- **`npm run verify`** is the gate: secrets, types, tests. It runs no database
-  and needs no network.
+- **`npm run verify`** is the gate: secrets, the panel script parsing, types,
+  tests. It runs no database and needs no network. The panel check is one line
+  of `node --check` and it is there because `bridge/assets/panel.js` is served
+  raw and imported by nothing, so a syntax error in it takes the whole operator
+  console down while every test still passes.
 
 ---
 
@@ -269,7 +291,7 @@ knowing before you need them:
 | `shared/` | Types and schemas describing the handoff contract, used by both halves. |
 | `persona/` | Tulip's identity, assembled into the agent's `CLAUDE.md`. No personal data. |
 | `docs/` | Threat model, architecture notes, operations runbook. |
-| `scripts/` | Docker installation, health checks, and the host-side terminal. |
+| `scripts/` | Docker installation, health checks, the host-side terminal, and the systemd units that bring the stack back after a reboot. |
 
 Inside `bridge/src`, the files that carry an argument rather than a feature:
 
@@ -338,7 +360,13 @@ npm run typecheck     # tsc --build, strict, across all four projects
                       # exits 0 on a tree full of type errors.
 npm test              # vitest
 npm run check:secrets # fails if a gitignored secret file is staged
+npm run check:panel   # node --check on the panel script, which nothing imports
 ```
+
+> `npm run typecheck` also **builds** `shared/` to `dist/`, which is what the
+> other two workspaces import. A source-only check leaves them compiling against
+> the previous schema, so a change to `shared/` looks fine and the tests fail
+> for reasons that have nothing to do with the change.
 
 TypeScript throughout, `strict` with `noUncheckedIndexedAccess`. Every value
 crossing a trust boundary — WhatsApp messages, agent outbox actions, config
@@ -373,7 +401,7 @@ And changes what a public audience makes untenable:
 | Host privileges | user account with passwordless sudo | uid 1000, all caps dropped, read-only root |
 | Abuse controls | none needed | per-sender token buckets, turn budgets, size caps |
 | Language | JavaScript | TypeScript strict, Zod at every boundary |
-| Terminal | ttyd proxied over a socket | a file exchange over the handoff volumes — no network between the halves |
+| Terminal | ttyd proxied over a socket | ttyd on the *host*, `docker exec`ing in — the agent gains no port, no route and no ttyd of its own |
 | Paid capabilities | keys in the agent's reach | performed by the bridge; no key enters the agent |
 
 Iris's bespoke business integrations — a morning-accountability bridge, a
