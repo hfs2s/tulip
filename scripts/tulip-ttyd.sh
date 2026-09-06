@@ -42,13 +42,30 @@ rm -f "$SOCKET"
 # and it types one reviewed line through `sendToChat` rather than handing
 # somebody a raw keyboard pointed at a stranger's chat.
 #
-# Dropping `--writable` is the whole control. With it, a keystroke in a browser
-# tab went straight into a live tmux session carrying every open conversation,
-# with no confirmation and no record of who typed it — and a mistyped one landed
-# in whichever chat happened to be focused.
+# `--writable` is on, which is a deliberate reversal and worth recording rather
+# than quietly flipping. It was dropped on the reasoning above: a keystroke here
+# goes into a live tmux session carrying every open conversation, with no
+# confirmation and no record of who typed it, and a mistyped one lands in
+# whichever chat happens to be focused. All of that is still true.
+#
+# It is on because a read-only terminal is not the thing this was asked to be.
+# Iris and the council wall are both writable, and it is what makes their
+# controls work at all — paste has nothing to paste into otherwise, and
+# scrollback needs copy-mode, which needs a keystroke. A pane an operator can
+# only watch is a log with extra steps.
+#
+# What bounds it is that reaching this needs the panel's token, and Cloudflare
+# Access in front of that; the operator is a named person by the time they are
+# looking at it. The care is now a human one rather than a mechanical one, which
+# is a real trade and the one that was chosen.
+#
+# `mouse on` is set by the agent, so the wheel scrolls the pane into copy-mode
+# the way it does everywhere else — that only works because input reaches tmux.
 exec ttyd \
   --interface "$SOCKET" \
   --ping-interval 30 \
   --client-option 'fontSize=13' \
   --client-option 'theme={"background":"#0d0d0f","foreground":"#fafafa","cursor":"#21d2ed"}' \
+  --writable \
+  --client-option 'enableClipboard=true' \
   docker exec -it "$CONTAINER" tmux new-session -A -s "$SESSION"

@@ -131,6 +131,10 @@ export async function ensureSession(): Promise<void> {
     'sh', '-c', `printf %s ${JSON.stringify(note)}; exec sleep infinity`,
   ]);
   await tmux(['set-option', '-g', 'history-limit', '20000']);
+  // The wheel scrolls the pane into copy-mode, which is how every other
+  // terminal in this family behaves. It needs input to reach tmux, so it works
+  // only because ttyd runs --writable.
+  await tmux(['set-option', '-g', 'mouse', 'on']);
   await tmux(['set-option', '-w', '-t', paneTarget(IDLE_WINDOW), 'window-size', 'manual']);
   await tmux(['resize-window', '-t', paneTarget(IDLE_WINDOW), '-x', '200', '-y', '50']);
 }
