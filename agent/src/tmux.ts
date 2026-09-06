@@ -230,35 +230,6 @@ export async function selectWindow(window: string): Promise<void> {
   await tmux(['select-window', '-t', paneTarget(window)]);
 }
 
-/**
- * Scroll the pane, which is not something the browser can do.
- *
- * tmux owns the scrollback, not the terminal emulator attached to it — xterm's
- * own buffer is empty for an attached session, which is why the panel's scroll
- * buttons appeared to do nothing at all. Reaching the history means entering
- * tmux's copy-mode, and the pane is served read-only, so the browser cannot ask
- * for it. This runs it on the pane directly instead, over the same authenticated
- * path the panel's other keys already take.
- *
- * Scrolling is not steering, which is why it is allowed to bypass the
- * read-only pane at all: nothing here can be typed into a conversation.
- */
-export async function scrollPane(window: string, direction: 'up' | 'down'): Promise<void> {
-  const target = paneTarget(window);
-  // Entering copy-mode is idempotent; already being in it is not an error, and
-  // `-u` starts a page up so the first press moves rather than merely arming.
-  if (direction === 'up') {
-    await tmux(['copy-mode', '-u', '-t', target]);
-    return;
-  }
-  await tmux(['send-keys', '-X', '-t', target, 'page-down']);
-}
-
-/** Leave copy-mode, so the pane follows the agent again. */
-export async function scrollToLive(window: string): Promise<void> {
-  await tmux(['send-keys', '-X', '-t', paneTarget(window), 'cancel']);
-}
-
 export async function sendText(window: string, text: string): Promise<void> {
   await tmux(['send-keys', '-t', paneTarget(window), '-l', text]);
 }

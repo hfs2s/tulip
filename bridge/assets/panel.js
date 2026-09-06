@@ -2844,6 +2844,57 @@ function terminalPanel(onClose) {
     try { return frame.contentWindow && frame.contentWindow.term; } catch (err) { return null; }
   }
 
+  /**
+   * The controls, ported from the council wall rather than reinvented.
+   *
+   * Two things there were learned the hard way and are the reason this is a
+   * copy rather than a fresh attempt:
+   *
+   * 1. **Scrolling is PageUp/PageDown, not tmux copy-mode.** Claude Code runs
+   *    on the alternate screen, so the pane accumulates no history at all —
+   *    `history_size` stays 0 and copy-mode has nothing to page through. The
+   *    TUI scrolls its own transcript when it receives the key.
+   * 2. **A synthetic KeyboardEvent needs the legacy numeric codes.** xterm's
+   *    handler silently no-ops on `key`/`code` alone: the event fires, nothing
+   *    errors, and `onData` simply never runs.
+   *
+   * Also recorded there as tried and useless: driving `.xterm-viewport.scrollTop`,
+   * and synthetic WheelEvents.
+   */
+  var LEGACY_KEY_CODE = { PageUp: 33, PageDown: 34, Enter: 13 };
+
+  function helperTextarea() {
+    try { return frame.contentDocument && frame.contentDocument.querySelector('.xterm-helper-textarea'); }
+    catch (err) { return null; }
+  }
+
+  function page(key) {
+    var area = helperTextarea();
+    var win = frame.contentWindow;
+    if (!area || !win) { toast('The terminal is still starting.'); return; }
+    // preventScroll: xterm anchors this textarea to the cursor row, so a plain
+    // focus() yanks the page to reveal it.
+    area.focus({ preventScroll: true });
+    var code = LEGACY_KEY_CODE[key] || 0;
+    // The iframe's own constructor: cross-realm ones are not interchangeable.
+    area.dispatchEvent(new win.KeyboardEvent('keydown', {
+      key: key, bubbles: true, cancelable: true, keyCode: code, which: code
+    }));
+  }
+
+  /** Everything on screen, as text a browser can select. xterm paints a canvas. */
+  function screenText() {
+    var t = term();
+    if (!t || !t.buffer) return '';
+    var buf = t.buffer.active;
+    var lines = [];
+    for (var i = 0; i < buf.length; i++) {
+      var line = buf.getLine(i);
+      if (line) lines.push(line.translateToString(true));
+    }
+    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
   var controls = node('div', 'termcontrols');
   function control(label, glyph, run) {
     var b = node('button', null, glyph);
@@ -2855,6 +2906,9 @@ function terminalPanel(onClose) {
     return b;
   }
 
+  control('Scroll up', '▲', function () { page('PageUp'); });
+  control('Scroll down', '▼', function () { page('PageDown'); });
+
   control('Copy the selection', '⧉', async function () {
     var t = term();
     var text = t && t.getSelection ? t.getSelection() : '';
@@ -2862,14 +2916,56 @@ function terminalPanel(onClose) {
     try { await navigator.clipboard.writeText(text); toast('Copied.'); }
     catch (err) { toast('The browser would not let me use the clipboard.', true); }
   });
-  // These drive tmux, not xterm. An attached session keeps its history in tmux,
-  // so the emulator's own buffer is empty and `scrollLines` moved nothing —
-  // which is exactly what it looked like. Reaching the scrollback means
-  // copy-mode, and the pane is read-only, so it goes over the authenticated key
-  // path instead. Scrolling is not steering: none of it reaches a conversation.
-  control('Scroll up', '↑', function () { sendKeys([{ text: '@scroll-up', literal: false }]); });
-  control('Scroll down', '↓', function () { sendKeys([{ text: '@scroll-down', literal: false }]); });
-  control('Back to live', '⤓', function () { sendKeys([{ text: '@scroll-live', literal: false }]); });
+
+  // Select text, paste and image all go through a dialog on the council wall
+  // rather than straight at the pane. That is not ceremony: a canvas cannot be
+  // selected, and a paste that goes in unseen lands in a live conversation.
+  control('Select text', '❏', function () {
+    var text = screenText();
+    if (!text) { toast('The terminal is still starting.'); return; }
+    openModal('Text from the terminal', 'Everything on screen, as text you can select and copy.', function (body) {
+      var pre = node('pre', 'termtext', text);
+      body.appendChild(pre);
+      var actions = node('div', 'modal-actions');
+      var copy = node('button', 'sm', 'Copy all');
+      copy.type = 'button';
+      copy.addEventListener('click', async function () {
+        try { await navigator.clipboard.writeText(text); toast('Copied.'); }
+        catch (err) { toast('The browser would not let me use the clipboard.', true); }
+      });
+      actions.appendChild(copy);
+      body.appendChild(actions);
+    });
+  });
+
+  control('Paste text', '⎘', function () {
+    openModal('Paste into the terminal', 'This goes into a live session. Read it before you send it.', function (body, modal, dismiss) {
+      var field = document.createElement('textarea');
+      field.className = 'termpaste';
+      field.rows = 6;
+      field.placeholder = 'Text to type into the terminal…';
+      body.appendChild(field);
+      var actions = node('div', 'modal-actions');
+      var cancel = node('button', 'sm', 'Cancel');
+      cancel.type = 'button';
+      cancel.addEventListener('click', dismiss);
+      var send = node('button', 'sm', 'Paste it in');
+      send.type = 'button';
+      send.addEventListener('click', function () {
+        var t = term();
+        if (!t || !t.paste) { toast('The terminal is still starting.'); return; }
+        if (!field.value) { dismiss(); return; }
+        t.paste(field.value);
+        dismiss();
+        toast('Pasted.');
+      });
+      actions.appendChild(cancel);
+      actions.appendChild(send);
+      body.appendChild(actions);
+      field.focus();
+    });
+  });
+
   if (onClose) control('Close', '✕', onClose).className = 'termclose';
   bar.appendChild(controls);
 

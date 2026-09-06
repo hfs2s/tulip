@@ -404,21 +404,14 @@ async function serveTerminal(): Promise<void> {
 
   if (Date.parse(request.watchUntil) < Date.now()) return stopStreaming();
 
-  const { listWindows, capture, scrollPane, scrollToLive, sendKey, sendText } = await import('./tmux.js');
+  const { listWindows, capture, sendKey, sendText } = await import('./tmux.js');
   const windows = await listWindows();
   const window = resolveWindow(request.window, windows);
 
   if (window !== null) {
     const fresh = keysToApply(request.keySeq, request.keys, appliedKeySeq);
     for (const key of fresh) {
-      // Three names the panel sends that are not keystrokes. Scrolling is a
-      // tmux operation rather than something the pane can be told, and it is
-      // allowed here despite the pane being read-only because nothing about it
-      // can reach a conversation.
-      if (!key.literal && key.text === '@scroll-up') await scrollPane(window, 'up');
-      else if (!key.literal && key.text === '@scroll-down') await scrollPane(window, 'down');
-      else if (!key.literal && key.text === '@scroll-live') await scrollToLive(window);
-      else if (key.literal) await sendText(window, key.text);
+      if (key.literal) await sendText(window, key.text);
       else await sendKey(window, key.text);
       appliedKeySeq = key.index;
     }
