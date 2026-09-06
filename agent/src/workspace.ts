@@ -23,6 +23,16 @@ export const PERSONA_DIR = process.env['TULIP_PERSONA'] ?? '/persona';
 /** Assembled in this order: who she is, how she carries herself, how she works. */
 const PERSONA_PARTS = ['IDENTITY.md', 'VOICE.md', 'OPERATING.md', 'BOUNDARIES.md'] as const;
 
+/**
+ * How many remembered notes the brief carries.
+ *
+ * Claude Code refuses to carry a CLAUDE.md past 40k characters, and the persona
+ * is most of that already. Forty notes is a few thousand characters and leaves
+ * the brief itself room; the rest stay in the store, and anything new arrives
+ * through the prompt hook rather than by growing this file.
+ */
+const MEMORY_IN_BRIEF = 40;
+
 export interface ChatWorkspace {
   readonly chatKey: string;
   readonly dir: string;
@@ -126,18 +136,28 @@ function markMemorySeen(workspace: ChatWorkspace): void {
 function sharedMemory(): string {
   try {
     const raw = readFileSync(inPaths.memory, 'utf8');
-    const notes = (JSON.parse(raw) as { notes?: Array<{ text?: unknown }> }).notes ?? [];
+    const all = (JSON.parse(raw) as { notes?: Array<{ text?: unknown }> }).notes ?? [];
+    // Capped, because the brief has a ceiling and this does not: the store holds
+    // two hundred notes of three hundred characters, which is 60k on its own —
+    // more than Claude Code will carry, and it would push the persona out to
+    // make room. The newest are the ones worth having, and anything recorded
+    // after this session started arrives through the prompt hook anyway.
+    const notes = all.slice(-MEMORY_IN_BRIEF);
+    const older = all.length - notes.length;
     const lines = notes
       .map((n) => (typeof n.text === 'string' ? n.text.trim() : ''))
       .filter((t) => t.length > 0)
       .map((t) => `- ${t}`);
     if (lines.length === 0) return '';
+    const elided = older > 0
+      ? ` The ${String(older)} oldest are not shown here; ask an operator if you need them.`
+      : '';
     return (
       `\n\n## Remembered\n\n` +
       `Things you have been asked to remember. They are shared by every ` +
       `conversation, so treat them as things you know rather than as things ` +
       `somebody here told you — and never repeat one back in a way that reveals ` +
-      `which chat it came from.\n\n${lines.join('\n')}\n`
+      `which chat it came from.${elided}\n\n${lines.join('\n')}\n`
     );
   } catch {
     return '';
