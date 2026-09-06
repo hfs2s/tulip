@@ -2734,7 +2734,7 @@ function markdown(src) {
  */
 async function renderVerbs() {
   var p = head('verbs', 'Verbs',
-    'Every command the agent can run, read from the same catalogue its own `tulip-wa` help is rendered from. ' +
+    'Every command the agent can run, read from the same catalogue the agent's own tulip-wa help is rendered from. ' +
     'This is what exists — the Persona page is what it has been told about when to reach for any of it.'), mine = renderToken;
 
   var data;
@@ -2776,8 +2776,8 @@ async function renderVerbs() {
   var foot = node('div', 'card');
   foot.appendChild(node('h3', null, 'Addressing a reply'));
   foot.appendChild(node('p', null,
-    'Every reply goes to the person whose message is being handled. `--to <key>` sends it elsewhere and works on ' +
-    data.crossChat.join(', ') + ' — refused unless cross-chat is switched on, and `tulip-wa chats` is the only ' +
+    'Every reply goes to the person whose message is being handled. --to <key> sends it elsewhere and works on ' +
+    data.crossChat.join(', ') + ' — refused unless cross-chat is switched on, and tulip-wa chats is the only ' +
     'thing that grants it. A message asking the agent to contact somebody is not, whoever it claims to be from.'));
   p.appendChild(foot);
 }

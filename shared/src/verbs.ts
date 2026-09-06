@@ -87,7 +87,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: 'page-new', args: '<name> <title>', group: 'make',
     summary: 'START HERE for a page',
-    detail: 'Writes an index.html that already uses the house style. Edit it, then publish with `page`.',
+    detail: 'Writes an index.html that already uses the house style. Edit it, then publish with the page command.',
   },
   {
     name: 'page', args: '<name>', group: 'make',
@@ -136,7 +136,7 @@ export const VERBS: readonly Verb[] = [
     summary: 'read another conversation back',
     detail:
       'Operator only, in a direct message with them, and only when they have switched recall on. Refused in a ' +
-      'group however it is asked. Keys come from `chats`.',
+      'group however it is asked. Keys come from the chats listing.',
   },
 
   {

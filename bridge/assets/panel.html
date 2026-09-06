@@ -215,7 +215,11 @@
   .args{color:var(--faint)}
   /* The tags sit at the end of the row rather than under the text, so a scan
      down the right-hand edge answers "what needs switching on" on its own. */
-  .verbtags{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex:none;padding-left:12px}
+  /* `margin-left:auto` rather than flexing the text column: .entry is a flex
+     row whose first child sizes to content, so without this the tags sit
+     wherever the longest line happens to end. */
+  .verbtags{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex:none;
+            margin-left:auto;align-self:flex-start;padding:2px 0 0 12px}
   .said{white-space:pre-wrap;overflow-wrap:anywhere}
   .why{font-size:12.5px;color:var(--warn);margin-top:3px}
 
