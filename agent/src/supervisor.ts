@@ -30,7 +30,6 @@ import { log } from './log.js';
 import { UsageMeter } from './usage.js';
 import { SessionPool, type Session } from './sessions.js';
 import { keysToApply } from './terminal.js';
-import { startTtyd } from './ttyd.js';
 import { setTurn } from './workspace.js';
 
 const POLL_MS = 500;
@@ -450,11 +449,6 @@ async function main(): Promise<void> {
     thinking: process.env['MAX_THINKING_TOKENS'] === '0' ? 'disabled' : 'default',
   });
   publishStatus();
-
-  // Started once and supervised. Idle it costs nothing, and the socket is
-  // reachable only through the bridge, so there is no window during which a
-  // terminal exists but the gate does not.
-  startTtyd();
 
   setInterval(publishStatus, STATUS_MS).unref();
   publishUsage();

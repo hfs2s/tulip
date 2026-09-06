@@ -107,19 +107,6 @@ export const outPaths = {
    */
   pages: `${OUT_DIR}/pages`,
   page: (slug: string) => `${OUT_DIR}/pages/${slug}`,
-  /**
-   * ttyd's UNIX socket, and the reason the terminal is not a network service.
-   *
-   * ttyd listens here; the bridge connects. That direction is the whole safety
-   * argument: the agent gains no way to dial the bridge, and its container
-   * keeps `internal: true` with no route, no published port and no DNS. A
-   * terminal was added without adding a network.
-   *
-   * On the outbound volume because that is the one the agent may write to. The
-   * bridge mounts it read-write and is the only other thing that can see it.
-   */
-  ttyd: `${OUT_DIR}/ttyd.sock`,
-
   /** The agent's self-report. Advisory; never used for a delivery decision. */
   status: `${OUT_DIR}/status.json`,
 
