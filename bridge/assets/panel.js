@@ -2890,41 +2890,140 @@ async function renderVerbs() {
   p.appendChild(foot);
 }
 
+/**
+ * What the agent has written down, and how much of it it is actually carrying.
+ *
+ * This is an audit surface, not a log: a note here is repeated into every
+ * conversation with everybody, so the reason to open the page is to find the one
+ * that is wrong and take it out. The text is therefore the loudest thing on the
+ * row and the destructive button the quietest, which is the opposite of how it
+ * read before.
+ *
+ * The one fact worth designing around is the brief cap. Only the newest
+ * MEMORY_IN_BRIEF notes are assembled into the agent's CLAUDE.md; past that a
+ * note is still stored and still listed, and is not in its head. Nothing in the
+ * panel said so, and the difference between "it knows this" and "it has this
+ * filed away" is the difference between a note being worth writing and not.
+ */
+var MEMORY_IN_BRIEF = 40;
+
+/** Where a note came from, said in words rather than in a key. */
+function noteSource(n) {
+  if (n.chatName) return n.chatName;
+  // Redacted for a moderator who may not see that conversation.
+  if (n.chatKey === null) return 'another conversation';
+  // An unnamed group: sixteen hex characters tell an operator nothing on their
+  // own, so the key is offered as identification rather than as the answer.
+  return null;
+}
+
 async function renderMemory() {
-  var p = head('memory', 'Memory', 'Things the agent has deliberately written down. It now runs as one session across every chat, so it carries far more than this — what makes these different is that they survive a restart and are carried into the brief itself, rather than only living in a context window.'), mine = renderToken;
+  var p = head('memory', 'Memory',
+    'What Tulip has chosen to write down. Unlike the conversations themselves these survive a restart, and every one of them is assembled into the brief it starts each session with — so a note that is wrong is repeated to everybody, and taking it out is the point of this page.'), mine = renderToken;
+
+  var data;
+  try {
+    data = await api('/api/memory');
+  } catch (err) {
+    var failed = node('div', 'card');
+    failed.appendChild(node('p', 'empty', err.message));
+    p.appendChild(failed);
+    return;
+  }
+  if (stale(mine)) return;
+
+  var notes = data.notes.slice().reverse();  // newest first
+  if (!notes.length) {
+    var none = node('div', 'card');
+    none.appendChild(node('p', 'empty',
+      'Nothing written down yet. Tulip records a note when it decides something is worth carrying between conversations, or when you ask it to remember something.'));
+    p.appendChild(none);
+    return;
+  }
+
+  var filter = document.createElement('input');
+  filter.type = 'search';
+  filter.className = 'memfilter';
+  filter.placeholder = 'Filter notes';
+  filter.setAttribute('aria-label', 'Filter notes');
+  p.appendChild(filter);
+
   var card = node('div', 'card');
   p.appendChild(card);
 
-  var data;
-  try { data = await api('/api/memory'); } catch (err) { card.appendChild(node('p', 'empty', err.message)); return; }
-  if (stale(mine)) return;
-
-  if (!data.notes.length) { card.appendChild(node('p', 'empty', 'Nothing remembered yet.')); return; }
-
-  data.notes.slice().reverse().forEach(function (n) {
-    var row = node('div', 'entry');
-    var left = node('div');
-    left.appendChild(node('div', null, n.text));
-    left.appendChild(node('div', 'hint', 'from ' + (n.chatName || n.chatKey) + ' · ' + ago(Date.now() - Date.parse(n.at))));
-    row.appendChild(left);
-    var bin = node('button', 'sm danger', 'Forget');
-    bin.type = 'button';
-    bin.addEventListener('click', function () {
-      if (!window.confirm('Forget this?\n\n' + n.text)) return;
-      act('memory/forget', null, '?id=' + encodeURIComponent(n.id));
+  function paint() {
+    clear(card);
+    var q = filter.value.trim().toLowerCase();
+    var shown = notes.filter(function (n) {
+      return !q || (n.text || '').toLowerCase().indexOf(q) >= 0
+        || ((noteSource(n) || n.chatKey || '')).toLowerCase().indexOf(q) >= 0;
     });
-    row.appendChild(bin);
-    card.appendChild(row);
-  });
 
+    if (!shown.length) {
+      card.appendChild(node('p', 'empty', 'No note matches that.'));
+      return;
+    }
+
+    var day = null;
+    shown.forEach(function (n) {
+      // The date the note was written, as a heading over the notes it belongs
+      // to. Time is the one real sequence in this list, so it is the one thing
+      // allowed to divide it.
+      var when = new Date(n.at);
+      var stamp = when.toDateString();
+      if (stamp !== day) {
+        day = stamp;
+        card.appendChild(node('h3', 'memday', dayLabel(when.getTime())));
+      }
+
+      // Everything from here down is not in the brief. Drawn once, where the
+      // boundary actually falls, rather than marked on every row.
+      if (notes.indexOf(n) === MEMORY_IN_BRIEF) {
+        var edge = node('div', 'memedge');
+        edge.appendChild(node('span', null,
+          'Below this line: kept, but not carried. Only the newest ' + MEMORY_IN_BRIEF
+          + ' notes go into the brief Tulip starts a session with.'));
+        card.appendChild(edge);
+      }
+
+      var row = node('div', 'memnote' + (notes.indexOf(n) >= MEMORY_IN_BRIEF ? ' cold' : ''));
+      row.appendChild(node('p', 'memtext', n.text));
+
+      var from = noteSource(n);
+      var meta = node('p', 'memfrom');
+      meta.appendChild(document.createTextNode(
+        from ? 'Learned from ' + from : 'Learned in an unnamed group '));
+      if (!from && n.chatKey) meta.appendChild(node('span', 'key', n.chatKey));
+      meta.appendChild(document.createTextNode(', ' + ago(Date.now() - Date.parse(n.at))));
+      row.appendChild(meta);
+
+      var bin = node('button', 'sm memforget', 'Forget');
+      bin.type = 'button';
+      bin.setAttribute('aria-label', 'Forget this note');
+      bin.addEventListener('click', function () {
+        if (!window.confirm('Forget this?\n\n' + n.text)) return;
+        act('memory/forget', null, '?id=' + encodeURIComponent(n.id));
+      });
+      row.appendChild(bin);
+      card.appendChild(row);
+    });
+  }
+
+  filter.addEventListener('input', paint);
+  paint();
+
+  var foot = node('div', 'memfoot');
+  foot.appendChild(node('span', 'muted',
+    notes.length + (notes.length === 1 ? ' note' : ' notes')
+    + (notes.length > MEMORY_IN_BRIEF ? ', ' + MEMORY_IN_BRIEF + ' of them carried' : ', all carried')));
   var all = node('button', 'sm danger', 'Forget everything');
   all.type = 'button';
-  all.style.marginTop = '16px';
   all.addEventListener('click', function () {
-    if (!window.confirm('Forget all ' + data.notes.length + ' remembered notes?\n\nNothing keeps a copy.')) return;
+    if (!window.confirm('Forget all ' + notes.length + ' notes?\n\nNothing keeps a copy.')) return;
     act('memory/forget', null, '?id=all');
   });
-  card.appendChild(all);
+  foot.appendChild(all);
+  p.appendChild(foot);
 }
 
 /**
