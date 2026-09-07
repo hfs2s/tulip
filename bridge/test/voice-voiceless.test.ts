@@ -117,13 +117,13 @@ describe('a language with no mouth', () => {
     expect(h.spentToday('voice')).toBe(0);
   });
 
-  it('applies to every withdrawn language, not only the one with a row', async () => {
+  it('applies to every language without a matching male voice', async () => {
     // The regression this closes: the rule used to key off `SPOKEN_LANGUAGES`,
-    // so a language with no row was always spoken. Vietnamese and Turkish had
-    // been withdrawn from the panel months earlier and were still being read
+    // so a language with no row was always spoken. Vietnamese had been
+    // withdrawn from the panel and was still being read
     // aloud by whichever default voice was configured — the row was the visible
     // half of the decision and the delivery was the half that mattered.
-    for (const language of ['Swedish', 'Vietnamese', 'Turkish']) {
+    for (const language of ['Swedish', 'Vietnamese']) {
       sent = [];
       synthesised = [];
       const h = await harness();

@@ -67,8 +67,8 @@ export function resolveVoice(config: Config, language: string): ResolvedVoice {
  * **Keyed on the boost, not on the row, and that is the whole correctness
  * argument.** An earlier version asked whether the *row* was flagged, which
  * quietly meant a language with no row was always spoken — so withdrawing
- * Vietnamese and Turkish from `SPOKEN_LANGUAGES` removed them from the panel
- * and left them being read aloud by whichever default voice was configured.
+ * Vietnamese from `SPOKEN_LANGUAGES` removed it from the panel and left it
+ * being read aloud by whichever default voice was configured.
  * Removing a row is a statement about what an operator can configure; it is not
  * a statement about what leaves the building. `UNSPOKEN_BOOSTS` is the second.
  *

@@ -46,6 +46,7 @@ describe('the languages added after the original nine', () => {
     for (const name of [
       'Dutch', 'German', 'Arabic', 'Mandarin', 'Russian', 'Japanese',
       'Czech', 'Greek', 'Hindi', 'Korean', 'Polish', 'Thai', 'Ukrainian',
+      'Cantonese', 'Finnish', 'Romanian', 'Turkish',
     ]) {
       expect(spokenLanguageFor(name)?.name, name).toBe(name);
     }
@@ -63,7 +64,7 @@ describe('the languages added after the original nine', () => {
     // concurrent edit and twice removed again, so this asserts the instruction
     // rather than accommodating the restoration. If Swedish comes back as a
     // row, this test fails, which is the point.
-    for (const withdrawn of ['Swedish', 'Vietnamese', 'Turkish']) {
+    for (const withdrawn of ['Swedish', 'Vietnamese']) {
       expect(spokenLanguageFor(withdrawn), withdrawn).toBeNull();
       expect(isUnspoken(withdrawn), withdrawn).toBe(true);
       // Still a value the provider accepts: written replies are unaffected, and
@@ -100,10 +101,11 @@ describe('the languages added after the original nine', () => {
 
   it('sends Mandarin as the provider spells it', () => {
     // The row is named for what the agent says; `Chinese` is what the request
-    // carries. Cantonese is a different value — `Chinese,Yue` — and has no row,
-    // so it must not quietly land on this one.
+    // carries. Cantonese is a different value — `Chinese,Yue` — and must land
+    // on its own row rather than quietly sharing this one.
     expect(spokenLanguageFor('Mandarin')?.boost).toBe('Chinese');
     expect(spokenLanguageFor('Chinese')?.name).toBe('Mandarin');
-    expect(spokenLanguageFor('Cantonese')).toBeNull();
+    expect(spokenLanguageFor('Cantonese')?.name).toBe('Cantonese');
+    expect(spokenLanguageFor('Cantonese')?.boost).toBe('Chinese,Yue');
   });
 });
