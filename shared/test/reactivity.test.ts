@@ -7,7 +7,7 @@
  * no dial, because it looks like it worked.
  */
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_REACTIVITY, REACTIVITY, reactivityInstruction, reactivityLevel } from '../src/reactivity.js';
+import { ALWAYS_ANSWER, DEFAULT_REACTIVITY, REACTIVITY, reactivityInstruction, reactivityLevel } from '../src/reactivity.js';
 
 describe('the levels', () => {
   it('runs 0 to 4 with no gaps, because the slider indexes straight into it', () => {
@@ -61,6 +61,41 @@ describe('reactivityInstruction', () => {
   it('carries each level’s own instruction unchanged', () => {
     for (const level of REACTIVITY) {
       expect(reactivityInstruction(level.value)).toContain(level.instruction);
+    }
+  });
+});
+
+/**
+ * Being addressed is not a judgement call.
+ *
+ * The dial governs whether to speak when nobody asked. It shipped governing
+ * both, and the agent went quiet on direct @-mentions in two groups within the
+ * hour — because "silence is the normal answer" was the first thing it read on
+ * every group turn, with no carve-out.
+ */
+describe('a direct mention is answered at every level', () => {
+  it('carries the rule on every level, including the quietest', () => {
+    for (const level of REACTIVITY) {
+      const line = reactivityInstruction(level.value);
+      expect(line, `level ${String(level.value)}`).toContain('@-mention');
+      expect(line, `level ${String(level.value)}`).toContain(ALWAYS_ANSWER);
+    }
+  });
+
+  it('states it before the tone, so it is not read as an exception to it', () => {
+    for (const level of REACTIVITY) {
+      const line = reactivityInstruction(level.value);
+      expect(line.indexOf(ALWAYS_ANSWER), `level ${String(level.value)}`)
+        .toBeLessThan(line.indexOf('Group tone'));
+    }
+  });
+
+  it('never tells the agent that silence is simply the normal answer', () => {
+    // The exact phrasing that suppressed the mentions. A level may still ask
+    // for restraint, but not as an unqualified default.
+    for (const level of REACTIVITY) {
+      expect(level.instruction.toLowerCase(), `level ${String(level.value)}`)
+        .not.toContain('silence is the normal answer');
     }
   });
 });
