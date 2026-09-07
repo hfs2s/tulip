@@ -1064,6 +1064,10 @@ const SettingsPatch = z
       outboundPerChatPerHour: z.number().int().min(1).max(1000).optional(),
       turnTimeoutMs: z.number().int().min(30_000).max(3_600_000).optional(),
     }).strict().optional(),
+    privacy: z.object({
+      owner: z.string().max(320).nullable().optional(),
+      chats: z.array(z.string().max(64)).max(200).optional(),
+    }).strict().optional(),
     pages: z.object({
       open: z.boolean().optional(),
       // Loose here on purpose: the merged result is validated by `parseConfig`
@@ -1221,6 +1225,50 @@ export function setPagePassword(deps: ApiDeps, slug: string, body: unknown): { o
   return written.ok
     ? { ok: true, message: 'Password set. Anyone you send the link to needs it too.' }
     : written;
+}
+
+/**
+ * Claim, or release, ownership of this deployment's private chats.
+ *
+ * Ownership is claimed rather than typed: the email comes from the verified
+ * Access assertion of whoever pressed the button, never from a form field. An
+ * operator typing an address in could hand their own conversations to somebody
+ * else with one autocorrect, and a field that accepts any string is a field
+ * somebody eventually points at an address they do not control.
+ */
+export function claimPrivacy(deps: ApiDeps, who: string | null): { ok: boolean; message: string } {
+  if (who === null) {
+    return {
+      ok: false,
+      message: 'This only works signed in through Access — the shared token says nothing about who you are.',
+    };
+  }
+  const written = updateSettings(deps, { privacy: { owner: who } });
+  return written.ok ? { ok: true, message: `Your chats are now private to ${who}.` } : written;
+}
+
+export function releasePrivacy(deps: ApiDeps): { ok: boolean; message: string } {
+  const written = updateSettings(deps, { privacy: { owner: null } });
+  return written.ok
+    ? { ok: true, message: 'Privacy is off. Every moderator sees every conversation again.' }
+    : written;
+}
+
+/** Mark one conversation private, or stop. */
+export function setChatPrivate(deps: ApiDeps, chatKey: string, priv: boolean): { ok: boolean; message: string } {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'No such conversation.' };
+  const current = deps.config.privacy.chats;
+  const next = priv
+    ? [...new Set([...current, chatKey])]
+    : current.filter((k) => k !== chatKey);
+  const written = updateSettings(deps, { privacy: { chats: next } });
+  if (!written.ok) return written;
+  return {
+    ok: true,
+    message: priv
+      ? 'Hidden from other moderators.'
+      : 'Visible to every moderator again.',
+  };
 }
 
 export function setPagePasswords(

@@ -423,6 +423,37 @@ const Pages = z
   .strict()
   .default({});
 
+/**
+ * Which conversations are the operator's own, and hidden from other moderators.
+ *
+ * The panel used to be all-or-nothing: anyone who got in saw every message in
+ * every chat. That is right for one operator and wrong the moment a second
+ * person is let in, because the operator's own conversation with the agent sits
+ * in the same list as everybody else's.
+ *
+ * Read `bridge/src/privacy.ts` before relying on this. The short version: it
+ * works only against people who arrive through Cloudflare Access, because the
+ * bearer token is a secret rather than an identity and everyone holding it is
+ * the same anonymous caller; and it hides a conversation from a colleague
+ * looking at a web page, not from anyone who can reach the host's disk.
+ */
+const Privacy = z
+  .object({
+    /**
+     * The Access email whose chats are private. Null switches this off.
+     *
+     * Off is the default and an unmatched address behaves as off, so a typo
+     * costs a leak rather than locking the operator out of their own panel.
+     * That direction is deliberate; the reverse fails in a way nobody notices
+     * until they are shut out.
+     */
+    owner: z.string().max(320).nullable().default(null),
+    /** Chat keys only the owner may see, anywhere in the panel. */
+    chats: z.array(z.string().regex(/^[0-9a-f]{16}$/)).max(200).default([]),
+  })
+  .strict()
+  .default({});
+
 export const ConfigSchema = z
   .object({
     audience: Audience,
@@ -433,6 +464,7 @@ export const ConfigSchema = z
     panel: Panel,
     delivery: Delivery,
     pages: Pages,
+    privacy: Privacy,
   })
   .strict();
 
