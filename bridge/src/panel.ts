@@ -393,7 +393,12 @@ export function startPanel(deps: ApiDeps): Server | null {
       // it is more sensitive than the rest: it is a live pty carrying every
       // conversation at once, so unlike a list it cannot be filtered. All or
       // nothing are the only honest options, and this is nothing.
-      if (!unrestricted && url.pathname.startsWith('/terminal')) {
+      //
+      // `PTY_PREFIX`, not '/terminal'. This guarded '/terminal' first, which
+      // nothing serves — the proxy is mounted at /pty — so the nav item was
+      // hidden and the API refused while the writable shell behind them
+      // answered 200 to anybody who typed the address.
+      if (!unrestricted && (url.pathname === PTY_PREFIX || url.pathname.startsWith(`${PTY_PREFIX}/`))) {
         res.writeHead(403, { ...headers, 'content-type': 'text/plain; charset=utf-8' })
           .end('The terminal is available to the operator who owns this deployment.\n');
         return;
@@ -404,7 +409,6 @@ export function startPanel(deps: ApiDeps): Server | null {
           message: 'The terminal is available to the operator who owns this deployment.',
         });
       }
-
       // One gate for every read path that names a conversation. Written once
       // rather than seven times, because the way this fails is one surface
       // quietly not being filtered — and a single page that still shows the
@@ -843,18 +847,40 @@ export function startPanel(deps: ApiDeps): Server | null {
    * shell — is the worst possible thing to leave open.
    */
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    const url = new URL(req.url ?? '/', 'http://panel.invalid');
-    if (url.pathname !== PTY_PREFIX && !url.pathname.startsWith(`${PTY_PREFIX}/`)) {
-      socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
-      return;
-    }
-    const supplied = cookieValue(req.headers.cookie, COOKIE);
-    if (supplied === null || !tokenMatches(supplied, token)) {
-      log('pty.upgradeRefused', { address: req.socket.remoteAddress ?? 'unknown' });
-      socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
-      return;
-    }
-    proxyUpgrade(req, socket, head);
+    void (async (): Promise<void> => {
+      const url = new URL(req.url ?? '/', 'http://panel.invalid');
+      if (url.pathname !== PTY_PREFIX && !url.pathname.startsWith(`${PTY_PREFIX}/`)) {
+        socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
+        return;
+      }
+
+      // Who, not just whether. The cookie says its holder knows a secret; once
+      // privacy names an owner, that is no longer enough to open a writable
+      // shell carrying every conversation. An Access assertion travels on the
+      // upgrade request like any other header, so the same identity is
+      // available here as on an ordinary request.
+      let who: string | null = null;
+      let credentialled = false;
+      const supplied = cookieValue(req.headers.cookie, COOKIE);
+      if (supplied !== null && tokenMatches(supplied, token)) credentialled = true;
+      if (access !== null) {
+        const header = req.headers['cf-access-jwt-assertion'];
+        const assertion = Array.isArray(header) ? header[0] : header;
+        const email = await verifiedEmail(assertion, access);
+        if (email !== null) { who = email; credentialled = true; }
+      }
+      if (!credentialled) {
+        log('pty.upgradeRefused', { address: req.socket.remoteAddress ?? 'unknown', why: 'no credential' });
+        socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        return;
+      }
+      if (!isOwner(deps.config.privacy, { who })) {
+        log('pty.upgradeRefused', { address: req.socket.remoteAddress ?? 'unknown', why: 'not the owner' });
+        socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+        return;
+      }
+      proxyUpgrade(req, socket, head);
+    })();
   });
 
   feed.on('entry', (row: unknown) => {
