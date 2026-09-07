@@ -314,8 +314,8 @@ const Agent = z
     /**
      * A voice per spoken language, overriding `voiceId` for that one.
      *
-     * One mouth for eight languages is one mouth that is wrong for seven of
-     * them. The keys are the languages the agent actually speaks — see
+     * One mouth for eighteen languages is one mouth that is wrong for
+     * seventeen of them. The keys are the languages the agent actually speaks — see
      * `SPOKEN_LANGUAGES` — rather than the provider's boost values, because
      * Cebuano and Filipino send the same boost and an operator may still want a
      * different voice reading each.

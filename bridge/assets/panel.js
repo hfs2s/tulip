@@ -3915,7 +3915,8 @@ async function saveSettings(patch, revert) {
  * top of the page after every single list edit.
  */
 /**
- * The voice matrix: a row per language Juan speaks, each with a voice id.
+ * The voice matrix: a row per language Juan speaks, each with a voice id and a
+ * way to hear it.
  *
  * Free text, deliberately. Voice ids belong to the provider, the catalogue
  * changes, and an operator who has just found one in MiniMax's library should
@@ -3926,19 +3927,84 @@ async function saveSettings(patch, revert) {
  *
  * Saved per row on blur rather than behind one Save button. Each row is
  * independent, an operator changes one and listens to it, and a modal that
- * demands all eight be right before any of them applies is a modal that gets
+ * demands all eighteen be right before any of them applies is a modal that gets
  * abandoned halfway.
+ *
+ * **Play is on the row, next to the field it auditions.** That adjacency is the
+ * whole design: paste an id, press play, hear the change. A separate testing
+ * ground elsewhere on the page would be the same requests with the cause and
+ * the effect in two different places.
+ *
+ * Three things the button has to get right, because it is the only affordance
+ * on the row and every press is billed:
+ *
+ *   · **It always says what it is doing.** Idle, generating, playing, failed —
+ *     a press that appears to do nothing is a press an operator repeats, and
+ *     each repeat costs money.
+ *   · **One voice at a time.** Starting a row stops whatever was talking.
+ *     Eighteen rows that can all speak at once is not a control surface.
+ *   · **It waits for the row to save.** Blurring the field starts a save and
+ *     pressing the button is what blurs it, so without this the preview races
+ *     the change it is meant to demonstrate — and would sometimes play the
+ *     previous id.
  */
 function openVoiceMatrix(s) {
   var rows = (s.spokenLanguages || []).slice();
   var current = (s.agent && s.agent.voices) || {};
   var fallback = (s.agent && s.agent.voiceId) || '';
+  var limits = s.voiceLimits || {};
+  var samples = s.voiceSamples || {};
 
   openModal('Voices by language',
-    'Which mouth reads each language. Ids come from MiniMax’s voice library.',
+    'Which mouth reads each language. Ids come from MiniMax’s voice library, and Play speaks a '
+    + 'real introduction in that language with whichever voice the row resolves to right now.',
     function (body) {
+      // One player for the whole matrix, and one blob at a time. The URL is
+      // revoked as soon as it stops being the thing playing, or a long session
+      // in this modal holds every clip it ever generated in memory.
+      var player = new Audio();
+      var url = null;
+      var owner = null;
+
+      function drop() {
+        if (url) { URL.revokeObjectURL(url); url = null; }
+      }
+      /** Stop whatever is talking and put its row back to idle. */
+      function silence() {
+        var was = owner;
+        owner = null;
+        try { player.pause(); } catch (err) { /* nothing was playing */ }
+        player.removeAttribute('src');
+        drop();
+        if (was) was.idle();
+      }
+      player.addEventListener('ended', function () {
+        var was = owner;
+        owner = null;
+        drop();
+        if (was) was.done();
+      });
+      player.addEventListener('error', function () {
+        var was = owner;
+        owner = null;
+        drop();
+        if (was) was.failed('The browser could not play what came back.');
+      });
+
+      // Closing the modal has to stop the audio, and Escape and a backdrop
+      // click both close it without telling us. The scrim losing its class is
+      // the one signal every dismissal shares.
+      var scrim = el('scrim');
+      var watcher = new MutationObserver(function () {
+        if (scrim.classList.contains('on')) return;
+        watcher.disconnect();
+        silence();
+      });
+      watcher.observe(scrim, { attributes: true, attributeFilter: ['class'] });
+
       var table = node('div', 'vmatrix');
       rows.forEach(function (row) {
+        var limit = limits[row.name] || null;
         var line = node('div', 'vrow');
 
         var names = node('div', 'vname');
@@ -3948,6 +4014,7 @@ function openVoiceMatrix(s) {
         names.appendChild(node('small', null, 'sends ' + row.boost));
         line.appendChild(names);
 
+        var set = node('div', 'vset');
         var input = document.createElement('input');
         input.type = 'text';
         input.className = 'textset';
@@ -3958,6 +4025,48 @@ function openVoiceMatrix(s) {
         input.value = current[row.name] || '';
         input.setAttribute('aria-label', 'Voice id for ' + row.name);
 
+        var play = node('button', 'vplay', '▶ Play');
+        play.type = 'button';
+        play.setAttribute('aria-label', 'Hear ' + row.name);
+        play.title = samples[row.name] || '';
+
+        set.appendChild(input);
+        set.appendChild(play);
+        line.appendChild(set);
+
+        // The status line. One per row, and a live region so a screen reader
+        // hears "generating" and the failure rather than only sighted users.
+        var say = node('p', 'vsay');
+        say.setAttribute('role', 'status');
+        say.setAttribute('aria-live', 'polite');
+        line.appendChild(say);
+        function tell(text, bad) {
+          say.textContent = text || '';
+          say.classList.toggle('bad', !!bad);
+        }
+        if (limit) tell(limit.note);
+
+        /**
+         * A language the provider has no voice for cannot be auditioned, and
+         * offering the press anyway would spend money to play the default
+         * voice reading words it has no idea how to pronounce. The button
+         * comes back the moment an id is typed, because at that point there is
+         * something real to listen to.
+         *
+         * `style.display` rather than the `hidden` attribute: this stylesheet
+         * has `display` rules that beat `[hidden]`, and a control that is only
+         * pretending to be gone is worse than one that is visible.
+         */
+        function offer() {
+          var voiceless = limit && limit.voiceless && input.value.trim().length === 0;
+          play.style.display = voiceless ? 'none' : '';
+        }
+        offer();
+        input.addEventListener('input', offer);
+
+        // The save this row started, if any. Play waits on it — see the
+        // docblock — so an id typed a moment ago is the id being auditioned.
+        var pending = null;
         var was = input.value;
         input.addEventListener('blur', function () {
           var next = input.value.trim();
@@ -3965,18 +4074,84 @@ function openVoiceMatrix(s) {
           var patch = {};
           patch[row.name] = next;
           was = next;
-          saveSettings({ agent: { voices: patch } }, function () {
+          pending = saveSettings({ agent: { voices: patch } }, function () {
             input.value = was = current[row.name] || '';
+            offer();
           });
           current[row.name] = next;
         });
-        line.appendChild(input);
+
+        var api = {
+          idle: function () { play.textContent = '▶ Play'; play.disabled = false; play.classList.remove('on'); },
+          done: function (voice) {
+            play.textContent = '▶ Play';
+            play.disabled = false;
+            play.classList.remove('on');
+            if (voice) tell('Spoken by ' + voice + '.');
+          },
+          failed: function (message) {
+            play.textContent = '▶ Retry';
+            play.disabled = false;
+            play.classList.remove('on');
+            tell(message, true);
+          }
+        };
+        // `done` is called by the shared player with no argument, so the voice
+        // that spoke is remembered on the row rather than passed through it.
+        var spoke = '';
+        var finish = api.done;
+        api.done = function () { finish(spoke); };
+
+        play.addEventListener('click', async function () {
+          // A second press on the row that is talking is Stop. Nothing is
+          // generated and nothing is billed.
+          if (owner === api) { silence(); tell(limit ? limit.note : ''); return; }
+          silence();
+          play.disabled = true;
+          play.textContent = '• Generating…';
+          tell('Asking MiniMax for this line, live. It is billed once per press.');
+          try {
+            if (pending) { try { await pending; } catch (err) { /* the save reported itself */ } }
+            var res = await fetch('/api/voice/preview', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ language: row.name })
+            });
+            if (!res.ok) {
+              var refusal = null;
+              try { refusal = await res.json(); } catch (err) { /* not JSON: keep the status */ }
+              throw new Error((refusal && refusal.message) || 'The bridge answered ' + res.status + '.');
+            }
+            spoke = res.headers.get('x-voice-id') || 'the default voice';
+            var clip = await res.blob();
+            silence();
+            url = URL.createObjectURL(clip);
+            owner = api;
+            player.src = url;
+            await player.play();
+            // Another row may have been pressed while this one was fetching,
+            // in which case it is now the one talking and this button must not
+            // claim to be.
+            if (owner !== api) return;
+            play.textContent = '■ Stop';
+            play.disabled = false;
+            play.classList.add('on');
+            tell('Playing, in ' + spoke + '.');
+          } catch (err) {
+            if (owner === api) owner = null;
+            api.failed(err.message);
+          }
+        });
+
         table.appendChild(line);
       });
       body.appendChild(table);
       body.appendChild(node('p', 'hint',
-        'Blank uses the default voice. A voice id the provider does not know fails the whole '
-        + 'request, so Juan sends the words as text instead — the Log says which id was refused.'));
+        'Blank uses the default voice, and Play auditions it — that is genuinely what a note in '
+        + 'that language sounds like today. A voice id the provider does not know fails the whole '
+        + 'request, so Juan sends the words as text instead; press Play and the refusal is shown on '
+        + 'the row rather than left in the Log. Each press is a real synthesis call and is billed, '
+        + 'so they are limited to six a minute.'));
     });
 }
 
@@ -4747,10 +4922,12 @@ async function renderSettings() {
   open.type = 'button';
   open.addEventListener('click', function () { openVoiceMatrix(s); });
   field(tools, 'Voice per language',
-    'One voice for eight languages is one voice that is wrong for seven of them. Set a voice id for '
-    + 'each language Juan speaks; anything left blank uses the default above. Cebuano and Filipino send '
-    + 'the same setting to the provider — there is one Austronesian voice family — but they are separate '
-    + 'rows here so you can read them in different mouths if you want to.',
+    'One voice for eighteen languages is one voice that is wrong for seventeen of them. Set a voice id '
+    + 'for each language Juan speaks and press Play on the row to hear it — a real recording, generated '
+    + 'when you press it, with whatever that row resolves to. Anything left blank uses the default above, '
+    + 'and Play auditions that too. Cebuano and Filipino send the same setting to the provider — there is '
+    + 'one Austronesian voice family — but they are separate rows so you can read them in different '
+    + 'mouths if you want to.',
     open);
 
   field(tools, 'Model', 'Which Claude model answers. Read-only here — it is set outside the panel, and changing it needs the container restarted.', node('span', 'value', s.model.name));

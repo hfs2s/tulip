@@ -72,6 +72,7 @@ import {
   settingsView,
   snapshot,
   updateSettings,
+  voicePreview,
   paneReader,
   terminalKeys,
   terminalScreen,
@@ -331,7 +332,14 @@ export function startPanel(deps: ApiDeps): Server | null {
       const headers: Record<string, string> = {
         'content-security-policy':
           "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-          "font-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; " +
+          // `blob:` on media only, and only for the voice audition: a preview is
+          // a POST, because a GET that spends money can be fired by a link or a
+          // prefetch, and the bytes therefore arrive in a response body rather
+          // than at a URL an <audio> can be pointed at. A blob URL is the way
+          // back to one, and it is not a widening in any meaningful sense —
+          // only this page's own script can mint one, and that script is
+          // already same-origin.
+          "font-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; " +
           // The terminal is an iframe onto the proxied ttyd at /pty. Without
           // this it is refused before it loads: `frame-src` has no default of
           // its own and falls back to `default-src 'none'`, so the frame stays
@@ -720,6 +728,44 @@ export function startPanel(deps: ApiDeps): Server | null {
           }
           const result = updateSettings(deps, body);
           return send(res, headers, result.ok ? 200 : 400, result);
+        }
+
+        /**
+         * Speak one language's sample line and hand back the audio.
+         *
+         * Behind the same token as everything else on this surface, and not
+         * additionally owner-gated. That is a deliberate reading rather than an
+         * oversight: anyone holding this token can already switch voice notes
+         * on, aim one at another chat and edit the voice ids this plays, so
+         * withholding the ability to *listen* to the setting they can change
+         * would protect nothing while making the control they were given
+         * unusable. The cost — it spends money per press — is bounded in
+         * `voicePreview` instead, by a rolling minute and the deployment's own
+         * daily speech allowance.
+         *
+         * POST, for the reason `/api/media/delete` is: a GET that bills the
+         * account could be fired by a link, a prefetch or a stray <img>.
+         *
+         * The audio comes back as bytes rather than as JSON with base64 in it,
+         * so the browser can hand the response straight to an <audio> element
+         * without a round trip through a string.
+         */
+        if (url.pathname === '/api/voice/preview' && req.method === 'POST') {
+          const preview = await voicePreview(deps, await readBody(req));
+          if (!preview.ok) return send(res, headers, preview.status, { ok: false, message: preview.message });
+          res
+            .writeHead(200, {
+              ...headers,
+              'content-type': 'audio/ogg',
+              'content-length': preview.audio.length,
+              // Which mouth actually spoke, so the row can say so rather than
+              // the page re-deriving it from settings it may have just changed.
+              // Latin-1 by construction: both are provider identifiers.
+              'x-voice-id': preview.voiceId || '(deployment default)',
+              'x-voice-boost': preview.boost,
+            })
+            .end(preview.audio);
+          return;
         }
 
         if (url.pathname === '/api/terminal' && req.method === 'GET') {

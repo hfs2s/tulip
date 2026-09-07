@@ -1,7 +1,8 @@
 /**
  * A voice per language.
  *
- * One mouth for eight languages is one mouth that is wrong for seven of them.
+ * One mouth for eighteen languages is one mouth that is wrong for seventeen of
+ * them.
  * The map is keyed on what the agent *says* rather than on what goes to the
  * provider, and Cebuano is why: it and Filipino send the same boost, because
  * there is one Austronesian voice family, but an operator may still want a
@@ -12,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { LANGUAGE_BOOSTS, spokenLanguageFor, SPOKEN_LANGUAGES } from '@tulip/shared';
 
 describe('finding the row', () => {
-  it('takes the eight languages by name, however capitalised', () => {
+  it('takes every language by name, however capitalised', () => {
     for (const row of SPOKEN_LANGUAGES) {
       expect(spokenLanguageFor(row.name)?.name, row.name).toBe(row.name);
       expect(spokenLanguageFor(row.name.toLowerCase())?.name, row.name).toBe(row.name);
@@ -46,9 +47,12 @@ describe('finding the row', () => {
   });
 
   it('is null for a language this deployment does not speak', () => {
-    // Valid for the provider, but not one of the eight — so there is no row and
-    // no voice, and the caller falls back to the default rather than guessing.
-    expect(spokenLanguageFor('Japanese')).toBeNull();
+    // Valid for the provider, but not one of the rows — so there is no voice,
+    // and the caller falls back to the default rather than guessing. Japanese
+    // used to be the example here and is now a language Juan speaks; Korean is
+    // the same case, and swapping it in is the point of having the test.
+    expect(spokenLanguageFor('Korean')).toBeNull();
+    expect(spokenLanguageFor('Thai')).toBeNull();
     expect(spokenLanguageFor('Klingon')).toBeNull();
     expect(spokenLanguageFor('')).toBeNull();
     expect(spokenLanguageFor('   ')).toBeNull();
