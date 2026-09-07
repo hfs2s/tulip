@@ -19,7 +19,7 @@
  * reach for something, which is a different question from what exists.
  */
 
-export type VerbGroup = 'reply' | 'make' | 'look' | 'reach' | 'meta';
+export type VerbGroup = 'reply' | 'make' | 'later' | 'look' | 'reach' | 'meta';
 
 export interface Verb {
   /** The word typed after `tulip-wa`. */
@@ -40,6 +40,7 @@ export interface Verb {
 export const VERB_GROUPS: ReadonlyArray<readonly [VerbGroup, string]> = [
   ['reply', 'Answering'],
   ['make', 'Making things'],
+  ['later', 'Promising something for later'],
   ['look', 'Finding out'],
   ['reach', 'Reaching further'],
   ['meta', 'About this turn'],
@@ -125,6 +126,34 @@ export const VERBS: readonly Verb[] = [
   },
 
   {
+    name: 'remind', args: '"<when>" <text>', group: 'later', capability: 'schedule', waits: true,
+    summary: 'send a message into this chat later',
+    detail:
+      'When: an ISO instant, "2026-09-26 09:00", "tomorrow 9am", "in 2 hours". Resolved in the deployment’s ' +
+      'timezone, NOT the container’s UTC clock, and the absolute time is printed back — quote that, not the ' +
+      'words you were given. Only this chat: there is no way to schedule into another.',
+  },
+  {
+    name: 'cron', args: '"<expression>" <text>', group: 'later', capability: 'schedule', waits: true,
+    summary: 'repeat a message on a schedule',
+    detail:
+      'Five fields — minute hour day-of-month month day-of-week. "0 9 * * 1-5" is 09:00 on weekdays. ' +
+      'Supports * , a,b ranges a-b and steps */n. Anything else is refused with a reason you can pass on.',
+  },
+  {
+    name: 'reminders', args: '', group: 'later', capability: 'schedule', waits: true,
+    summary: 'what you have promised this chat',
+    detail:
+      'You cannot see the store — the bridge holds it — so check here rather than from memory before telling ' +
+      'anybody what is set. Prints the id of each, which is what forget-reminder takes.',
+  },
+  {
+    name: 'forget-reminder', args: '<id>', group: 'later', capability: 'schedule', waits: true,
+    summary: 'call one off',
+    detail: 'Ids come from remind or reminders. Only this chat’s: another conversation’s id is "no such reminder".',
+  },
+
+  {
     name: 'read', args: '<path>', group: 'look',
     summary: 'read a document somebody sent',
     detail:
@@ -176,10 +205,10 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: 'whoami', args: '', group: 'meta',
-    summary: 'which conversation you are answering',
+    summary: 'which conversation you are answering, and what time it is there',
     detail:
       'Worth running when unsure. One session now answers every chat, so the conversation in front of you is ' +
-      'not necessarily the one you read last.',
+      'not necessarily the one you read last. Also prints their local time — your shell is UTC and theirs is not.',
   },
 ];
 

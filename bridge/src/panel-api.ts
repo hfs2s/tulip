@@ -26,6 +26,9 @@ import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { CurrentTurn, SHARED_WINDOW, TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
+import { TimeZone, describeSpec, formatLocal, parseCron, parseWhen } from '@tulip/shared';
+import type { ScheduleSpec as ScheduleSpecType } from '@tulip/shared';
+import { cancelSchedule, createSchedule, findSchedule, readSchedule } from './schedule.js';
 import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES, parseConfig, Contact } from './config.js';
 import { LANGUAGE_LIMITS, LANGUAGE_SAMPLES } from '@tulip/shared';
 import { synthesise } from './minimax.js';
@@ -896,6 +899,155 @@ export function memoryForget(id: string): { ok: boolean; message: string } {
   return { ok: true, message: 'Forgotten.' };
 }
 
+// ─── Reminders ───────────────────────────────────────────────────────────────
+
+/**
+ * Everything promised for later, soonest first.
+ *
+ * **`nextAt` is sent twice on purpose** — once as an instant and once as a
+ * string already rendered in the entry's own zone. The browser must not
+ * re-derive that: a page rendering an instant with `toLocaleString` shows it in
+ * *the viewer's* zone, so an operator checking from a laptop in another country
+ * would read a different time from the one the reminder will actually arrive
+ * at, and would have no way to tell. The zone the promise was made in is a
+ * property of the promise, and the server is the only thing that knows it.
+ *
+ * Every row names its chat, which is what lets `panel.ts` filter this the way
+ * it filters Memory and Media. That filtering is done there, once, rather than
+ * here — see the `strip` helper and the reasoning beside it.
+ */
+export function scheduleView(deps: ApiDeps): { items: Array<Record<string, unknown>> } {
+  const now = Date.now();
+  const rows = readSchedule().map((entry) => ({
+    id: entry.id,
+    chatKey: entry.chatKey,
+    /**
+     * Who it lands on, by display name.
+     *
+     * The page says "Goes to …" and a chat key cannot fill that sentence — it
+     * is sixteen hex characters chosen to be meaningless. This is the field an
+     * operator reads before cancelling something, and cancelling the wrong
+     * reminder is the mistake this page can actually cause.
+     *
+     * Null for a conversation the registry no longer knows, which is a real
+     * state rather than an error: the entry is about to fail for that reason,
+     * and the card is honest about it instead of inventing a name.
+     */
+    chatName: deps.chats.get(entry.chatKey)?.name ?? null,
+    spec: entry.spec,
+    /** Human-readable: an absolute time, or the expression and its zone. */
+    describes: describeSpec(entry.spec, entry.timezone),
+    text: entry.text,
+    createdBy: entry.createdBy,
+    createdAt: entry.createdAt,
+    timezone: entry.timezone,
+    nextAt: entry.nextAt,
+    nextAtLocal: entry.nextAt === null ? null : formatLocal(Date.parse(entry.nextAt), entry.timezone),
+    lastFiredAt: entry.lastFiredAt,
+    lastFiredAtLocal:
+      entry.lastFiredAt === null ? null : formatLocal(Date.parse(entry.lastFiredAt), entry.timezone),
+    fireCount: entry.fireCount,
+    state: entry.state,
+    note: entry.note,
+  }));
+
+  // Upcoming first, then everything finished, newest of those first. An
+  // operator opens this page to answer "what is about to happen", not "what
+  // happened last March".
+  const upcoming = rows
+    .filter((r) => r.state === 'active' && r.nextAt !== null)
+    .sort((a, b) => Date.parse(a.nextAt as string) - Date.parse(b.nextAt as string));
+  const rest = rows
+    .filter((r) => !(r.state === 'active' && r.nextAt !== null))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return { items: [...upcoming, ...rest].map((r) => ({ ...r, overdueMs: overdue(r.nextAt, r.state, now) })) };
+}
+
+/** How late an active entry is, or null. Lets the page mark a stuck one red. */
+function overdue(nextAt: string | null, state: string, now: number): number | null {
+  if (state !== 'active' || nextAt === null) return null;
+  const due = Date.parse(nextAt);
+  return Number.isFinite(due) && due < now ? now - due : null;
+}
+
+/**
+ * Which conversation an entry belongs to, for the privacy check in `panel.ts`.
+ *
+ * Cancelling is addressed by id rather than by `?key=`, so the gate that
+ * catches every other `?key=` route cannot see it. This is how that route asks
+ * the same question by hand.
+ */
+export function scheduleOwner(id: string): string | null {
+  return findSchedule(id)?.chatKey ?? null;
+}
+
+export function scheduleCancel(id: string): { ok: boolean; message: string } {
+  const dropped = cancelSchedule(id);
+  if (!dropped.ok) return { ok: false, message: dropped.error };
+  feed.event('schedule.cancelled', `an operator called off a reminder: ${dropped.entry.text.slice(0, 120)}`);
+  return { ok: true, message: 'Cancelled.' };
+}
+
+/**
+ * The operator's own way to set one.
+ *
+ * `when` takes the same words the agent's verb does — "tomorrow 9am", an ISO
+ * instant, `in 2 hours` — resolved by the same function, in the deployment's
+ * zone. Two parsers for the same phrase is how the panel and the chat end up
+ * disagreeing about which nine o'clock was meant.
+ *
+ * Validated with Zod at the boundary like every other write on this surface:
+ * this is a request body, and a request body is external input.
+ */
+const ScheduleRequest = z
+  .object({
+    /** A wall-clock phrase, resolved in `timezone` below. Absent for a cron entry. */
+    when: z.string().min(1).max(120).optional(),
+    /** A five-field expression. Absent for a one-off. */
+    cron: z.string().min(1).max(200).optional(),
+    text: z.string().min(1).max(4096),
+    /** Defaults to the deployment's zone; an operator may name another. */
+    timezone: TimeZone.optional(),
+  })
+  .strict();
+
+export function scheduleCreate(deps: ApiDeps, chatKey: string, body: unknown): { ok: boolean; message: string } {
+  const parsed = ScheduleRequest.safeParse(body);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? 'That is not a reminder I can read.' };
+  }
+  const { when, cron, text } = parsed.data;
+  const timezone = parsed.data.timezone ?? deps.config.timezone;
+
+  if (deps.chats.jidFor(chatKey) === null) return { ok: false, message: 'No such conversation.' };
+  if ((when === undefined) === (cron === undefined)) {
+    return { ok: false, message: 'Give either a time or a cron expression, not both and not neither.' };
+  }
+
+  let spec: ScheduleSpecType;
+  if (cron !== undefined) {
+    const check = parseCron(cron);
+    if (!check.ok) return { ok: false, message: check.error };
+    spec = { kind: 'cron', expression: cron, timezone };
+  } else {
+    const resolved = parseWhen(when as string, timezone);
+    if (!resolved.ok) return { ok: false, message: resolved.error };
+    spec = { kind: 'once', at: resolved.at.toISOString() };
+  }
+
+  const made = createSchedule(deps.config, { chatKey, spec, text, createdBy: 'operator' });
+  if (!made.ok) return { ok: false, message: made.error };
+  feed.event(
+    'schedule.created',
+    `an operator set a reminder for ${formatLocal(Date.parse(made.entry.nextAt ?? ''), made.entry.timezone)}` +
+      `: ${made.entry.text.slice(0, 120)}`,
+  );
+  return {
+    ok: true,
+    message: `Set for ${formatLocal(Date.parse(made.entry.nextAt ?? ''), made.entry.timezone)}.`,
+  };
+}
+
 // ─── Log ─────────────────────────────────────────────────────────────────────
 
 /** The writer's naming, from `log.ts`. ISO dates sort lexicographically. */
@@ -978,6 +1130,10 @@ export function logTail(lines: number): Json {
 export function settingsView(deps: ApiDeps): Json {
   const c = deps.config;
   return {
+    // The wall clock every reminder is said in, and the one thing on this page
+    // that is not a preference: it is a fact about where the people are, and
+    // getting it wrong moves every scheduled message by hours.
+    timezone: c.timezone,
     // The actual values, not counts. An allow list you cannot read is one you
     // cannot audit, and the panel already sits behind whatever authenticates
     // in front of it — hiding the numbers from the operator protects nobody.
@@ -1208,6 +1364,16 @@ const SettingsPatch = z
       outboundPerTurn: z.number().int().min(1).max(100).optional(),
       outboundPerChatPerHour: z.number().int().min(1).max(1000).optional(),
       turnTimeoutMs: z.number().int().min(30_000).max(3_600_000).optional(),
+      // Ranges match `config.ts` exactly. They are restated rather than
+      // imported because every other line in this block is, and one imported
+      // field among twelve literals is harder to check than twelve literals —
+      // the merged result is validated by `parseConfig` regardless, which is
+      // the check that actually decides.
+      scheduledPerChat: z.number().int().min(0).max(200).optional(),
+      scheduledTotal: z.number().int().min(0).max(5000).optional(),
+      scheduleMinLeadMs: z.number().int().min(0).max(3_600_000).optional(),
+      scheduleMaxHorizonDays: z.number().int().min(1).max(3650).optional(),
+      scheduleGraceMs: z.number().int().min(0).max(7 * 24 * 3_600_000).optional(),
     }).strict().optional(),
     privacy: z.object({
       owner: z.string().max(320).nullable().optional(),
@@ -1236,6 +1402,12 @@ const SettingsPatch = z
       search: z.boolean().optional(),
       images: z.boolean().optional(),
       voice: z.boolean().optional(),
+      /**
+       * Reminders. Switching it off refuses the three scheduling verbs and
+       * holds the agent's existing entries; it deletes nothing, and an
+       * operator's own entries keep firing. See `agent.schedule` in config.ts.
+       */
+      schedule: z.boolean().optional(),
       voiceId: z.string().max(128).regex(VOICE_ID, VOICE_ID_MESSAGE).optional(),
       /**
        * A voice per spoken language. Keys are checked against the list rather

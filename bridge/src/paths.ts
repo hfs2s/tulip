@@ -59,4 +59,21 @@ export const paths = {
 
   /** Bearer token for the control panel. Generated on first run, mode 0600. */
   panelToken: join(STATE_DIR, 'panel-token'),
+
+  /**
+   * Messages promised to somebody for later, and the rules that repeat them.
+   *
+   * On *this* volume, which the agent has no mount for at all — not even the
+   * read-only one it gets for `memory.json`. The asymmetry is the point. A
+   * scheduled send is a message that leaves with nobody watching, hours or
+   * weeks after the conversation that caused it, so the three things a
+   * compromised agent must not be able to do to this file are forge an entry,
+   * edit one it already asked for, and replay an old one. None of them is
+   * detected and rejected here; all three are unrepresentable, because there is
+   * no path from that container to this file.
+   *
+   * So the agent asks, exactly as it asks for `remember`, and the bridge writes
+   * — with the destination taken from the turn rather than from the request.
+   */
+  schedule: join(STATE_DIR, 'schedule.json'),
 } as const;

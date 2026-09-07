@@ -30,7 +30,16 @@ import {
 import { basename, join, resolve, sep } from 'node:path';
 import { mkdirSync, statSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { OutboxAction, ToolResult, inPaths, outPaths, writeJsonAtomic, canRecall } from '@tulip/shared';
+import {
+  OutboxAction,
+  ToolResult,
+  inPaths,
+  outPaths,
+  writeJsonAtomic,
+  canRecall,
+  describeSpec,
+  formatLocal,
+} from '@tulip/shared';
 import type { OutboxAction as OutboxActionType } from '@tulip/shared';
 import { feed } from './feed.js';
 import { fetchPage, search, type ExaOutcome } from './exa.js';
@@ -52,8 +61,9 @@ import {
   writePageImage,
 } from './pages.js';
 import { addContact } from './contacts.js';
-import { resolveVoice } from './voice.js';
+import { resolveVoice, voiceless } from './voice.js';
 import { remember } from './memory.js';
+import { cancelSchedule, createSchedule, schedulesFor } from './schedule.js';
 import { recentMessages } from './history.js';
 import type { Limiter } from './ratelimit.js';
 import type { Cost, Turn, TurnRegistry } from './turns.js';
@@ -494,7 +504,7 @@ export class Outbox extends EventEmitter {
 
   private async answer(
     actionId: string,
-    kind: 'search' | 'fetch' | 'chats' | 'page' | 'contact' | 'sent' | 'history',
+    kind: 'search' | 'fetch' | 'chats' | 'page' | 'contact' | 'sent' | 'history' | 'schedule',
     outcome: ExaOutcome,
   ): Promise<void> {
     const result = ToolResult.safeParse({
@@ -696,6 +706,115 @@ export class Outbox extends EventEmitter {
         await this.answer(action.id, 'page', kept.ok
           ? { ok: true, items: [] }
           : { ok: false, error: kept.error });
+        break;
+      }
+
+      /**
+       * Promise something for later, into this chat.
+       *
+       * `turn.chatKey` is the destination and there is nowhere else it could
+       * have come from — the action carries no `chatKey` field at all, so the
+       * cross-chat question is not answered here, it is never asked. See the
+       * schema in shared/src/handoff.ts.
+       *
+       * Charged as a *tool*, alongside `remember` and `search`, because it
+       * delivers nothing at the moment it is called. The eventual send spends
+       * the destination's hourly outbound allowance on the day it happens, in
+       * `Scheduler.fire`. Both budgets exist; neither is the other's spare
+       * capacity — see the comment above `DELIVERS`.
+       */
+      case 'schedule': {
+        if (!this.deps.config.agent.schedule) {
+          // Answered rather than spoken, and this is the one refusal in this
+          // file that must never be quiet: the failure being designed against
+          // is a reminder promised in words that no machinery could keep. The
+          // agent waits for this answer and prints it, so "cannot" reaches the
+          // person before "done" ever gets a chance to.
+          await this.answer(action.id, 'schedule', {
+            ok: false,
+            error:
+              'Reminders are switched off by the operator, so nothing was scheduled. Say so plainly — do not ' +
+              'promise to remind them, and offer to send something now instead.',
+          });
+          break;
+        }
+        const made = createSchedule(this.deps.config, {
+          chatKey: turn.chatKey,
+          spec: action.spec,
+          text: action.text,
+          createdBy: 'agent',
+        });
+        if (!made.ok) {
+          log('schedule.refused', { chatKey: turn.chatKey, reason: made.error.slice(0, 80) });
+          await this.answer(action.id, 'schedule', { ok: false, error: made.error });
+          break;
+        }
+        // Loud on purpose, exactly like `memory.remembered` above. A message
+        // that will arrive in somebody's chat later, with no human in the loop
+        // at the time, is precisely the thing an operator should scroll past
+        // even if they never open the page.
+        feed.event(
+          'schedule.created',
+          `a reminder was set for ${formatLocal(Date.parse(made.entry.nextAt ?? ''), made.entry.timezone)}` +
+            `: ${made.entry.text.slice(0, 120)}`,
+        );
+        await this.answer(action.id, 'schedule', {
+          ok: true,
+          items: [
+            {
+              // The id, so the agent can tell somebody how to call it off.
+              title: made.entry.id,
+              // The resolved absolute time, spelled out with its zone. Quoting
+              // it back is what stops two people meaning different nine
+              // o'clocks — see shared/src/schedule.ts.
+              url: formatLocal(Date.parse(made.entry.nextAt ?? ''), made.entry.timezone),
+              published: null,
+              text: describeSpec(made.entry.spec, made.entry.timezone),
+            },
+          ],
+        });
+        break;
+      }
+
+      case 'scheduleCancel': {
+        if (!this.deps.config.agent.schedule) {
+          await this.answer(action.id, 'schedule', {
+            ok: false,
+            error: 'Reminders are switched off by the operator, so I cannot change them.',
+          });
+          break;
+        }
+        // Scoped to this chat. An id from another conversation gets the same
+        // answer as an invented one, so this is not a way to find out what
+        // anybody else has been promised.
+        const dropped = cancelSchedule(action.scheduleId, turn.chatKey);
+        if (dropped.ok) feed.event('schedule.cancelled', `a reminder was called off: ${dropped.entry.text.slice(0, 120)}`);
+        await this.answer(action.id, 'schedule', dropped.ok
+          ? { ok: true, items: [{ title: dropped.entry.id, url: '', published: null, text: dropped.entry.text }] }
+          : { ok: false, error: dropped.error });
+        break;
+      }
+
+      case 'scheduleList': {
+        if (!this.deps.config.agent.schedule) {
+          await this.answer(action.id, 'schedule', {
+            ok: false,
+            error: 'Reminders are switched off by the operator, so there are none to list.',
+          });
+          break;
+        }
+        // This chat's own, and nothing else's. `schedulesFor` filters by key;
+        // the key comes from the turn, which the agent cannot choose.
+        const mine = schedulesFor(turn.chatKey).filter((e) => e.state === 'active');
+        await this.answer(action.id, 'schedule', {
+          ok: true,
+          items: mine.slice(0, 40).map((e) => ({
+            title: e.id,
+            url: e.nextAt === null ? '' : formatLocal(Date.parse(e.nextAt), e.timezone),
+            published: e.spec.kind === 'cron' ? e.spec.expression : null,
+            text: e.text.slice(0, 300),
+          })),
+        });
         break;
       }
 
@@ -1053,6 +1172,46 @@ export class Outbox extends EventEmitter {
 
       case 'voice': {
         if (!this.deps.config.agent.voice) return this.refuse('voice', dest, action.text);
+
+        // Which mouth reads this, decided before anything is spent — the whole
+        // resolution is pure, and one of its answers is "none".
+        //
+        // The message's own language wins over the deployment's, so the agent
+        // can answer a Barcelona group and a Filipino one in the same evening
+        // without an operator flipping a setting between them. Empty is the
+        // ordinary case and means "whatever the operator chose".
+        //
+        // Resolved here rather than in the agent, because the row decides two
+        // things and only one of them is the agent's business: which boost the
+        // request carries, and which voice reads it. The second is an
+        // operator's choice and the agent should not be able to name a voice.
+        //
+        // Resolved by `voice.ts` rather than here, so the panel's test bench
+        // and this line cannot disagree about which mouth a language gets. A
+        // bench that plays a different voice from the one an actual note uses
+        // is worse than no bench.
+        const chosen = resolveVoice(this.deps.config, action.language);
+
+        // Some languages the provider will *pronounce* and cannot *speak*.
+        // Swedish has a boost and not one voice, so a Swedish voice note was a
+        // Spanish mouth sounding out Swedish words — an impression rather than
+        // an accent, and worse than not speaking at all.
+        //
+        // So it goes as text, which is the same fallback a synthesis failure
+        // and a spent allowance already take: the words always arrive, and only
+        // the audio is lost. Checked before `claim`, deliberately — nothing was
+        // synthesised, so nothing should be billed against the day.
+        if (voiceless(chosen)) {
+          log('outbox.voiceless', { language: chosen.spoken?.name ?? '', note: 'sent as text; no voice exists for it' });
+          feed.event(
+            'voice.noMouth',
+            `${chosen.spoken?.name ?? 'that language'} has no voice, so it was sent as a message instead`,
+          );
+          await this.deps.wa.sendText(dest.jid, action.text);
+          feed.outbound(dest.key, 'text', action.text);
+          break;
+        }
+
         // Metered like pictures, and for the same reason: synthesis is billed
         // per call. This was unmetered while voice could only ever answer the
         // person in front of it, which bounded it by the conversation; a voice
@@ -1070,21 +1229,6 @@ export class Outbox extends EventEmitter {
           feed.outbound(dest.key, 'text', action.text);
           break;
         }
-        // The message's own language wins over the deployment's, so the agent can
-        // answer a Barcelona group and a Filipino one in the same evening
-        // without an operator flipping a setting between them. Empty is the
-        // ordinary case and means "whatever the operator chose".
-        //
-        // Resolved here rather than in the agent, because the row decides two
-        // things and only one of them is the agent's business: which boost the
-        // request carries, and which voice reads it. The second is an
-        // operator's choice and the agent should not be able to name a voice.
-        //
-        // Resolved by `voice.ts` rather than here, so the panel's test bench
-        // and this line cannot disagree about which mouth a language gets. A
-        // bench that plays a different voice from the one an actual note uses
-        // is worse than no bench.
-        const chosen = resolveVoice(this.deps.config, action.language);
         const audio = await synthesise(action.text, chosen.voiceId, chosen.boost);
         if (!audio.ok) {
           // Never drop the message: say it in text rather than stay silent.

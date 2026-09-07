@@ -15,7 +15,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
-import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES } from '@tulip/shared';
+import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES, TimeZone } from '@tulip/shared';
 
 // Re-exported so the panel's own schema keeps importing it from one place.
 export { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES };
@@ -177,6 +177,55 @@ const Limits = z
     voicePerDay: z.number().int().min(0).max(5000).default(200),
     /** A turn that outlives this is abandoned so it cannot hold the queue shut. */
     turnTimeoutMs: z.number().int().min(30_000).max(3_600_000).default(600_000),
+
+    /**
+     * How many standing reminders one conversation may hold at once.
+     *
+     * Counted over *active* entries only, so a chat that has had a hundred
+     * reminders fire over a year is not thereby full. Small on purpose: a
+     * reminder is a promise to interrupt somebody later, and ten outstanding
+     * ones is already more than anybody asked for.
+     */
+    scheduledPerChat: z.number().int().min(0).max(200).default(10),
+    /**
+     * And across every conversation, which is the number that bounds the fleet.
+     *
+     * The per-chat cap is the wrong shape on its own for the same reason
+     * `imagesPerDay` is: the risk is not one chat being greedy, it is a hundred
+     * chats each being reasonable and the bridge waking up with a thousand
+     * messages to send.
+     */
+    scheduledTotal: z.number().int().min(0).max(5000).default(100),
+    /**
+     * The least notice a reminder may be set with.
+     *
+     * Not a rate limit — it is the difference between scheduling and sending.
+     * "Remind me in ten seconds" is a message, and the honest answer is to send
+     * one; routing it through a store that ticks every thirty seconds makes it
+     * late and puts a promise on disk for no reason.
+     */
+    scheduleMinLeadMs: z.number().int().min(0).max(3_600_000).default(60_000),
+    /**
+     * And the most notice, in days. Past this the answer is "write it down".
+     *
+     * Matched to the forward scan in shared/src/schedule.ts, which gives up at
+     * the same distance: an entry the resolver cannot see the far side of is
+     * one that would sit `active` forever with nothing to fire.
+     */
+    scheduleMaxHorizonDays: z.number().int().min(1).max(3650).default(400),
+    /**
+     * How late a missed reminder may still be worth delivering.
+     *
+     * The bridge restarts, the box loses power, a deploy takes ten minutes —
+     * and something was due in the middle of it. Three outcomes are available
+     * and only one of them is defensible. Firing it late is useful: a 9am
+     * reminder arriving at 10:30 is still a reminder. Firing it a week late is
+     * noise, and worse than noise, because it reads as the bot being confused
+     * about what day it is. And *silence* — dropping it because it is awkward —
+     * is the one outcome that is always wrong, which is why nothing here drops
+     * an entry: past this window it is marked `missed`, loudly, in the feed.
+     */
+    scheduleGraceMs: z.number().int().min(0).max(7 * 24 * 3_600_000).default(2 * 3_600_000),
   })
   .strict()
   .default({});
@@ -299,6 +348,24 @@ const Agent = z
     search: z.boolean().default(true),
     images: z.boolean().default(true),
     voice: z.boolean().default(true),
+    /**
+     * May the agent promise to send something later?
+     *
+     * On by default, unlike `crossChat` and `recall`, because it neither widens
+     * the address space nor reads anything: a scheduled message goes to the
+     * chat that asked for it and nowhere else — the action has no field for a
+     * destination — so the worst it can do is talk to the person it was already
+     * talking to, at a time they chose.
+     *
+     * What switching it off does, precisely, because it is two things:
+     * `schedule`, `scheduleCancel` and `scheduleList` are refused, and entries
+     * the *agent* created stop firing while it is off. Entries an operator set
+     * from the panel keep firing — an operator silencing the agent's reminders
+     * has not asked to silence their own — and nothing is deleted either way.
+     * Anything that comes due while it is off is delivered late if it is back
+     * on within `scheduleGraceMs`, and marked `missed` in the feed if not.
+     */
+    schedule: z.boolean().default(true),
     /**
      * Which voice speaks. Empty means the deployment's own default, so an
      * existing install keeps whatever `MINIMAX_VOICE_ID` gave it.
@@ -466,8 +533,33 @@ const Privacy = z
   .strict()
   .default({});
 
+/**
+ * The wall clock everything user-facing is said in.
+ *
+ * At the top level rather than inside `agent` or `limits`, because it is not a
+ * capability and not a ceiling — it is a fact about where this deployment's
+ * people are, and three separate things read it: the scheduler resolves "9am"
+ * against it, the panel renders `nextAt` in it, and the agent is told it in
+ * `current.json` so that a reminder it confirms in words is the reminder that
+ * arrives.
+ *
+ * **The default is not UTC, and that is the point.** The box runs UTC, both
+ * containers run UTC, and every timestamp in this codebase is an ISO instant —
+ * all correct, and all invisible to the person whose clock says 14:02 while the
+ * agent's terminal says 12:01. Left to default to the machine, "9am" means 9am
+ * on the machine, which is 11am to them. So the default is the zone the
+ * operator actually lives in, and it is written down here rather than
+ * discovered.
+ *
+ * Validated against the platform's own zone database at parse time, so
+ * `Europe/Madrizd` is a startup failure with a readable message rather than a
+ * silent fallback — see `isTimeZone` in shared/src/schedule.ts.
+ */
+const DEFAULT_TIMEZONE = 'Europe/Madrid';
+
 export const ConfigSchema = z
   .object({
+    timezone: TimeZone.default(DEFAULT_TIMEZONE),
     audience: Audience,
     agent: Agent,
     operators: Operators,
