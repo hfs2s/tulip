@@ -53,8 +53,26 @@ describe('remembering', () => {
     expect(readMemory()).toHaveLength(0);
   });
 
-  it('truncates rather than storing an essay', () => {
-    remember('x'.repeat(900), CHAT, null);
+  it('refuses an essay rather than storing half of one', () => {
+    // Reversed deliberately. It used to truncate at 300 and report success, so
+    // a long note was cut mid-word, the agent was told it had been kept, and
+    // the fragment was read back as fact in every later session. A sentence cut
+    // before its condition can mean the opposite of itself.
+    const verdict = remember('x'.repeat(900), CHAT, null);
+    expect(verdict.ok).toBe(false);
+    expect(readMemory()).toHaveLength(0);
+  });
+
+  it('says how long the note was and what the limit is, so it can be rewritten', () => {
+    const verdict = remember('x'.repeat(412), CHAT, null);
+    expect(verdict.ok).toBe(false);
+    expect(!verdict.ok && verdict.error).toContain('412');
+    expect(!verdict.ok && verdict.error).toContain('300');
+  });
+
+  it('keeps a note that is exactly at the limit', () => {
+    // Off-by-one here would refuse a note the schema is happy to store.
+    expect(remember('x'.repeat(300), CHAT, null).ok).toBe(true);
     expect(readMemory()[0]?.text.length).toBe(300);
   });
 

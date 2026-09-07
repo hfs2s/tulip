@@ -62,10 +62,30 @@ function persist(notes: MemoryNote[]): boolean {
 
 export type Remembered = { ok: true; total: number } | { ok: false; error: string };
 
+/** The most a single note may carry. Matches `MemoryNote.text` in the schema. */
+const MAX_NOTE_CHARS = 300;
+
 /** Add a note. Oldest falls off the end rather than refusing a new one. */
 export function remember(text: string, chatKey: string, chatName: string | null): Remembered {
-  const trimmed = text.trim().slice(0, 300);
+  const trimmed = text.trim();
   if (trimmed.length === 0) return { ok: false, error: 'nothing to remember' };
+
+  // Refuse rather than truncate, on the same reasoning as the spend ceilings:
+  // a cap that degrades silently is worse than one that says no.
+  //
+  // This used to be `.slice(0, 300)`. The agent was told the note was kept, and
+  // what was actually stored ended mid-word — "…and let the bridge decid" — and
+  // was then read back to it as fact in every session's brief. A sentence cut
+  // before its condition can mean the opposite of itself: "do not do X unless
+  // Y" truncated after "do not do X" is a different instruction. Losing the
+  // note and being told why is recoverable; keeping half of it is not.
+  if (trimmed.length > MAX_NOTE_CHARS) {
+    return {
+      ok: false,
+      error: `that note is ${String(trimmed.length)} characters and the limit is ${String(MAX_NOTE_CHARS)} — `
+        + 'write it shorter and remember it again, or split it into two notes',
+    };
+  }
 
   const notes = readMemory();
   // Exact duplicates are the commonest failure here: an agent reminded of
