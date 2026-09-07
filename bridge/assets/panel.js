@@ -4144,10 +4144,15 @@ async function renderSettings() {
   // the agent gets to use its judgement. An operator read that label, moved off
   // it, and then asked for the mode it describes.
   var modes = [['mention', 'Mentions'], ['trigger', 'Triggers'], ['observe', 'Judgement']];
+  // Declared before paintModes so it can reference it, assigned after the field
+  // exists. The dial belongs to Judgement alone, and switching mode shows or
+  // hides it there and then rather than on the next render.
+  var toneRow = null;
   function paintModes(active) {
     Array.prototype.forEach.call(modeSeg.children, function (btn, i) {
       btn.setAttribute('aria-pressed', modes[i][0] === active ? 'true' : 'false');
     });
+    if (toneRow) toneRow.hidden = active !== 'observe';
   }
   modes.forEach(function (m) {
     var b = node('button', null, m[1]);
@@ -4206,14 +4211,10 @@ async function renderSettings() {
   });
   toneWrap.appendChild(slider);
   toneWrap.appendChild(toneSaid);
-  if (s.groups.replyTo !== 'observe') {
-    toneWrap.style.opacity = '0.45';
-    slider.disabled = true;
-    toneSaid.appendChild(document.createTextNode(' — only applies in Judgement mode.'));
-  }
 
   field(groups, 'Group mode', 'When Tulip should speak up in a group.  ·  Mentions: only when somebody @-mentions it — a real WhatsApp mention, the kind you make by tapping the name, not the letters typed out — or replies to one of its messages. The quietest setting, and the one most likely to look broken, because typing “Juan” is not a mention.  ·  Triggers: the above, plus any message containing one of the trigger words below.  ·  Judgement: Tulip follows the whole conversation and decides for itself. It answers a question nobody else has answered when it actually knows, settles a factual disagreement, reacts to something funny — and stays silent for everything else, which is most things. This is the setting that behaves like a person in the room. It is also the expensive one: every message becomes a paid turn whether or not it replies, though messages arriving together are batched into one.', modeSeg);
-  field(groups, 'How readily it speaks up', 'Judgement hands Tulip every message in the group and lets it decide whether to answer. This is how forward that decision should be. It takes effect on the next message — no restart — and the words below are the words Tulip is given, not a paraphrase of them.', toneWrap);
+  toneRow = field(groups, 'How readily it speaks up', 'Judgement hands Tulip every message in the group and lets it decide whether to answer. This is how forward that decision should be. It takes effect on the next message — no restart — and the words below are the words Tulip is given, not a paraphrase of them.', toneWrap);
+  toneRow.hidden = s.groups.replyTo !== 'observe';
   listField(groups, 'Trigger words', 'Only used when Group mode is set to Trigger. Ignored otherwise.',
     s.groups.triggers || [], 'e.g. juan',
     'A group message containing any of these is answered; everything else in the room is ignored. Upper and lower case do not matter, and a phrase with spaces works as well as a single word — “hey juan” is a fine trigger. Keep them distinctive: a word like “the” means Tulip answers almost everything.',
