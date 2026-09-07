@@ -3965,6 +3965,11 @@ function openVoiceMatrix(s) {
       var player = new Audio();
       var url = null;
       var owner = null;
+      // Whether sound actually started for the clip currently loaded. See the
+      // watchdog below: `paused` is false the instant play() is called, so it
+      // says nothing about whether anything is audible.
+      var started = false;
+      player.addEventListener('playing', function () { started = true; });
 
       function drop() {
         if (url) { URL.revokeObjectURL(url); url = null; }
@@ -4127,16 +4132,37 @@ function openVoiceMatrix(s) {
             silence();
             url = URL.createObjectURL(clip);
             owner = api;
+            started = false;
             player.src = url;
-            await player.play();
-            // Another row may have been pressed while this one was fetching,
-            // in which case it is now the one talking and this button must not
-            // claim to be.
-            if (owner !== api) return;
             play.textContent = '■ Stop';
             play.disabled = false;
             play.classList.add('on');
             tell('Playing, in ' + spoke + '.');
+            /**
+             * Deliberately not awaited.
+             *
+             * `play()` returns a promise that a media element is entitled to
+             * leave pending forever — a throttled tab, a device with no audio
+             * output, a decode that never completes — and awaiting it left the
+             * button reading "Generating…" with the audio already in hand and
+             * nothing coming. A press that appears to do nothing is the one
+             * failure this control must not have, because each retry is billed.
+             *
+             * So the row commits to its playing state as soon as the bytes are
+             * here, and only two things move it off: a refusal, which arrives
+             * as a rejection, and silence, which arrives as nothing at all and
+             * is what the watchdog is for.
+             */
+            player.play().catch(function (err) {
+              if (owner !== api) return;
+              owner = null;
+              api.failed('It was generated, but this browser would not play it: ' + err.message);
+            });
+            window.setTimeout(function () {
+              if (owner !== api || started) return;
+              owner = null;
+              api.failed('It was generated, but no sound started. Check this tab is not muted.');
+            }, 6000);
           } catch (err) {
             if (owner === api) owner = null;
             api.failed(err.message);
