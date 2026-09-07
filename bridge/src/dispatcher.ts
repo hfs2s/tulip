@@ -499,7 +499,10 @@ export class Dispatcher extends EventEmitter {
     },
     // What `!reset` moves. Read per turn rather than held, so a reset taken
     // while a chat is idle applies to its very next message.
-    state.generation(chatKey));
+    state.generation(chatKey),
+    // Only meaningful in `observe`: the other modes are gated by the bridge, so
+    // nothing reaches the agent it did not already decide to send.
+    this.deps.config.groups.replyTo === 'observe' ? this.deps.config.groups.reactivity : null);
 
     this.inFlight = { turnId: turn.turnId, chatKey, startedAt: now };
     this.deps.limiter.spendTurn(chatKey, now);

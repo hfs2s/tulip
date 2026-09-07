@@ -49,7 +49,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONTROL_COMMANDS, CROSS_CHAT_VERBS, VERBS, VERB_GROUPS, writeFileAtomic } from '@tulip/shared';
+import { CONTROL_COMMANDS, CROSS_CHAT_VERBS, REACTIVITY, VERBS, VERB_GROUPS, writeFileAtomic } from '@tulip/shared';
 import { feed } from './feed.js';
 import { accessConfig, verifiedEmail } from './access.js';
 import { canSee, isOwner } from './privacy.js';
@@ -634,7 +634,10 @@ export function startPanel(deps: ApiDeps): Server | null {
           return send(res, headers, 200, Array.isArray(lines) ? strip(lines, (l) => l.chatKey ?? null) : lines);
         }
         if (url.pathname === '/api/settings' && req.method === 'GET') {
-          return send(res, headers, 200, settingsView(deps));
+          // The level table travels with the settings it describes, so the
+          // panel cannot show a description that has drifted from the sentence
+          // the agent is actually given.
+          return send(res, headers, 200, { ...(settingsView(deps) as object), reactivityLevels: REACTIVITY });
         }
         // Method guard matters: without it this also swallows the POST and
         // silently returns the current values instead of applying the change.

@@ -5,3 +5,4 @@ export * from './ids.js';
 export * from './paths.js';
 export * from './atomic.js';
 export * from './verbs.js';
+export * from './reactivity.js';

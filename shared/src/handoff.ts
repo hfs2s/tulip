@@ -193,6 +193,14 @@ export const CurrentTurn = z
     isGroup: z.boolean(),
     /** Path to the batch, relative to the inbound mount. */
     batch: z.string().regex(/^batches\/[0-9a-f-]{36}\.json$/),
+    /**
+     * How talkative to be in this group, 0–4. Absent for a direct chat.
+     *
+     * Carried per turn rather than in the brief so that moving the slider takes
+     * effect on the next message instead of the next session — a dial an
+     * operator has to restart the agent to feel is a dial they will not use.
+     */
+    reactivity: z.number().int().min(0).max(4).nullable().default(null),
     startedAt: z.string().datetime(),
     /**
      * This chat's context generation, bumped by `!reset`.

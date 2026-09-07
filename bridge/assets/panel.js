@@ -4165,7 +4165,55 @@ async function renderSettings() {
     modeSeg.appendChild(b);
   });
   paintModes(s.groups.replyTo);
+
+  // How readily it speaks up, and only where that is a decision it gets to
+  // make: in Mentions and Triggers the bridge has already filtered what reaches
+  // it, so a dial there would describe nothing.
+  var levels = (s.reactivityLevels || []);
+  var toneWrap = node('div');
+  var toneSaid = node('p', 'sub');
+  var slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = '0';
+  slider.max = String(Math.max(0, levels.length - 1));
+  slider.step = '1';
+  slider.value = String(s.groups.reactivity);
+  slider.className = 'slider';
+  slider.setAttribute('aria-label', 'How readily Tulip speaks up in a group');
+
+  function sayLevel(v) {
+    var lv = levels[v] || { name: '', description: '' };
+    // The number is meaningless on its own, so it never appears alone.
+    clear(toneSaid);
+    toneSaid.appendChild(node('strong', null, v + ' · ' + lv.name + ' — '));
+    toneSaid.appendChild(document.createTextNode(lv.description));
+    slider.setAttribute('aria-valuetext', v + ', ' + lv.name);
+  }
+  sayLevel(Number(slider.value));
+
+  // Describe while dragging, save when let go: one write per decision rather
+  // than one per pixel.
+  slider.addEventListener('input', function () { sayLevel(Number(slider.value)); });
+  slider.addEventListener('change', function () {
+    var was = s.groups.reactivity;
+    var now = Number(slider.value);
+    s.groups.reactivity = now;
+    saveSettings({ groups: { reactivity: now } }, function () {
+      s.groups.reactivity = was;
+      slider.value = String(was);
+      sayLevel(was);
+    });
+  });
+  toneWrap.appendChild(slider);
+  toneWrap.appendChild(toneSaid);
+  if (s.groups.replyTo !== 'observe') {
+    toneWrap.style.opacity = '0.45';
+    slider.disabled = true;
+    toneSaid.appendChild(document.createTextNode(' — only applies in Judgement mode.'));
+  }
+
   field(groups, 'Group mode', 'When Tulip should speak up in a group.  ·  Mentions: only when somebody @-mentions it — a real WhatsApp mention, the kind you make by tapping the name, not the letters typed out — or replies to one of its messages. The quietest setting, and the one most likely to look broken, because typing “Juan” is not a mention.  ·  Triggers: the above, plus any message containing one of the trigger words below.  ·  Judgement: Tulip follows the whole conversation and decides for itself. It answers a question nobody else has answered when it actually knows, settles a factual disagreement, reacts to something funny — and stays silent for everything else, which is most things. This is the setting that behaves like a person in the room. It is also the expensive one: every message becomes a paid turn whether or not it replies, though messages arriving together are batched into one.', modeSeg);
+  field(groups, 'How readily it speaks up', 'Judgement hands Tulip every message in the group and lets it decide whether to answer. This is how forward that decision should be. It takes effect on the next message — no restart — and the words below are the words Tulip is given, not a paraphrase of them.', toneWrap);
   listField(groups, 'Trigger words', 'Only used when Group mode is set to Trigger. Ignored otherwise.',
     s.groups.triggers || [], 'e.g. juan',
     'A group message containing any of these is answered; everything else in the room is ignored. Upper and lower case do not matter, and a phrase with spaces works as well as a single word — “hey juan” is a fine trigger. Keep them distinctive: a word like “the” means Tulip answers almost everything.',
