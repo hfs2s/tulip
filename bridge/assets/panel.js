@@ -152,9 +152,19 @@ var PAGES = [
   ['pages', 'Pages'], ['settings', 'Settings'], ['log', 'Log']
 ];
 
+/** Is the person looking the operator who owns this deployment? */
+function isOwner() {
+  return !(state && state.viewer && state.viewer.owner === false);
+}
+
 function buildNav() {
   var nav = clear(el('nav'));
   PAGES.forEach(function (p) {
+    // The terminal is a live pty carrying every conversation at once, so it
+    // cannot be filtered the way a list can. The server refuses it outright for
+    // anyone but the owner; hiding the row keeps the panel from offering a
+    // button that only ever produces a 403.
+    if (p[0] === 'terminal' && !isOwner()) return;
     var b = node('button', 'nav');
     b.type = 'button';
     b.dataset.route = p[0];
@@ -507,6 +517,36 @@ function renderChats(s) {
 
   var card = node('div', 'card');
   var q = chatQuery.trim().toLowerCase();
+  // Who, if anyone, owns the private conversations here. Claimed rather than
+  // typed: the address comes from the Access assertion of whoever presses it,
+  // so it cannot be pointed at somebody else by a typo.
+  if (isOwner()) {
+    var v = (state && state.viewer) || {};
+    var bar = node('div', 'card');
+    if (!v.on) {
+      bar.appendChild(node('p', 'sub',
+        'Every moderator who can reach this panel sees every conversation. Claim yours to hide them — '
+        + 'it works against people signing in through Access, and not against anyone holding the panel token.'));
+      var claim = node('button', 'sm', 'Make my chats private');
+      claim.type = 'button';
+      claim.addEventListener('click', function () { act('privacy/claim', null, ''); });
+      bar.appendChild(claim);
+    } else {
+      bar.appendChild(node('p', 'sub',
+        'Private conversations belong to ' + (v.who || 'the token holder')
+        + '. Other moderators do not see them anywhere in this panel, and do not get the Terminal page at all — '
+        + 'it is one live session carrying every chat, so it cannot be filtered.'));
+      var release = node('button', 'sm', 'Turn privacy off');
+      release.type = 'button';
+      release.addEventListener('click', function () {
+        if (!window.confirm('Turn privacy off?\n\nEvery moderator will see every conversation again, and get the Terminal back.')) return;
+        act('privacy/release', null, '');
+      });
+      bar.appendChild(release);
+    }
+    p.appendChild(bar);
+  }
+
   var list = s.chats.filter(function (c) {
     return !q || (c.name || '').toLowerCase().indexOf(q) >= 0 || c.chatKey.indexOf(q) >= 0;
   });
@@ -533,6 +573,22 @@ function renderChats(s) {
     open.setAttribute('aria-label', 'Open the conversation with ' + (c.name || c.chatKey));
     open.addEventListener('click', function () { go('chat/' + c.chatKey); });
     td.appendChild(open);
+    // Owner only, and only once privacy is switched on — otherwise the button
+    // would promise something the server is not enforcing.
+    if (isOwner() && state && state.viewer && state.viewer.on) {
+      var priv = (state.viewer.privateChats || []).indexOf(c.chatKey) >= 0;
+      var lock = node('button', 'sm', priv ? 'Private' : 'Make private');
+      lock.type = 'button';
+      lock.setAttribute('aria-pressed', priv ? 'true' : 'false');
+      lock.title = priv
+        ? 'Only you can see this conversation. Click to share it with other moderators again.'
+        : 'Hide this conversation from other moderators everywhere in the panel.';
+      lock.addEventListener('click', function () {
+        act('privacy/chat', null, '?chat=' + encodeURIComponent(c.chatKey) + '&private=' + (priv ? '0' : '1'));
+      });
+      td.appendChild(lock);
+    }
+
     var b = node('button', 'sm' + (c.blocked ? '' : ' danger'), c.blocked ? 'Unblock' : 'Block');
     b.type = 'button';
     b.style.marginLeft = '8px';
@@ -743,8 +799,10 @@ function convoRow(c) {
   dot.setAttribute('title', says);
   b.appendChild(dot);
 
+  var isPrivate = !!(state && state.viewer && (state.viewer.privateChats || []).indexOf(c.chatKey) >= 0);
   b.appendChild(node('span', 'name',
-    (c.name || 'Someone') + (c.isGroup ? ' (group)' : '') + (c.blocked ? ' — blocked' : '')));
+    (c.name || 'Someone') + (c.isGroup ? ' (group)' : '') + (c.blocked ? ' — blocked' : '')
+    + (isPrivate ? ' — private' : '')));
   b.appendChild(node('span', 'when', state ? ago(state.now - c.lastSeenAt) : ''));
   b.appendChild(node('span', 'last', previewFor(c)));
   b.addEventListener('click', function () { go('chat/' + c.chatKey); });

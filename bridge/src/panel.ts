@@ -52,6 +52,7 @@ import { fileURLToPath } from 'node:url';
 import { CONTROL_COMMANDS, CROSS_CHAT_VERBS, VERBS, VERB_GROUPS, writeFileAtomic } from '@tulip/shared';
 import { feed } from './feed.js';
 import { accessConfig, verifiedEmail } from './access.js';
+import { canSee, isOwner } from './privacy.js';
 import { PTY_PREFIX, proxyRequest, proxyUpgrade, ptyAvailable } from './pty.js';
 import { isPagesRequest, pagesHost, servePage } from './pages.js';
 import { log } from './log.js';
@@ -85,6 +86,9 @@ import {
   restorePage,
   clearPagePassword,
   setPagePassword,
+  claimPrivacy,
+  releasePrivacy,
+  setChatPrivate,
 } from './panel-api.js';
 
 const COOKIE = 'tulip_token';
@@ -377,6 +381,53 @@ export function startPanel(deps: ApiDeps): Server | null {
         log('panel.write', { path: url.pathname, who: auth.who ?? 'token holder' });
       }
 
+      // ...and who is *looking*, which is a different question the panel did not
+      // used to ask. See bridge/src/privacy.ts for what this can and cannot do;
+      // the short version is that it hides a conversation from a colleague
+      // reading a web page, not from anyone who can reach the host's disk.
+      const viewer = { who: auth.who };
+      const privacy = deps.config.privacy;
+      const unrestricted = isOwner(privacy, viewer);
+
+      // The terminal is owner-only when privacy is configured, and not because
+      // it is more sensitive than the rest: it is a live pty carrying every
+      // conversation at once, so unlike a list it cannot be filtered. All or
+      // nothing are the only honest options, and this is nothing.
+      if (!unrestricted && url.pathname.startsWith('/terminal')) {
+        res.writeHead(403, { ...headers, 'content-type': 'text/plain; charset=utf-8' })
+          .end('The terminal is available to the operator who owns this deployment.\n');
+        return;
+      }
+      if (!unrestricted && url.pathname.startsWith('/api/terminal')) {
+        return send(res, headers, 403, {
+          ok: false,
+          message: 'The terminal is available to the operator who owns this deployment.',
+        });
+      }
+
+      // One gate for every read path that names a conversation. Written once
+      // rather than seven times, because the way this fails is one surface
+      // quietly not being filtered — and a single page that still shows the
+      // chat makes the other six decoration.
+      const hidden = (key: string): boolean => !canSee(privacy, viewer, key);
+      const strip = <T,>(items: readonly T[], keyOf: (item: T) => string | null): T[] =>
+        unrestricted ? [...items] : items.filter((i) => { const k = keyOf(i); return k === null || !hidden(k); });
+      const notFound = { ok: false, message: 'No such conversation.' };
+
+      // Every route that acts on one conversation names it the same way, in a
+      // `key` query parameter — reading it, typing into it, attaching to it,
+      // blocking it, resetting it, fetching its media. So the check is here,
+      // once, ahead of all of them, rather than repeated at each and forgotten
+      // at the eighth.
+      //
+      // The answer is the one a key that was never issued would get. "You may
+      // not see this one" would confirm the conversation exists, which is the
+      // thing being hidden.
+      const named = url.searchParams.get('key');
+      if (named !== null && named.length > 0 && hidden(named)) {
+        return send(res, headers, 404, notFound);
+      }
+
       // The agent's real terminal, proxied from a host socket. Same-origin and
       // inside the gate above, so the panel's own cookie is the only credential
       // and there is no second authentication path to get wrong.
@@ -459,8 +510,32 @@ export function startPanel(deps: ApiDeps): Server | null {
           return;
         }
 
-        if (url.pathname === '/api/state') return send(res, headers, 200, snapshot(deps));
-        if (url.pathname === '/api/feed') return send(res, headers, 200, feed.recent(num('n', 120, 500)));
+        if (url.pathname === '/api/state') {
+          const state = snapshot(deps) as Record<string, unknown>;
+          if (!unrestricted) {
+            const chats = state['chats'];
+            if (Array.isArray(chats)) {
+              state['chats'] = strip(chats as Array<{ chatKey: string }>, (c) => c.chatKey);
+            }
+            // "Replying to <key>" would name a conversation this viewer is not
+            // shown, which is the whole thing leaking through a status line.
+            const queue = state['queue'] as { inFlight?: string | null } | undefined;
+            if (queue && typeof queue.inFlight === 'string' && hidden(queue.inFlight)) queue.inFlight = null;
+          }
+          // So the browser can hide what the server would refuse anyway. The
+          // nav item is cosmetic; the 403 above is the control.
+          state['viewer'] = {
+            who: auth.who,
+            owner: unrestricted,
+            on: privacy.owner !== null && privacy.owner.trim().length > 0,
+            privateChats: unrestricted ? privacy.chats : [],
+          };
+          return send(res, headers, 200, state);
+        }
+        if (url.pathname === '/api/feed') {
+          const recent = feed.recent(num('n', 120, 500)) as Array<{ chatKey?: string | null }>;
+          return send(res, headers, 200, strip(recent, (e) => e.chatKey ?? null));
+        }
         if (url.pathname === '/api/chat') {
           return send(res, headers, 200, chatHistory(deps, url.searchParams.get('key') ?? '', num('n', 200, 1000)));
         }
@@ -524,7 +599,10 @@ export function startPanel(deps: ApiDeps): Server | null {
           );
           return send(res, headers, result.ok ? 200 : 400, result);
         }
-        if (url.pathname === '/api/media/list') return send(res, headers, 200, mediaList(deps, num('n', 120, 500)));
+        if (url.pathname === '/api/media/list') {
+          const items = mediaList(deps, num('n', 120, 500)) as Array<{ chatKey?: string | null }>;
+          return send(res, headers, 200, strip(items, (m) => m.chatKey ?? null));
+        }
         if (url.pathname === '/api/media') {
           mediaFile(
             res,
@@ -551,7 +629,10 @@ export function startPanel(deps: ApiDeps): Server | null {
           return send(res, headers, result.ok ? 200 : 400, result);
         }
 
-        if (url.pathname === '/api/logs') return send(res, headers, 200, logTail(num('n', 200, 1000)));
+        if (url.pathname === '/api/logs') {
+          const lines = logTail(num('n', 200, 1000)) as Array<{ chatKey?: string | null }>;
+          return send(res, headers, 200, Array.isArray(lines) ? strip(lines, (l) => l.chatKey ?? null) : lines);
+        }
         if (url.pathname === '/api/settings' && req.method === 'GET') {
           return send(res, headers, 200, settingsView(deps));
         }
@@ -566,7 +647,19 @@ export function startPanel(deps: ApiDeps): Server | null {
           return send(res, headers, 200, { verbs: VERBS, groups: VERB_GROUPS, crossChat: CROSS_CHAT_VERBS, control: CONTROL_COMMANDS });
         }
         if (url.pathname === '/api/memory' && req.method === 'GET') {
-          return send(res, headers, 200, memoryList());
+          const memory = memoryList() as { notes?: Array<{ chatKey?: string | null; chatName?: string | null }> };
+          // The notes stay — they are shared by every conversation and hiding
+          // them would misrepresent what the agent knows. What is removed is
+          // where each came from, which is the part that names a hidden chat.
+          if (!unrestricted && Array.isArray(memory.notes)) {
+            for (const note of memory.notes) {
+              if (typeof note.chatKey === 'string' && hidden(note.chatKey)) {
+                note.chatKey = null;
+                note.chatName = 'another conversation';
+              }
+            }
+          }
+          return send(res, headers, 200, memory);
         }
         if (url.pathname === '/api/memory/forget' && req.method === 'POST') {
           const result = memoryForget(url.searchParams.get('id') ?? '');
@@ -687,6 +780,22 @@ export function startPanel(deps: ApiDeps): Server | null {
           return;
         }
 
+        if (url.pathname === '/api/privacy/claim' && req.method === 'POST') {
+          const result = claimPrivacy(deps, auth.who);
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        if (url.pathname === '/api/privacy/release' && req.method === 'POST') {
+          // Owner-only: the whole point is that another moderator cannot switch
+          // it off and then read what it was hiding.
+          if (!unrestricted) return send(res, headers, 403, { ok: false, message: 'Not yours to change.' });
+          const result = releasePrivacy(deps);
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        if (url.pathname === '/api/privacy/chat' && req.method === 'POST') {
+          if (!unrestricted) return send(res, headers, 403, { ok: false, message: 'Not yours to change.' });
+          const result = setChatPrivate(deps, url.searchParams.get('chat') ?? '', url.searchParams.get('private') === '1');
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
         if (url.pathname.startsWith('/api/action/') && req.method === 'POST') {
           const result = runAction(deps, url.pathname.slice('/api/action/'.length), url.searchParams.get('key') ?? '');
           return send(res, headers, result.ok ? 200 : 400, result);
