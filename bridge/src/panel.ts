@@ -829,6 +829,29 @@ export function startPanel(deps: ApiDeps): Server | null {
           return send(res, headers, result.ok ? 200 : 400, result);
         }
 
+        // Everything else is a panel route, so serve the panel and let it work
+        // out which page. This is what lets the address bar hold `/memory`
+        // rather than `/#/memory`: a real path only survives a reload if the
+        // server answers it, and until now it did not.
+        //
+        // Deliberately last, so it can only catch what nothing else claimed.
+        // `/api/*` and `/pty/*` are excluded explicitly rather than by
+        // ordering: an unmatched API path must stay a 404 that says so, not a
+        // page of HTML that a fetch will try to parse as JSON — the failure
+        // this codebase already learned once, when a redirect fed `<!DOCTYPE`
+        // to `JSON.parse`. The pages host never reaches here; it is answered
+        // much earlier, by hostname.
+        const isPanelRoute =
+          (req.method === 'GET' || req.method === 'HEAD') &&
+          !url.pathname.startsWith('/api/') &&
+          url.pathname !== PTY_PREFIX &&
+          !url.pathname.startsWith(`${PTY_PREFIX}/`) &&
+          !url.pathname.includes('.');
+        if (isPanelRoute && page) {
+          res.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8' }).end(page);
+          return;
+        }
+
         res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
       } catch (err) {
         log('panel.error', { path: url.pathname, err: String((err as Error).message) });
