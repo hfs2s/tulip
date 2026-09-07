@@ -375,6 +375,9 @@
 
   .field{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;
          padding:13px 0;border-bottom:1px solid var(--line-soft)}
+  /* `display:grid` above beats the browser's own [hidden] rule, so a row that
+     hides itself needs saying explicitly — as .work-steps and .termnote do. */
+  .field[hidden]{display:none}
   /* A <label> when it names a checkbox, so the words are a hit target too. */
   /* ── The persona reader ─────────────────────────────────────────────────────
      A brief is prose, and prose has different needs from a settings page: a
