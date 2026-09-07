@@ -33,9 +33,9 @@ export const REACTIVITY: readonly ReactivityLevel[] = [
     value: 0,
     name: 'Silent',
     description:
-      'Never speaks first. Answers only a real @-mention or a reply to one of its own messages, exactly as Mentions mode would — but it still reads everything, and still costs a turn per message.',
+      'Never speaks first. Answers a real @-mention or a reply to one of its own messages and nothing else, exactly as Mentions mode would — but it still reads everything, and still costs a turn per message.',
     instruction:
-      'Say nothing in this group unless this message is a direct @-mention of you or a reply to something you said. For anything else, run `tulip-wa quiet`.',
+      'Beyond that, say nothing here. Run `tulip-wa quiet` for anything you were not directly addressed in.',
   },
   {
     value: 1,
@@ -43,15 +43,15 @@ export const REACTIVITY: readonly ReactivityLevel[] = [
     description:
       'Speaks only when it knows something nobody else in the room does — an answer to a question that has gone unanswered, a correction to something factually wrong. Otherwise silent, including when the conversation is about it.',
     instruction:
-      'Speak only if you know something nobody else here does: an unanswered question you can actually answer, or a plain factual error worth correcting. If in doubt, run `tulip-wa quiet`.',
+      'Otherwise speak only if you know something nobody else here does: an unanswered question you can actually answer, or a plain factual error worth correcting. If in doubt, run `tulip-wa quiet`.',
   },
   {
     value: 2,
     name: 'Considered',
     description:
-      'The default, and the one the persona was written for. Joins when it can be useful and stays out of ordinary conversation between other people. Silent most of the time.',
+      'The default, and the one the persona was written for. Joins when it can be useful and stays out of ordinary conversation between other people. Silent most of the time — but a direct @-mention is always answered, at every level.',
     instruction:
-      'Join in when you can be useful, and stay out of ordinary conversation between other people. Silence is the normal answer — run `tulip-wa quiet` when you have nothing worth adding.',
+      'Otherwise join in when you can be useful, and stay out of ordinary conversation between other people. When nobody has addressed you and you have nothing worth adding, run `tulip-wa quiet`.',
   },
   {
     value: 3,
@@ -71,6 +71,23 @@ export const REACTIVITY: readonly ReactivityLevel[] = [
   },
 ];
 
+/**
+ * True at every level, and stated separately so no level can forget it.
+ *
+ * The dial governs whether to speak *unprompted*. Being @-mentioned is not
+ * unprompted — somebody typed your name to get your attention — and neither is
+ * a reply to something you said. Answering those is not a judgement call.
+ *
+ * This is not a hypothetical tidy-up. Levels 1 and 2 said "silence is the
+ * normal answer" with no carve-out, and that line is the first thing the agent
+ * reads on a group turn: it went quiet on direct mentions in two groups within
+ * an hour of the dial shipping.
+ */
+export const ALWAYS_ANSWER =
+  'Whatever the tone below says, always answer a direct @-mention of you and always answer a reply to '
+  + 'something you said. Being addressed is not a judgement call — the tone is only about whether to '
+  + 'speak when nobody asked you to.';
+
 export const DEFAULT_REACTIVITY = 2;
 
 export function reactivityLevel(value: number): ReactivityLevel {
@@ -84,5 +101,6 @@ export function reactivityLevel(value: number): ReactivityLevel {
  * messages written by strangers and must not mistake one for the other.
  */
 export function reactivityInstruction(value: number): string {
-  return `Group tone, set by the operator (${reactivityLevel(value).name}): ${reactivityLevel(value).instruction}`;
+  const level = reactivityLevel(value);
+  return `${ALWAYS_ANSWER} Group tone, set by the operator (${level.name}): ${level.instruction}`;
 }
