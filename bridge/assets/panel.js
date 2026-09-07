@@ -3075,7 +3075,9 @@ async function renderPages() {
 
   if (!data.items.length) { card.appendChild(node('p', 'empty', 'Nothing published yet.')); return; }
 
-  data.items.forEach(function (page) { appendPageRow(card, page, data); });
+  var grid = node('div', 'pagegrid');
+  card.appendChild(grid);
+  data.items.forEach(function (page) { appendPageCard(grid, page, data); });
 }
 
 /**
@@ -3112,145 +3114,196 @@ function grantSummary(page, data) {
  * people in it. Granting a group is granting its members, and adding an editor
  * becomes adding somebody to a group rather than editing a config file.
  */
-function appendPageRow(card, page, data) {
-  var row = node('div', 'entry');
-  var link = node('a', 'value', page.slug);
+/**
+ * One published page, as a card.
+ *
+ * The card answers the two questions somebody opens this page with — what is
+ * this, and who can change it — and nothing else. Everything that alters a page
+ * lives behind Settings, because those controls were seven buttons wide in a
+ * row and the destructive one sat between two ordinary ones.
+ */
+function appendPageCard(grid, page, data) {
+  var card = node('div', 'pagecard');
+
+  var link = node('a', 'pagename', page.slug);
   link.href = page.url;
   link.target = '_blank';
   link.rel = 'noopener noreferrer';
-  row.appendChild(link);
-  var state = plural(page.files, 'file') + ' · ' + bytes(page.bytes) + ' · ' + ago(Date.now() - page.at);
-  if (page.unpublished) state += ' · taken down — the link says it does not exist';
-  if (page.hasPassword) state += ' · password protected';
-  row.appendChild(node('span', 'meta', state));
+  card.appendChild(link);
 
-  var open = false;
-  var editor = node('div', 'card');
-  editor.hidden = true;
+  // The address, because a page exists to be handed to somebody and the link is
+  // the thing that gets handed.
+  card.appendChild(node('p', 'pageurl', (page.url || '').replace(/^https?:\/\//, '')));
 
-  var who = node('button', 'sm', 'Who can change this');
-  who.type = 'button';
-  who.setAttribute('aria-expanded', 'false');
-  who.addEventListener('click', function () {
-    open = !open;
-    editor.hidden = !open;
-    who.setAttribute('aria-expanded', open ? 'true' : 'false');
-  });
-  row.appendChild(who);
+  // State that changes what a visitor sees comes before state that does not.
+  var flags = node('div', 'pageflags');
+  if (page.unpublished) flags.appendChild(node('span', 'flag down', 'Taken down'));
+  if (page.hasPassword) flags.appendChild(node('span', 'flag', 'Password'));
+  if (flags.children.length) card.appendChild(flags);
 
-  // Taken down by whoever was granted it — that happens through a chat message,
-  // not a click here, so this is where an operator finds out and can undo it.
-  if (page.unpublished) {
-    var back = node('button', 'sm', 'Put back');
-    back.type = 'button';
-    back.addEventListener('click', function () {
-      act('pages/restore', null, '?slug=' + encodeURIComponent(page.slug));
-    });
-    row.appendChild(back);
-  }
+  card.appendChild(node('p', 'pagemeta',
+    plural(page.files, 'file') + ' · ' + bytes(page.bytes) + ' · ' + ago(Date.now() - page.at)));
+  card.appendChild(node('p', 'pagewho', grantSummary(page, data)));
 
-  // Per page, and "whether" rather than "what": the stored value is a salted
-  // hash and is never sent to this page. A password cannot be checked by the
-  // page it protects — served under connect-src 'none' and form-action 'none',
-  // it can neither call out nor post, and anything written into it is visible
-  // to whoever opened it — so the bridge asks for it before sending any bytes.
-  var lock = node('button', 'sm', page.hasPassword ? 'Change password' : 'Add password');
-  lock.type = 'button';
-  lock.addEventListener('click', function () {
-    var typed = window.prompt(
-      'Password for “' + page.slug + '”\n\n'
-      + 'Visitors are asked for it before the page loads. Anyone you give the link to also needs this.');
-    if (typed === null) return;
-    if (!typed.trim()) { toast('Nothing typed — the password is unchanged.'); return; }
-    act('pages/lock', null, '?slug=' + encodeURIComponent(page.slug), { password: typed });
-  });
-  row.appendChild(lock);
+  var foot = node('div', 'pagefoot');
+  var settings = node('button', 'sm', 'Settings');
+  settings.type = 'button';
+  settings.setAttribute('aria-label', 'Settings for ' + page.slug);
+  settings.addEventListener('click', function () { openPageSettings(page, data); });
+  foot.appendChild(settings);
+  card.appendChild(foot);
 
-  if (page.hasPassword) {
-    var unlock = node('button', 'sm', 'Remove password');
-    unlock.type = 'button';
-    unlock.addEventListener('click', function () {
-      if (!window.confirm('Remove the password on “' + page.slug + '”?\n\nAnyone with the link will be able to read it.')) return;
-      act('pages/unlock', null, '?slug=' + encodeURIComponent(page.slug));
-    });
-    row.appendChild(unlock);
-  }
+  grid.appendChild(card);
+}
 
-  var bin = node('button', 'sm danger', 'Delete');
-  bin.type = 'button';
-  bin.addEventListener('click', function () {
-    if (!window.confirm('Delete the page “' + page.slug + '”?\n\nThe link stops working immediately, and nothing keeps a copy.')) return;
-    act('pages/delete', null, '?slug=' + encodeURIComponent(page.slug));
-  });
-  row.appendChild(bin);
-  card.appendChild(row);
-  card.appendChild(node('p', 'meta', grantSummary(page, data)));
+/**
+ * Everything that changes a page, in one place.
+ *
+ * Grouped by what it does to a visitor: who may edit it, whether a password
+ * stands in front of it, whether it is served at all, and whether it exists.
+ * Deleting is last and alone, because it is the only one that cannot be undone.
+ */
+function openPageSettings(page, data) {
+  openModal(page.slug, (page.url || '').replace(/^https?:\/\//, ''), function (body, modal, dismiss) {
+    function section(title, note) {
+      body.appendChild(node('h4', 'modal-section', title));
+      if (note) body.appendChild(node('p', 'modal-note', note));
+    }
 
-  // Claimed or not, first: until a page is claimed the per-chat switches below
-  // have nothing to say.
-  var claim = node('div', 'entry');
-  claim.appendChild(node('span', 'value', 'Anyone'));
-  claim.appendChild(node('span', 'meta', 'leave this page unclaimed'));
-  claim.appendChild(liveSwitch(page.grantedTo === null, function (on, input) {
-    input.disabled = true;
-    void savePageGrant(page.slug, on ? null : [], function () { input.checked = !on; input.disabled = false; });
-  }));
-  editor.appendChild(claim);
+    // ── Who can change it ───────────────────────────────────────────────────
+    section('Who can change it',
+      'A conversation on this list may rewrite, publish, illustrate, take down and lock this page. '
+      + 'Everyone else is refused.');
 
-  data.chats.forEach(function (c) {
-    var line = node('div', 'entry');
-    line.appendChild(node('span', 'value', chatLabel(c)));
-    line.appendChild(node('span', 'meta', (c.isGroup ? 'group' : 'direct') + ' · ' + ago(Date.now() - c.lastSeenAt)));
-    var granted = page.grantedTo !== null && page.grantedTo.indexOf(c.chatKey) !== -1;
-    line.appendChild(liveSwitch(granted, function (on, input) {
+    var claim = node('div', 'entry');
+    claim.appendChild(node('span', 'value', 'Anyone'));
+    claim.appendChild(node('span', 'meta', 'leave this page unclaimed'));
+    claim.appendChild(liveSwitch(page.grantedTo === null, function (on, input) {
       input.disabled = true;
-      var next = (page.grantedTo || []).filter(function (k) { return k !== c.chatKey; });
-      if (on) next.push(c.chatKey);
-      void savePageGrant(page.slug, next, function () { input.checked = !on; input.disabled = false; });
+      void savePageGrant(page.slug, on ? null : [], function () { input.checked = !on; input.disabled = false; });
     }));
-    editor.appendChild(line);
-  });
+    body.appendChild(claim);
 
-  // Anyone the bridge has not seen. A chat key only exists once somebody has
-  // written, so without this a page cannot be handed to a named person until
-  // they happen to message first — which is backwards when the grant is the
-  // thing meant to invite them.
-  (page.grantedLabels || []).filter(function (g) { return g.pending; }).forEach(function (g) {
-    var line = node('div', 'entry');
-    line.appendChild(node('span', 'value', g.label));
-    line.appendChild(node('span', 'meta', 'not seen yet — applies as soon as they message'));
-    var off = node('button', 'sm', 'Remove');
-    off.type = 'button';
-    off.addEventListener('click', function () {
-      off.disabled = true;
-      var next = page.grantedTo.filter(function (k) { return k !== g.entry; });
-      void savePageGrant(page.slug, next, function () { off.disabled = false; });
+    data.chats.forEach(function (c) {
+      var line = node('div', 'entry');
+      line.appendChild(node('span', 'value', chatLabel(c)));
+      line.appendChild(node('span', 'meta', (c.isGroup ? 'group' : 'direct') + ' · ' + ago(Date.now() - c.lastSeenAt)));
+      var granted = page.grantedTo !== null && page.grantedTo.indexOf(c.chatKey) !== -1;
+      line.appendChild(liveSwitch(granted, function (on, input) {
+        input.disabled = true;
+        var next = (page.grantedTo || []).filter(function (k) { return k !== c.chatKey; });
+        if (on) next.push(c.chatKey);
+        void savePageGrant(page.slug, next, function () { input.checked = !on; input.disabled = false; });
+      }));
+      body.appendChild(line);
     });
-    line.appendChild(off);
-    editor.appendChild(line);
-  });
 
-  var add = node('div', 'entry');
-  var box = document.createElement('input');
-  box.type = 'text';
-  box.placeholder = 'Phone number or linked id';
-  box.setAttribute('aria-label', 'Grant this page to a phone number or linked id');
-  box.className = 'value';
-  add.appendChild(box);
-  var go = node('button', 'sm', 'Add');
-  go.type = 'button';
-  go.addEventListener('click', function () {
-    var raw = box.value.replace(/[^0-9a-z@]/gi, '');
-    if (!raw) { toast('Enter a phone number in full, without + or spaces.', true); return; }
-    go.disabled = true;
-    var next = (page.grantedTo || []).slice();
-    if (next.indexOf(raw) === -1) next.push(raw);
-    void savePageGrant(page.slug, next, function () { go.disabled = false; });
-  });
-  add.appendChild(go);
-  editor.appendChild(add);
+    // Anyone the bridge has not seen. A chat key only exists once somebody has
+    // written, so without this a page cannot be handed to a named person until
+    // they happen to message first — backwards, when the grant is the thing
+    // meant to invite them.
+    (page.grantedLabels || []).filter(function (g) { return g.pending; }).forEach(function (g) {
+      var line = node('div', 'entry');
+      line.appendChild(node('span', 'value', g.label));
+      line.appendChild(node('span', 'meta', 'not seen yet — applies as soon as they message'));
+      var off = node('button', 'sm', 'Remove');
+      off.type = 'button';
+      off.addEventListener('click', function () {
+        off.disabled = true;
+        var next = page.grantedTo.filter(function (k) { return k !== g.entry; });
+        void savePageGrant(page.slug, next, function () { off.disabled = false; });
+      });
+      line.appendChild(off);
+      body.appendChild(line);
+    });
 
-  card.appendChild(editor);
+    var add = node('div', 'entry');
+    var box = document.createElement('input');
+    box.type = 'text';
+    box.placeholder = 'Phone number or linked id';
+    box.setAttribute('aria-label', 'Grant this page to a phone number or linked id');
+    box.className = 'value';
+    add.appendChild(box);
+    var go = node('button', 'sm', 'Add');
+    go.type = 'button';
+    go.addEventListener('click', function () {
+      var raw = box.value.replace(/[^0-9a-z@]/gi, '');
+      if (!raw) { toast('Enter a phone number in full, without + or spaces.', true); return; }
+      go.disabled = true;
+      var next = (page.grantedTo || []).slice();
+      if (next.indexOf(raw) === -1) next.push(raw);
+      void savePageGrant(page.slug, next, function () { go.disabled = false; });
+    });
+    add.appendChild(go);
+    body.appendChild(add);
+
+    // ── Password ────────────────────────────────────────────────────────────
+    // "Whether", never "what": the stored value is a salted hash and is not sent
+    // to this page. A page cannot check its own password — served under
+    // connect-src 'none' and form-action 'none' it can neither call out nor
+    // post, and anything written into it is visible to whoever opened it — so
+    // the bridge asks before sending any bytes.
+    section('Password', page.hasPassword
+      ? 'Visitors are asked for a password before this page loads.'
+      : 'Anyone with the link can read this page.');
+
+    var pw = node('div', 'entry');
+    pw.appendChild(node('span', 'value', page.hasPassword ? 'Password set' : 'No password'));
+    var lock = node('button', 'sm', page.hasPassword ? 'Change' : 'Add password');
+    lock.type = 'button';
+    lock.addEventListener('click', function () {
+      var typed = window.prompt(
+        'Password for “' + page.slug + '”\n\n'
+        + 'Visitors are asked for it before the page loads. Anyone you give the link to also needs it.');
+      if (typed === null) return;
+      if (!typed.trim()) { toast('Nothing typed — the password is unchanged.'); return; }
+      dismiss();
+      act('pages/lock', null, '?slug=' + encodeURIComponent(page.slug), { password: typed });
+    });
+    pw.appendChild(lock);
+    if (page.hasPassword) {
+      var unlock = node('button', 'sm', 'Remove');
+      unlock.type = 'button';
+      unlock.addEventListener('click', function () {
+        if (!window.confirm('Remove the password on “' + page.slug + '”?\n\nAnyone with the link will be able to read it.')) return;
+        dismiss();
+        act('pages/unlock', null, '?slug=' + encodeURIComponent(page.slug));
+      });
+      pw.appendChild(unlock);
+    }
+    body.appendChild(pw);
+
+    // ── Whether it is served ────────────────────────────────────────────────
+    section('Availability', page.unpublished
+      ? 'The link answers “not found”. Nothing was deleted — the files are still here.'
+      : 'The page is being served to anyone with the link.');
+
+    var avail = node('div', 'entry');
+    avail.appendChild(node('span', 'value', page.unpublished ? 'Taken down' : 'Live'));
+    if (page.unpublished) {
+      var back = node('button', 'sm', 'Put back');
+      back.type = 'button';
+      back.addEventListener('click', function () {
+        dismiss();
+        act('pages/restore', null, '?slug=' + encodeURIComponent(page.slug));
+      });
+      avail.appendChild(back);
+    } else {
+      avail.appendChild(node('span', 'meta', 'whoever is granted this page can take it down from a chat'));
+    }
+    body.appendChild(avail);
+
+    // ── The one that cannot be undone ───────────────────────────────────────
+    section('Delete', 'The link stops working immediately and nothing keeps a copy.');
+    var bin = node('button', 'sm danger', 'Delete this page');
+    bin.type = 'button';
+    bin.addEventListener('click', function () {
+      if (!window.confirm('Delete the page “' + page.slug + '”?\n\nThe link stops working immediately, and nothing keeps a copy.')) return;
+      dismiss();
+      act('pages/delete', null, '?slug=' + encodeURIComponent(page.slug));
+    });
+    body.appendChild(bin);
+  });
 }
 
 /**
