@@ -239,7 +239,12 @@ function go(next) {
   if (page === 'chat') chatOpen = /^[0-9a-f]{16}$/.test(parts[1] || '') ? parts[1] : null;
 
   route = page;
-  if (location.hash !== '#/' + next) location.hash = '#/' + next;
+  // A real path, pushed into history rather than written into the fragment.
+  // The server answers any panel route with the page, so this survives a reload
+  // and a bookmark — which `#/memory` did too, but only because the browser
+  // never sent the fragment anywhere.
+  var want = '/' + next + strippedSearch();
+  if (location.pathname + location.search !== want) history.pushState({ route: next }, '', want);
   // Choosing a page is the end of the menu's job.
   setNav(false);
   var crumb = el('topbarPage');
@@ -4974,8 +4979,34 @@ mountTopbarMark();
 wireNavToggle();
 mountFlow();
 void mountPaper();
-go((location.hash || '#/overview').replace('#/', '') || 'overview');
-window.addEventListener('hashchange', function () { go((location.hash || '#/overview').replace('#/', '')); });
+/**
+ * The query, without the one parameter that must not persist.
+ *
+ * `?t=` is the panel token. The server turns it into a cookie on the first
+ * request precisely so it stops appearing in the address bar; carrying it
+ * forward through every pushState would undo that and put a credential in
+ * browser history and in any onward Referer.
+ */
+function strippedSearch() {
+  var q = new URLSearchParams(location.search);
+  q.delete('t');
+  var s = q.toString();
+  return s ? '?' + s : '';
+}
+
+/** The route the address bar is asking for. */
+function routeFromLocation() {
+  var path = location.pathname.replace(/^\/+/, '').replace(/\/+$/, '');
+  // Old links still work: anything bookmarked as `#/memory` is honoured and
+  // then rewritten to `/memory` by `go`, so a stale link upgrades itself rather
+  // than landing on Overview.
+  if (!path && location.hash) path = location.hash.replace(/^#\/?/, '');
+  return path || 'overview';
+}
+
+go(routeFromLocation());
+// Back and forward move between pages rather than through the fragment.
+window.addEventListener('popstate', function () { go(routeFromLocation()); });
 
 var stream = new EventSource('/api/stream');
 var feedPending = null;
