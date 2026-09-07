@@ -2414,37 +2414,136 @@ function paintChatLive() {
   chatSig = sig;
   paintThread(chatView);
 }
+
+/**
+ * Media — every attachment, and which way it went.
+ *
+ * Direction is the first fact about a file here, and it used to be a chip in
+ * the corner of a thumbnail: present, and invisible in a wall of two dozen.
+ * It is the page’s top-level division now — a band per direction, a control
+ * that shows one of them on its own, and a rail down the leading edge of every
+ * card so a card read out of its band still says which way it went.
+ *
+ * Outbound leads, and is the half the page is loud about. Those are files Juan
+ * made on his own account and sent to somebody; they appear nowhere else in the
+ * panel, and they are the half worth auditing. What people sent in is already
+ * visible in the conversation it arrived in.
+ */
+var mediaDir = 'all';
+
+/** Did Juan make this and send it, or did somebody send it to him? */
+function sentByJuan(m) { return m.direction === 'out'; }
+
 async function renderMedia() {
-  var p = head('media', 'Media', 'Every attachment, both directions — what people sent Juan, and what he sent them. Files are served from the bridge and never leave it. Copies of what Juan sent are kept for 14 days; what people sent stays as long as its conversation does.'), mine = renderToken;
-  var card = node('div', 'card');
-  p.appendChild(card);
+  var p = head('media', 'Media',
+    'Every file that has crossed between Juan and the people he talks to. They are served from the bridge and never leave it.'), mine = renderToken;
+
   var data;
-  try { data = await api('/api/media/list?n=200'); } catch (err) { card.appendChild(node('p', 'empty', err.message)); return; }
+  try { data = await api('/api/media/list?n=200'); }
+  catch (err) { p.appendChild(node('p', 'empty', err.message)); return; }
   if (stale(mine)) return;
-  if (!data.items.length) { card.appendChild(node('p', 'empty', 'No attachments yet.')); return; }
 
-  // Audio is not a picture and does not belong in a picture grid. A voice note
-  // has no thumbnail, so a square tile shows a player floating in empty space —
-  // and, now that they are transcribed, the words are the part worth reading.
-  // They get full-width rows; everything with a visual gets the grid.
-  var sound = data.items.filter(function (m) { return m.kind === 'audio'; });
-  var seen = data.items.filter(function (m) { return m.kind !== 'audio'; });
+  if (!data.items.length) {
+    p.appendChild(node('p', 'empty',
+      'No attachments yet. A picture or a voice note appears here the moment one is sent, in either direction.'));
+    return;
+  }
 
-  // Pictures first: they identify themselves at a glance, which is what a
-  // gallery is for. Sound cannot, so it goes underneath as a list you read
-  // rather than a wall you scrub through.
+  var sent = data.items.filter(sentByJuan);
+  var got = data.items.filter(function (m) { return !sentByJuan(m); });
+
+  // The counts ride on the control rather than in a row of tiles above it:
+  // "how many of each" is the same question the control exists to answer, and
+  // a stat row would say the numbers a second time.
+  var picks = [['all', 'Everything', data.items.length],
+               ['out', 'Juan sent', sent.length],
+               ['in', 'People sent', got.length]];
+  var controls = node('div', 'controls');
+  var seg = node('div', 'seg');
+  seg.setAttribute('role', 'group');
+  seg.setAttribute('aria-label', 'Which direction to show');
+  picks.forEach(function (f) {
+    var b = node('button', null, f[1]);
+    b.type = 'button';
+    b.appendChild(node('span', 'segcount', String(f[2])));
+    b.addEventListener('click', function () { mediaDir = f[0]; paint(); });
+    seg.appendChild(b);
+  });
+  controls.appendChild(seg);
+  p.appendChild(controls);
+
+  var body = node('div', 'mediabody');
+  p.appendChild(body);
+
+  function paint() {
+    Array.prototype.forEach.call(seg.children, function (b, n) {
+      b.setAttribute('aria-pressed', picks[n][0] === mediaDir ? 'true' : 'false');
+    });
+    clear(body);
+    if (mediaDir !== 'in') mediaBand(body, 'out', sent);
+    if (mediaDir !== 'out') mediaBand(body, 'in', got);
+    body.appendChild(mediaFoot(data, sent.length, got.length));
+  }
+  paint();
+}
+
+/**
+ * One direction: what it is, why these files are here, and how long they stay.
+ *
+ * The retention rule differs by direction and used to sit in the page’s own
+ * subheading, where it applied to everything on the screen and was true of half
+ * of it. It belongs to the band it describes.
+ */
+function mediaBand(into, dir, items) {
+  var out = dir === 'out';
+  var band = node('div', 'mediaband ' + dir);
+  var top = node('div', 'mediaband-top');
+  top.appendChild(node('h3', 'mediaband-name', out ? 'Juan sent' : 'People sent Juan'));
+  top.appendChild(node('span', 'mediaband-count', plural(items.length, 'file')));
+  band.appendChild(top);
+  band.appendChild(node('p', 'mediaband-why', out
+    ? 'Made here and sent out: a picture he generated, a voice note he spoke. A voice note carries no transcript — he was reading words he had already written in the conversation. Copies are kept for fourteen days and then removed.'
+    : 'Arrived in a conversation, and kept as long as that conversation is. Voice notes are transcribed on the way in, so the words are on the card.'));
+  into.appendChild(band);
+
+  if (!items.length) {
+    into.appendChild(node('p', 'empty', out
+      ? 'Juan has not sent anybody a file yet.'
+      : 'Nobody has sent Juan a file yet.'));
+    return;
+  }
+
+  // A recording has no thumbnail, so it cannot live in a picture grid — the
+  // split is about what a card can show, not about what the file is.
+  var heard = items.filter(function (m) { return m.kind === 'audio'; });
+  var seen = items.filter(function (m) { return m.kind !== 'audio'; });
+
   if (seen.length) {
-    if (sound.length) card.appendChild(node('h3', 'subhead', 'Pictures and video'));
-    var grid = node('div', 'grid');
-    seen.forEach(function (m) { grid.appendChild(mediaTile(m)); });
-    card.appendChild(grid);
+    if (heard.length) {
+      var moving = seen.some(function (m) { return m.kind === 'video'; });
+      into.appendChild(node('h4', 'mediakind', moving ? 'Pictures and video' : 'Pictures'));
+    }
+    var grid = node('div', 'mediagrid');
+    seen.forEach(function (m) { grid.appendChild(mediaCard(m)); });
+    into.appendChild(grid);
   }
-  if (sound.length) {
-    card.appendChild(node('h3', 'subhead', sound.length === 1 ? 'Voice note' : 'Voice notes'));
+  if (heard.length) {
+    if (seen.length) {
+      into.appendChild(node('h4', 'mediakind', heard.length === 1 ? 'Voice note' : 'Voice notes'));
+    }
     var voices = node('div', 'voicegrid');
-    sound.forEach(function (m) { voices.appendChild(voiceCard(m)); });
-    card.appendChild(voices);
+    heard.forEach(function (m) { voices.appendChild(voiceCard(m)); });
+    into.appendChild(voices);
   }
+}
+
+/** What is held, in one sentence, under everything it counts. */
+function mediaFoot(data, sent, got) {
+  var shown = data.items.length;
+  var lead = data.total > shown
+    ? 'The newest ' + shown + ' of ' + data.total + ' files.'
+    : plural(shown, 'file') + ' kept.';
+  return node('p', 'mediafoot', lead + ' ' + got + ' came in, ' + sent + ' went out.');
 }
 
 function mediaSrc(m) {
@@ -2453,22 +2552,52 @@ function mediaSrc(m) {
     + '&dir=' + encodeURIComponent(m.direction || 'in');
 }
 
-/** Which way it went, which is the first thing to know about an attachment. */
-function directionTag(m) {
-  var sent = m.direction === 'out';
-  return node('span', 'tag' + (sent ? ' sent' : ''), sent ? 'Juan sent' : 'received');
+/**
+ * Which way it went, in the caption rather than over the picture.
+ *
+ * The words are the ones the old chip used; what has changed is that they are
+ * in the reading order of the card instead of floating on the image, where they
+ * were read as part of the picture and skipped with it — and where a voice note,
+ * having no picture, had nowhere to put them at all.
+ */
+function mediaWho(m) {
+  return node('span', 'mediawho', sentByJuan(m) ? 'Juan sent' : 'Received');
 }
 
-function mediaTile(m) {
-  var tile = node('div', 'tile');
+/** Who it was with, how big, how long ago. */
+function mediaMeta(m) {
+  var meta = node('span', 'mediameta');
+  if (m.chatName) meta.appendChild(document.createTextNode(m.chatName));
+  else meta.appendChild(node('span', 'key', m.chatKey || 'unnamed chat'));
+  meta.appendChild(document.createTextNode(' · ' + bytes(m.bytes) + ' · ' + ago(Date.now() - m.at)));
+  return meta;
+}
+
+function mediaCard(m) {
+  var card = node('figure', 'mediacard ' + (sentByJuan(m) ? 'out' : 'in'));
   var src = mediaSrc(m);
-  if (m.kind === 'image') { var img = document.createElement('img'); img.src = src; img.alt = ''; img.loading = 'lazy'; tile.appendChild(img); }
-  else if (m.kind === 'video') { var v = document.createElement('video'); v.src = src; v.controls = true; tile.appendChild(v); }
-  else tile.appendChild(node('div', 'none', m.kind));
-  tile.appendChild(directionTag(m));
-  tile.appendChild(node('div', 'meta', (m.chatName || m.chatKey) + ' · ' + bytes(m.bytes)));
-  tile.appendChild(binButton(m));
-  return tile;
+  if (m.kind === 'image') {
+    var img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    card.appendChild(img);
+  } else if (m.kind === 'video') {
+    var v = document.createElement('video');
+    v.src = src;
+    v.controls = true;
+    v.preload = 'metadata';
+    card.appendChild(v);
+  } else {
+    card.appendChild(node('div', 'mediablank', m.kind));
+  }
+  card.appendChild(binButton(m));
+  var cap = node('figcaption', 'mediacap');
+  cap.appendChild(mediaWho(m));
+  cap.appendChild(mediaMeta(m));
+  card.appendChild(cap);
+  return card;
 }
 
 /**
@@ -2480,25 +2609,33 @@ function mediaTile(m) {
  * form you can read: the card leads with it, and the audio is what you open
  * when the words are not enough.
  *
+ * Only inbound recordings have words. An outbound one was spoken from text Juan
+ * had already written, so nothing was ever transcribed — which is a fact about
+ * the direction, not about the file, and so it is said once in the band above
+ * rather than on each of nine identical cards. What a card of his gets is the
+ * one thing that differs from an inbound one: no words to read, so play it.
+ *
  * The `<audio>` is built on first open rather than up front. Two hundred of
  * them on a page is two hundred media elements the browser has to keep, for
  * something almost none of which will be played.
  */
 function voiceCard(m) {
-  var card = node('div', 'voice');
+  var out = sentByJuan(m);
+  var card = node('div', 'voice ' + (out ? 'out' : 'in'));
 
   var toggle = node('button', 'voice-open');
   toggle.type = 'button';
   toggle.setAttribute('aria-expanded', 'false');
 
   var head = node('div', 'voice-head');
-  head.appendChild(node('span', 'who', m.chatName || m.chatKey));
-  head.appendChild(directionTag(m));
-  head.appendChild(node('span', 'meta', bytes(m.bytes)));
+  head.appendChild(mediaWho(m));
+  head.appendChild(mediaMeta(m));
   toggle.appendChild(head);
 
   if (m.transcript) toggle.appendChild(node('blockquote', 'said', m.transcript));
-  else toggle.appendChild(node('div', 'said none', 'No transcript — either transcription was off when this arrived, or it failed.'));
+  else if (out) toggle.appendChild(node('div', 'said none cue', 'Play to hear it.'));
+  else toggle.appendChild(node('div', 'said none',
+    'No transcript — either transcription was off when this arrived, or it failed.'));
   card.appendChild(toggle);
 
   var slot = node('div', 'voice-player');
