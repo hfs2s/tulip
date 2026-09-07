@@ -27,6 +27,72 @@ function node(tag, cls, text) {
 }
 function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
 function hhmm(ts) { return new Date(ts).toTimeString().slice(0, 5); }
+
+/**
+ * An instant as the person reading it actually experiences it.
+ *
+ * Every timestamp crossing the wire is UTC — ISO with a Z, or epoch
+ * milliseconds — because that is the only form that survives a DST boundary
+ * without an argument about what it meant. That makes UTC the right thing to
+ * store and the wrong thing to show. The Log page used to slice the characters
+ * straight out of the ISO string, so a bridge running in UTC printed 12:01 to
+ * an operator whose wall clock read 14:02, and the two hours were invisible
+ * rather than merely wrong: nothing on the line said which zone it was in.
+ *
+ * `hhmm` above is left alone deliberately. It goes through a Date and renders
+ * in the browser’s own zone, which is already the reader’s — the bug was never
+ * in the timestamps that were parsed, only in the ones treated as text.
+ *
+ * `zone` names the zone to render in; omitted, the reader’s own is used.
+ */
+function localTime(at, zone) {
+  var d = at instanceof Date ? at : new Date(at);
+  if (isNaN(d.getTime())) return '';
+  var opts = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+  if (zone) opts.timeZone = zone;
+  try { return new Intl.DateTimeFormat(undefined, opts).format(d); }
+  catch (err) { return d.toTimeString().slice(0, 8); }
+}
+
+/** The same instant, said in full — for a `title`, where there is room to be unambiguous. */
+function localFull(at, zone) {
+  var d = at instanceof Date ? at : new Date(at);
+  if (isNaN(d.getTime())) return '';
+  var opts = { dateStyle: 'medium', timeStyle: 'long' };
+  if (zone) opts.timeZone = zone;
+  try { return new Intl.DateTimeFormat(undefined, opts).format(d) + '  ·  ' + d.toISOString(); }
+  catch (err) { return d.toISOString(); }
+}
+
+/** A date and time together, for a fire time somebody is going to plan around. */
+function localWhen(at, zone) {
+  var d = at instanceof Date ? at : new Date(at);
+  if (isNaN(d.getTime())) return '';
+  var opts = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short' };
+  if (zone) opts.timeZone = zone;
+  try { return new Intl.DateTimeFormat(undefined, opts).format(d); }
+  catch (err) { return d.toISOString(); }
+}
+
+/**
+ * How far away, in words.
+ *
+ * The absolute time answers "when", and on its own it is a poor answer to the
+ * question an operator actually has, which is "is this about to happen". Both
+ * are shown for that reason.
+ */
+function relative(at) {
+  var d = at instanceof Date ? at : new Date(at);
+  if (isNaN(d.getTime())) return '';
+  var ms = d.getTime() - Date.now(), ahead = ms >= 0, secs = Math.abs(ms) / 1000;
+  var n, unit;
+  if (secs < 60) { return ahead ? 'in under a minute' : 'just now'; }
+  if (secs < 3600) { n = Math.round(secs / 60); unit = 'minute'; }
+  else if (secs < 86400) { n = Math.round(secs / 3600); unit = 'hour'; }
+  else { n = Math.round(secs / 86400); unit = 'day'; }
+  var phrase = n + ' ' + unit + (n === 1 ? '' : 's');
+  return ahead ? 'in ' + phrase : phrase + ' ago';
+}
 function ago(ms) {
   var s = Math.round(ms / 1000);
   if (s < 60) return s + 's ago';
@@ -107,6 +173,7 @@ async function act(action, key, rawPath, payload) {
 // Icons are a fixed literal in this file. They are the only markup assigned as
 // HTML anywhere on the page, and they never contain a value from the API.
 var ICONS = {
+  schedule: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.4 1.6"/><path d="M9 2.6h6"/>',
   overview: '<path d="M3.5 18a8.5 8.5 0 1 1 17 0"/><path d="M12 18l4.4-5.6"/>',
   messages: '<path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1z"/>',
   chats: '<path d="M16.2 12.5H18a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H7.6a1 1 0 0 0-1 1v1.4"/><path d="M13 7.8H4.6a1 1 0 0 0-1 1v6.6a1 1 0 0 0 1 1H6v3.1l3.9-3.1H13a1 1 0 0 0 1-1V8.8a1 1 0 0 0-1-1z"/>',
@@ -149,7 +216,7 @@ function icon(name) {
 var PAGES = [
   ['overview', 'Overview'], ['chat', 'Chat'], ['messages', 'Messages'], ['chats', 'Chats'],
   ['media', 'Media'], ['terminal', 'Terminal'], ['persona', 'Persona'], ['memory', 'Memory'],
-  ['verbs', 'Verbs'],
+  ['schedule', 'Schedule'], ['verbs', 'Verbs'],
   ['pages', 'Pages'], ['settings', 'Settings'], ['log', 'Log']
 ];
 
@@ -4971,12 +5038,182 @@ async function renderLog() {
   if (!rows.length) { card.appendChild(node('p', 'empty', 'Nothing logged yet today.')); return; }
   rows.reverse().forEach(function (r) {
     var line = node('div', 'logline');
-    line.appendChild(node('b', null, (r.at || '').slice(11, 19) + '  '));
+    // Was `.slice(11, 19)` — the characters cut out of the ISO string, which is
+    // UTC and says so nowhere. The title carries the full instant for anyone
+    // reconciling this against a log from another machine.
+    var when = node('b', null, localTime(r.at) + '  ');
+    when.title = localFull(r.at);
+    line.appendChild(when);
     var rest = Object.keys(r).filter(function (k) { return k !== 'at' && k !== 'event'; })
       .map(function (k) { return k + '=' + (typeof r[k] === 'string' ? r[k] : JSON.stringify(r[k])); }).join(' ');
     line.appendChild(document.createTextNode((r.event || '') + '  ' + rest));
     card.appendChild(line);
   });
+}
+
+/**
+ * What 2LP has promised to do later.
+ *
+ * This page exists because the promise is invisible everywhere else. A reminder
+ * is agreed in one conversation, fires days later into that same conversation,
+ * and in between there is nothing anywhere that says it is coming. An operator
+ * could not tell a promise that will be kept from one the agent made up and
+ * then forgot — and the second is the likelier failure, because agreeing costs
+ * a sentence and remembering costs a scheduler.
+ *
+ * So the three things worth seeing are the three things shown: what is still
+ * owed, what has already been sent, and what came due while the bridge was
+ * down. The last is the one a list of "upcoming" would quietly omit, and it is
+ * the one somebody is standing in a room waiting for.
+ */
+async function renderSchedule() {
+  var p = head('schedule', 'Schedule',
+    'Reminders and repeating jobs 2LP has been asked to run. Each fires into the conversation that asked for it, at the time that conversation was given — so every line here is a promise somebody is waiting on.'), mine = renderToken;
+
+  var data;
+  try {
+    data = await api('/api/schedule');
+  } catch (err) {
+    var failed = node('div', 'card');
+    failed.appendChild(node('p', 'empty', err.message));
+    p.appendChild(failed);
+    return;
+  }
+  if (stale(mine)) return;
+
+  // Tolerant of either shape: a bare array, or an envelope carrying the
+  // deployment zone alongside. The zone is worth stating once at the top —
+  // every time below is rendered in the entry’s own zone, and an operator
+  // reading "09:00" deserves to know whose nine that is.
+  var entries = Array.isArray(data) ? data : (data.items || []);
+
+  // Each entry carries the zone it was *promised* in, which is not necessarily
+  // the deployment's current one — that is the point of storing it per entry.
+  // So the banner names the zone only when every entry agrees on one; when they
+  // do not, saying which is the card's job and a single heading would lie.
+  var zones = entries.map(function (e) { return e.timezone; })
+    .filter(function (z, i, all) { return z && all.indexOf(z) === i; });
+  if (entries.length) {
+    var where = node('p', 'schedzone');
+    if (zones.length === 1) {
+      where.appendChild(document.createTextNode('Times are shown in '));
+      where.appendChild(node('b', null, zones[0]));
+      where.appendChild(document.createTextNode(' — the zone each of these was agreed in.'));
+    } else {
+      where.appendChild(document.createTextNode('Times are shown in the zone each reminder was agreed in, named on the card.'));
+    }
+    p.appendChild(where);
+  }
+
+  if (!entries.length) {
+    var none = node('div', 'card');
+    none.appendChild(node('p', 'empty',
+      'Nothing scheduled. When somebody asks 2LP to remind them about something, or to do something on a repeating basis, it appears here until it has fired.'));
+    p.appendChild(none);
+    return;
+  }
+
+  // Pending first, and by when they fire rather than when they were made: the
+  // question this page is opened with is almost always "what happens next".
+  var pending = entries.filter(function (e) { return e.state === 'active'; })
+    .sort(function (a, b) { return new Date(a.nextAt || 0) - new Date(b.nextAt || 0); });
+  // Everything settled, newest first. `missed` and `failed` live here too — not
+  // hidden away, because a promise that did not arrive is the thing most worth
+  // reading on this page.
+  var settled = entries.filter(function (e) { return e.state !== 'active'; })
+    .sort(function (a, b) {
+      return new Date(b.lastFiredAt || b.createdAt || 0) - new Date(a.lastFiredAt || a.createdAt || 0);
+    });
+
+  if (pending.length) {
+    p.appendChild(node('h3', 'schedhead', 'Coming up'));
+    var upcoming = node('div', 'schedgrid');
+    pending.forEach(function (e) { upcoming.appendChild(scheduleCard(e, true)); });
+    p.appendChild(upcoming);
+  }
+
+  if (settled.length) {
+    p.appendChild(node('h3', 'schedhead', 'Already run'));
+    var past = node('div', 'schedgrid');
+    settled.forEach(function (e) { past.appendChild(scheduleCard(e, false)); });
+    p.appendChild(past);
+  }
+}
+
+/** How a repeating entry is described when the server has not described it. */
+function scheduleShape(entry) {
+  if (entry.describes) return entry.describes;
+  var spec = entry.spec || {};
+  if (spec.kind === 'cron') return 'Repeats · ' + (spec.expression || '');
+  return 'One time';
+}
+
+/** One entry, as a card. */
+function scheduleCard(entry, live) {
+  var card = node('div', 'schedcard' + (live ? '' : ' past'));
+
+  var top = node('div', 'schedtop');
+  // The state is the first thing read, so it leads. `missed` and `failed` are
+  // the two that need to look different from across the room.
+  top.appendChild(node('span', 'schedstate s-' + entry.state, entry.state));
+  // Who asked matters before somebody cancels the wrong one: an operator's own
+  // reminder and one the agent agreed to in a conversation are not the same
+  // thing to delete.
+  top.appendChild(node('span', 'schedwho', entry.createdBy === 'operator' ? 'you' : 'asked in chat'));
+  card.appendChild(top);
+
+  // The message itself, which is the only part a person on WhatsApp will see.
+  card.appendChild(node('p', 'schedtext', entry.text || ''));
+
+  var meta = node('div', 'schedmeta');
+
+  if (entry.nextAt) {
+    var next = node('p', 'schedwhen');
+    next.appendChild(node('b', null, live ? 'Next  ' : 'Was due  '));
+    next.appendChild(document.createTextNode(
+      (entry.nextAtLocal || localWhen(entry.nextAt, entry.timezone)) + '  ·  ' + relative(entry.nextAt)));
+    next.title = localFull(entry.nextAt, entry.timezone);
+    meta.appendChild(next);
+  }
+
+  var shape = node('p', null, scheduleShape(entry));
+  meta.appendChild(shape);
+
+  if (entry.chatName) meta.appendChild(node('p', null, 'Goes to ' + entry.chatName));
+
+  if (entry.fireCount) {
+    var sent = node('p', null, 'Sent ' + entry.fireCount + (entry.fireCount === 1 ? ' time' : ' times')
+      + (entry.lastFiredAt ? ', last ' + relative(entry.lastFiredAt) : ''));
+    if (entry.lastFiredAt) sent.title = localFull(entry.lastFiredAt, entry.timezone);
+    meta.appendChild(sent);
+  }
+
+  // The note is where a miss explains itself. It is not decoration and it is
+  // not truncated — if the bridge was down for six hours, this is the sentence
+  // that says so.
+  if (entry.overdueMs > 0) {
+    meta.appendChild(node('p', 'schednote',
+      'Overdue by ' + relative(Date.now() - entry.overdueMs).replace(' ago', '') + ' and not sent yet.'));
+  }
+  if (entry.note) meta.appendChild(node('p', 'schednote', entry.note));
+
+  card.appendChild(meta);
+
+  if (live) {
+    var cancel = node('button', 'schedcancel', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', function () {
+      // No confirm(): a modal dialog blocks the panel, and this is reversible
+      // in the only sense that matters — nothing has been sent yet, and the
+      // person can ask again. Deleting a *fired* message is what would not be.
+      cancel.disabled = true;
+      cancel.textContent = 'Cancelling…';
+      act('schedule/cancel', null, '?id=' + encodeURIComponent(entry.id));
+    });
+    card.appendChild(cancel);
+  }
+
+  return card;
 }
 
 // ── Render ──────────────────────────────────────────────────────────────────
@@ -4998,7 +5235,7 @@ var NEEDS_STATE = { overview: 1, chats: 1 };
  * Excludes chat and terminal on purpose — those own a poll and a text box, and
  * rebuilding them would restart the one and empty the other.
  */
-var SELF_FETCHING = { pages: 1, memory: 1, media: 1, persona: 1, verbs: 1, log: 1 };
+var SELF_FETCHING = { pages: 1, memory: 1, media: 1, persona: 1, verbs: 1, log: 1, schedule: 1 };
 
 /** Re-read the current page after something changed it. */
 function repaintAfterChange() {
@@ -5021,6 +5258,7 @@ function render() {
   else if (route === 'persona') void renderPersona();
   else if (route === 'verbs') void renderVerbs();
   else if (route === 'settings') renderSettings();
+  else if (route === 'schedule') void renderSchedule();
   else if (route === 'log') renderLog();
 }
 

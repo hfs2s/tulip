@@ -164,8 +164,8 @@ export function ensureWorkspace(chatKey: string): ChatWorkspace {
   const persona = composePersona();
   writeFileSync(
     workspace.claudeMd,
-    `${persona}${sharedMemory()}\n\n---\n\nThis file is regenerated from the persona directory every time a ` +
-      `session starts. Editing it here changes nothing; edit the persona instead.\n`,
+    `${persona}${sharedMemory()}${localTime()}\n\n---\n\nThis file is regenerated from the persona directory every ` +
+      `time a session starts. Editing it here changes nothing; edit the persona instead.\n`,
   );
 
   return workspace;
@@ -230,6 +230,52 @@ function sharedMemory(): string {
   } catch {
     return '';
   }
+}
+
+/**
+ * Which clock the people on the other end are reading.
+ *
+ * This container runs UTC and says nothing about it, so before this existed the
+ * agent had no time information at all: `date` printed 12:01 while the operator
+ * looked at 14:02, and "remind us at 9am" quietly became 9am UTC — 11am to
+ * them. A two-hour error in a promise, invisible from both ends.
+ *
+ * Read from `current.json`, which the bridge writes from its own config, rather
+ * than hard-coded here: there is one place the deployment's zone is decided and
+ * this is not it. Absent or unreadable yields nothing rather than a guess — the
+ * verbs that resolve a time print the zone back with every answer, so a session
+ * that started before the first turn is corrected the moment it schedules
+ * anything.
+ */
+function localTime(): string {
+  let zone: string;
+  try {
+    const current = JSON.parse(readFileSync(inPaths.current, 'utf8')) as { timezone?: unknown };
+    if (typeof current.timezone !== 'string' || current.timezone.length === 0) return '';
+    zone = current.timezone;
+  } catch {
+    return '';
+  }
+
+  let sample: string;
+  try {
+    sample = new Intl.DateTimeFormat('en-GB', {
+      timeZone: zone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZoneName: 'short',
+    }).format(new Date());
+  } catch {
+    return '';
+  }
+
+  return (
+    `\n\n## The clock\n\n` +
+    `The people you are talking to are in **${zone}**. It was ${sample} there when this session started, ` +
+    `while \`date\` in your shell said ${new Date().toISOString().slice(11, 16)} UTC. ` +
+    `Those are the same moment. Say times in ${zone}, never in UTC, and never read your shell's clock out loud.\n`
+  );
 }
 
 /**

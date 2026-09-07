@@ -33,6 +33,7 @@
  */
 import { z } from 'zod';
 import { LanguageBoost } from './languages.js';
+import { ScheduleSpec, TimeZone } from './schedule.js';
 
 // ─── Primitives ──────────────────────────────────────────────────────────────
 
@@ -217,6 +218,26 @@ export const CurrentTurn = z
      */
     generation: z.number().int().nonnegative().default(0),
     /**
+     * The wall clock the people in this conversation are actually living on.
+     *
+     * The agent had no time information at all before this existed, and the
+     * container runs UTC — so `date` in its shell reads two hours behind a
+     * person in Madrid, and "remind us at 9am" quietly became 9am UTC, which is
+     * 11am to them. That is a promise broken by two hours with nobody able to
+     * see why.
+     *
+     * Carried per turn like `reactivity`, and from the same reasoning: an
+     * operator changing the deployment's zone should not have to restart a
+     * session for it to take effect.
+     *
+     * Defaults to `UTC` so a `current.json` written by an older bridge still
+     * parses. That default is *wrong* for this deployment, deliberately and
+     * visibly: every verb that resolves a time echoes the zone back with the
+     * resolved instant, so falling back to UTC shows up in the confirmation
+     * rather than on the day the reminder does not arrive.
+     */
+    timezone: TimeZone.default('UTC'),
+    /**
      * Which capabilities are switched on for this turn.
      *
      * Advisory, and deliberately so: the bridge refuses a switched-off action
@@ -246,6 +267,17 @@ export const CurrentTurn = z
          * defaults closed and an older file means "no".
          */
         recall: z.boolean().default(false),
+        /**
+         * Defaults true, like the sending capabilities above it.
+         *
+         * The direction is safe for the same reason: an older `current.json`
+         * lets the agent try, and the bridge — which reads the real config —
+         * refuses. And here the refusal is *loud* rather than silent, because
+         * the failure being designed against is a promise that cannot be kept:
+         * `tulip-wa remind` prints the reason and exits non-zero, so the agent
+         * has the words to relay instead of a reminder it thinks it set.
+         */
+        schedule: z.boolean().default(true),
       })
       .strict()
       .default({}),
@@ -424,6 +456,70 @@ export const OutboxAction = z.discriminatedUnion('kind', [
        */
       kind: z.literal('remember'),
       text: z.string().min(1).max(300),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
+       * Ask the bridge to send something into *this* chat, later.
+       *
+       * **Note what is missing: there is no `chatKey` field.** Not a nullable
+       * one, not a defaulted one — none at all, so a scheduled send to another
+       * conversation is unrepresentable rather than refused. That is a stronger
+       * statement than the one `sendTo` makes, and it is deliberate: a delayed
+       * cross-chat send is a far better spam primitive than an immediate one.
+       * `sendTo` at least happens while a turn is open, an operator can watch
+       * the feed move, and the conversation that caused it is on the screen. A
+       * message that leaves at three in the morning, from a rule set weeks
+       * earlier, in a chat nobody is looking at, has none of that.
+       *
+       * The bridge stamps the entry with the turn's own chat and nothing else,
+       * exactly as `text` is addressed. See bridge/src/schedule.ts.
+       *
+       * A *tool* rather than a send: it delivers nothing at the moment it is
+       * called. It spends the turn's tool budget, like `remember` and `search`,
+       * for the reason `outbox.ts` sets out where the two budgets are charged.
+       * The eventual delivery spends the destination chat's outbound rate, on
+       * the day it happens, like any other message.
+       */
+      kind: z.literal('schedule'),
+      spec: ScheduleSpec,
+      /** Capped like `text`, and for the same reason — see that action. */
+      text: z.string().min(1).max(4096),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
+       * Call one off.
+       *
+       * Scoped to the asking chat on the bridge side: an id belonging to
+       * somebody else's conversation is answered as "no such reminder", which
+       * is also what an invented id gets. Ids are v4 UUIDs, so guessing one is
+       * not a route in, and the check means a guess would buy nothing anyway.
+       */
+      kind: z.literal('scheduleCancel'),
+      scheduleId: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
+       * What has been promised to the people in this chat.
+       *
+       * The agent cannot see its own store — the file is on the bridge's own
+       * volume, which it has no mount for — so without this it would have to
+       * remember what it had set up, across sessions, which is exactly the kind
+       * of thing it does not reliably do. Returns this chat's entries and no
+       * others.
+       */
+      kind: z.literal('scheduleList'),
     })
     .strict(),
   z
@@ -655,7 +751,7 @@ export const MemoryFile = z.object({ notes: z.array(MemoryNote).max(200) }).stri
 export const ToolResult = z
   .object({
     actionId: z.string().uuid(),
-    kind: z.enum(['search', 'fetch', 'chats', 'page', 'contact', 'sent', 'history']),
+    kind: z.enum(['search', 'fetch', 'chats', 'page', 'contact', 'sent', 'history', 'schedule']),
     at: z.string().datetime(),
     ok: z.boolean(),
     /** Present when ok is false. Short, and safe to show a person. */

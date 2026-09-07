@@ -23,6 +23,7 @@ import { startPanel } from './panel.js';
 import { setPagePasswords } from './panel-api.js';
 import { paths } from './paths.js';
 import { Limiter } from './ratelimit.js';
+import { Scheduler } from './schedule.js';
 import { TurnRegistry } from './turns.js';
 import { WhatsApp } from './whatsapp.js';
 
@@ -167,6 +168,14 @@ async function main(): Promise<void> {
   outbox.start();
   startPanel({ config, wa, chats, limiter, dispatcher: currentDispatcher });
 
+  // Messages somebody was promised for later.
+  //
+  // Started after the socket, so a reminder that came due while the bridge was
+  // down is not attempted before there is anything to send it over — it would
+  // fail, and be recorded as `failed` when the truth is `missed`, which are the
+  // two states an operator most needs to be able to tell apart.
+  const scheduler = new Scheduler({ wa, config, chats, limiter }).start();
+
   // Typing follows the turn rather than the send: the wait people notice is the
   // one before the first word, and WhatsApp expires a composing state after
   // about ten seconds, so it has to be refreshed rather than set once.
@@ -267,6 +276,7 @@ async function main(): Promise<void> {
     limiter.flush();
     chats.flush();
     outbox.stop();
+    scheduler.stop();
     process.exit(0);
   };
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => shutdown(signal));

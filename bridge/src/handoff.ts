@@ -42,6 +42,13 @@ export function publishTurn(
   can?: CurrentTurnType['can'],
   generation = 0,
   reactivity: number | null = null,
+  /**
+   * The deployment's wall clock. Defaulted rather than required so the two
+   * suites that call this with a batch alone keep working — and `UTC` is the
+   * honest default there, because a caller that does not say is a caller with
+   * no config to read.
+   */
+  timezone = 'UTC',
 ): void {
   const validated = InboxBatch.parse(batch);
   writeJsonAtomic(inPaths.batch(validated.turnId), validated, 0o644);
@@ -57,6 +64,7 @@ export function publishTurn(
     // Only for a group, and only in `observe` mode. A direct chat has no tone to
     // set — the agent answers the person who wrote to it.
     reactivity: validated.isGroup ? reactivity : null,
+    timezone,
     // Omitted rather than guessed when the caller does not say: every field
     // defaults to on, and the bridge refuses for real regardless.
     ...(can === undefined ? {} : { can }),

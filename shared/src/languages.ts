@@ -152,29 +152,23 @@ export const SPOKEN_LANGUAGES = [
   /**
    * Swedish is a row with no mouth.
    *
-   * The provider has a Swedish `language_boost` and not one Swedish voice, so
-   * this row improves how the words are *pronounced* while leaving the accent
-   * to whatever the deployment default is. That is a real limitation rather
-   * than a setting nobody has filled in yet, and the panel says so on the row —
-   * an operator who sees a blank field otherwise reads it as a to-do.
+   * The provider has a Swedish `language_boost` and not one Swedish voice. The
+   * row is kept rather than withdrawn because the boost is real — it is what
+   * stops Swedish being read with an English mouth in *written* contexts — and
+   * because a language an operator can see and understand the limits of is
+   * better than one that has silently vanished.
+   *
+   * It is also in `UNSPOKEN_BOOSTS`, so nothing speaks it aloud in a fallback
+   * voice. Those two facts are the whole of the design: visible here, never
+   * spoken there, unless an operator pastes in a voice id of their own.
    */
   { name: 'Swedish', boost: 'Swedish' },
-  { name: 'Turkish', boost: 'Turkish' },
   { name: 'Arabic', boost: 'Arabic' },
   // Named for what the agent says, boosted with what the provider calls it.
   // `Chinese` is Mandarin here; Cantonese is `Chinese,Yue` and has no row.
   { name: 'Mandarin', boost: 'Chinese' },
   { name: 'Russian', boost: 'Russian' },
   { name: 'Japanese', boost: 'Japanese' },
-  /**
-   * Vietnamese has exactly one voice in the catalogue and it is female.
-   *
-   * Every other row here is read by a man, because that is who Juan is. There
-   * is no male Vietnamese voice to choose — not a preference, an absence — so
-   * the row is here and the panel says whose voice it is, rather than leaving
-   * an operator to work out why this one sounds like somebody else.
-   */
-  { name: 'Vietnamese', boost: 'Vietnamese' },
 ] as const;
 
 export type SpokenLanguage = (typeof SPOKEN_LANGUAGES)[number]['name'];
@@ -182,7 +176,7 @@ export type SpokenLanguage = (typeof SPOKEN_LANGUAGES)[number]['name'];
 /**
  * One sentence per language, for hearing what a voice actually sounds like.
  *
- * The panel's test bench speaks these. They are the same sentence in eighteen
+ * The panel's test bench speaks these. They are the same sentence in sixteen
  * languages rather than eighteen different sentences, because the thing being
  * compared is the mouth and not the words — and they are a real introduction
  * rather than "testing, one two three", so what an operator hears is what a
@@ -206,48 +200,84 @@ export const LANGUAGE_SAMPLES: Readonly<Record<SpokenLanguage, string>> = {
   Dutch: 'Hallo, ik ben Juan. Ik ben een behulpzame assistent, en zo klink ik als ik jouw taal spreek.',
   German: 'Hallo, ich bin Juan. Ich bin ein hilfsbereiter Assistent, und so klinge ich, wenn ich deine Sprache spreche.',
   Swedish: 'Hej, jag heter Juan. Jag är en hjälpsam assistent, och så här låter jag när jag talar ditt språk.',
-  Turkish: 'Merhaba, ben Juan. Yardımcı bir asistanım ve senin dilinde konuştuğumda kulağa böyle geliyorum.',
   Arabic: 'مرحبًا، أنا خوان. أنا مساعد مفيد، وهكذا أبدو عندما أتحدث لغتك.',
   Mandarin: '你好，我是胡安。我是一个乐于助人的助手，这就是我说你的语言时的声音。',
   Russian: 'Здравствуйте, меня зовут Хуан. Я полезный помощник, и вот как я звучу, когда говорю на вашем языке.',
   Japanese: 'こんにちは、フアンです。お役に立てるアシスタントです。あなたの言語で話すと、このように聞こえます。',
-  Vietnamese: 'Xin chào, tôi là Juan. Tôi là một trợ lý hữu ích, và đây là giọng của tôi khi nói tiếng của bạn.',
 };
 
 /**
- * Where the provider's catalogue does not give us what the row wants.
+ * Boosts this deployment will not speak aloud.
  *
- * Two rows are compromises rather than choices, and both were established by
- * reading the live `get_voice` catalogue rather than by assuming from the
- * language's name. Written down here because the alternative is a blank field
- * and a surprising accent, neither of which explains itself:
+ * **Removing a row does not stop a language being spoken, and that is the trap
+ * this list exists to close.** `SPOKEN_LANGUAGES` decides what the panel offers
+ * an operator a voice field for; it does not decide what leaves the building.
+ * A language with no row still resolves — `resolveVoice` falls through to the
+ * raw boost and the deployment's default voice — so withdrawing Vietnamese and
+ * Turkish from the rows took them out of the panel and left them being spoken,
+ * by a mouth belonging to another language, for months. The row was the visible
+ * half of the decision and the delivery was the half that mattered.
  *
- *   · **Swedish** has a `language_boost` and not one voice. The row is worth
- *     having — the boost is what stops Swedish being read with an English
- *     mouth — but there is nothing to audition, so the panel says so instead of
- *     offering a button that spends money to play the default voice reading
- *     Swedish words.
- *   · **Vietnamese** has exactly one voice and it is female. Every other row is
- *     read by a man because that is who Juan is; this one cannot be.
+ * So the rule is keyed on the **boost**, which is what a request actually
+ * carries, and it holds whether or not a row exists.
  *
- * `voiceless` is the machine-readable half — the panel withholds the audition
- * control on those rows — and `note` is the half a person reads. Both travel to
- * the panel with the language list so the copy has one home.
+ * Three entries, for two different reasons that are worth keeping apart:
  *
- * A third language did not make it in at all: the provider has no Punjabi voice
- * *and* no Punjabi boost, so there is nothing a row could carry. It is absent
- * rather than listed-and-broken.
+ *   · **Swedish** — the provider has a `language_boost` and not one Swedish
+ *     voice. Boosted pronunciation does not rescue a Spanish mouth sounding out
+ *     Swedish words; that is an impression rather than an accent.
+ *   · **Vietnamese** — exactly one voice, and it is female. Every other row is
+ *     read by a man because that is who Juan is, so the choice was to say
+ *     nothing rather than to sound like somebody else.
+ *   · **Turkish** — a working voice, withdrawn by the operator.
+ *
+ * What happens instead is not silence: the bridge sends the words as an
+ * ordinary **text message**, so the message always arrives and only the audio
+ * is lost. See `voiceless()` in bridge/src/voice.ts, which applies the rule, and
+ * the fallback beside it — the same one a synthesis failure and a spent daily
+ * allowance already take.
+ *
+ * All three stay in `LANGUAGE_BOOSTS`. That list is a transcription of the
+ * provider's reference rather than a statement about this deployment, and it is
+ * still consulted for *written* replies; it is speech that is withheld.
+ *
+ * **Swedish is the odd one of the three, deliberately.** Turkish and Vietnamese
+ * have no row: they were withdrawn from the panel entirely. Swedish keeps its
+ * row and its limitation note, because a boost with no voice is a real thing an
+ * operator should be able to see, and is listed here only so that nothing reads
+ * it aloud in a mouth that is not Swedish.
+ *
+ * To start speaking one of these, give it a row in `SPOKEN_LANGUAGES` with a
+ * voice an operator has actually auditioned, and delete it from this list. Both
+ * halves — or the panel offers a control that changes nothing.
+ */
+export const UNSPOKEN_BOOSTS: readonly string[] = ['Swedish', 'Vietnamese', 'Turkish'];
+
+/** Will this deployment speak that boost aloud? Case-insensitive. */
+export function isUnspoken(boost: string): boolean {
+  const value = boost.trim().toLowerCase();
+  return UNSPOKEN_BOOSTS.some((b) => b.toLowerCase() === value);
+}
+
+/**
+ * Where the provider's catalogue does not give us what a row wants.
+ *
+ * One entry: **Swedish**, which has a boost and not one voice. `voiceless`
+ * withholds the panel's audition button and `note` is the sentence a person
+ * reads beside it — without both, the row is a blank field and a surprising
+ * accent, neither of which explains itself.
+ *
+ * Note the division of labour, because the two were briefly one thing and the
+ * merge was wrong: this governs what the **panel draws** for a language it
+ * speaks. `UNSPOKEN_BOOSTS` above governs what the **bridge sends**, for
+ * languages it does not.
  */
 export const LANGUAGE_LIMITS: Readonly<
   Partial<Record<SpokenLanguage, { readonly voiceless: boolean; readonly note: string }>>
 > = {
   Swedish: {
     voiceless: true,
-    note: 'The provider has no Swedish voice at all. The setting above still improves how Swedish is pronounced, but whichever default voice you have set is the one that reads it — there is nothing here to audition.',
-  },
-  Vietnamese: {
-    voiceless: false,
-    note: 'The provider has exactly one Vietnamese voice and it is female. There is no male option to choose.',
+    note: 'The provider has no Swedish voice at all. Swedish is never spoken aloud — a request for it arrives as an ordinary text message instead. Paste a voice id here only if you have one you have actually heard.',
   },
 };
 

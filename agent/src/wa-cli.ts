@@ -24,6 +24,7 @@ import { execFileSync } from 'node:child_process';
 import { cap, planFor, xmlToText } from './doc-read.js';
 import { takeDestination as liftDestination, takeLanguage as liftLanguage, strayFlag } from './cli-args.js';
 import { LANGUAGE_ALIASES, LANGUAGE_BOOSTS, usageText } from '@tulip/shared';
+import { parseCron, splitWhen } from '@tulip/shared';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -90,7 +91,33 @@ function currentWorkspace(): { dir: string; turnId: string } {
  * Read from `current.json`, which the bridge writes for this turn. Missing or
  * unreadable means carry on: the bridge is the authority and will say no.
  */
-function requireCapability(name: 'voice' | 'images' | 'search' | 'crossChat' | 'recall', verb: string): void {
+/**
+ * The wall clock the people in this conversation are actually on.
+ *
+ * **This container runs UTC.** `date` in this shell is two hours behind
+ * somebody in Madrid for half the year, and there is nothing in the container
+ * that says so. Left to guess, "remind us at 9am" becomes 9am UTC, which is
+ * 11am to them — a promise broken by two hours, silently, with the confirmation
+ * message reading perfectly.
+ *
+ * So the bridge writes the deployment's zone into `current.json`, which is on
+ * the read-only mount, and every verb that resolves a time reads it from there
+ * and prints the resolved instant back with the zone named. UTC is the fallback
+ * when the pointer is unreadable — the honest one, since it is what the clock
+ * here really is — and because the echo always names the zone, falling back is
+ * visible in the confirmation rather than on the day.
+ */
+function currentTimezone(): string {
+  try {
+    const current = JSON.parse(readFileSync(inPaths.current, 'utf8')) as { timezone?: unknown };
+    if (typeof current.timezone === 'string' && current.timezone.length > 0) return current.timezone;
+  } catch {
+    /* no pointer, or unreadable */
+  }
+  return 'UTC';
+}
+
+function requireCapability(name: 'voice' | 'images' | 'search' | 'crossChat' | 'recall' | 'schedule', verb: string): void {
   let can: Record<string, unknown>;
   try {
     const current = JSON.parse(readFileSync(inPaths.current, 'utf8')) as { can?: Record<string, unknown> };
@@ -99,9 +126,17 @@ function requireCapability(name: 'voice' | 'images' | 'search' | 'crossChat' | '
     return; // no pointer, or unreadable — let the bridge decide
   }
   if (can[name] === false) {
+    // A switched-off send loses a message; a switched-off *reminder* loses a
+    // promise, which is worse, because the words confirming it have usually
+    // already been written. So this one says "do not promise" rather than "say
+    // it in words".
     die(
-      `tulip-wa ${verb}: ${name} is switched off by the operator, so nothing was sent. ` +
-        'Say what you meant in words instead — do not leave them with silence.',
+      name === 'schedule'
+        ? `tulip-wa ${verb}: reminders are switched off by the operator, so NOTHING was scheduled. ` +
+            'Tell them plainly that you cannot set a reminder — do not say you will remind them, and do not ' +
+            'promise to try again later. Offer to send something now instead.'
+        : `tulip-wa ${verb}: ${name} is switched off by the operator, so nothing was sent. ` +
+            'Say what you meant in words instead — do not leave them with silence.',
     );
   }
 }
@@ -123,7 +158,12 @@ function queue(action: Record<string, unknown>): string {
   // Typing and the tool requests are excluded: none of them says anything to
   // anybody, and marking a turn as spoken because it ran a search would let a
   // turn end in silence after doing research and never reporting back.
-  if (!['typing', 'search', 'fetch'].includes(String(action['kind']))) {
+  //
+  // The three scheduling verbs are on that list for a sharper version of the
+  // same reason. Setting a reminder delivers nothing *now*, so a turn that only
+  // set one has said nothing — and the one thing that must never happen after
+  // scheduling something is the person not being told it is set.
+  if (!['typing', 'search', 'fetch', 'schedule', 'scheduleCancel', 'scheduleList'].includes(String(action['kind']))) {
     try {
       mkdirSync(join(dir, '.markers'), { recursive: true });
       writeFileSync(join(dir, '.markers', 'spoke'), String(Date.now()));
@@ -435,6 +475,144 @@ switch (command) {
     break;
   }
 
+  /**
+   * Promise something for later.
+   *
+   * Three things this prints that are not decoration:
+   *
+   *   - **the resolved absolute time, with its zone.** A reminder confirmed
+   *     without a concrete time is how you get a silent disagreement about
+   *     which nine o'clock was meant, and this container's clock is UTC while
+   *     the people are not. Quote what comes back, not the words you were
+   *     given.
+   *   - **the id**, which is how it gets called off.
+   *   - **the refusal, verbatim, on a non-zero exit.** Nothing is scheduled
+   *     when this fails, and the whole failure being designed against is a
+   *     promise made in words that no machinery could keep. If this does not
+   *     say "set", you did not set it — say so.
+   */
+  case 'remind': {
+    requireCapability('schedule', 'remind');
+    const zone = currentTimezone();
+    const split = splitWhen(rest, zone);
+    if (!split.ok) die(`tulip-wa remind: ${split.error}`);
+    const text = split.text.trim();
+    if (text.length === 0) die('tulip-wa remind: say what the reminder should say — nothing was scheduled.');
+    if (text.length > 4000) {
+      die(`tulip-wa remind: that message is ${String(text.length)} characters and the limit is 4000. Nothing was scheduled.`);
+    }
+
+    const id = queue({ kind: 'schedule', spec: { kind: 'once', at: split.at.toISOString() }, text });
+    const result = await awaitResult(id, 20_000);
+    if (result === null) {
+      process.stdout.write(
+        'remind: no answer from the bridge within 20s. Do NOT tell them it is set — run `tulip-wa reminders` ' +
+          'to see whether it actually was.\n',
+      );
+      break;
+    }
+    if (!result.ok) {
+      process.stdout.write(`NOT SCHEDULED — ${result.error ?? 'refused'}\n`);
+      process.exit(1);
+    }
+    const item = result.items[0];
+    process.stdout.write(
+      `set for ${item?.url ?? 'an unknown time'}\n` +
+        `id ${item?.title ?? '?'} — cancel it with \`tulip-wa forget-reminder ${item?.title ?? '<id>'}\`\n` +
+        `Times are ${zone}. Tell them the absolute time above, not the words you were given.\n`,
+    );
+    break;
+  }
+
+  /**
+   * The same thing, repeating.
+   *
+   * The expression is checked here as well as on the bridge, because the
+   * refusal is the useful part: a five-field expression written by a model
+   * fails in specific, nameable ways, and "0 9 * * MON" deserves an answer
+   * saying day-of-week is numeric rather than a shrug.
+   */
+  case 'cron': {
+    requireCapability('schedule', 'cron');
+    const zone = currentTimezone();
+    const expression = (rest[0] ?? '').trim();
+    const text = rest.slice(1).join(' ').trim();
+    if (expression.length === 0 || text.length === 0) {
+      die('tulip-wa cron: `tulip-wa cron "0 9 * * 1-5" "the message"` — five fields, then what to send.');
+    }
+    const checked = parseCron(expression);
+    if (!checked.ok) die(`tulip-wa cron: ${checked.error} Nothing was scheduled.`);
+
+    const id = queue({ kind: 'schedule', spec: { kind: 'cron', expression, timezone: zone }, text });
+    const result = await awaitResult(id, 20_000);
+    if (result === null) {
+      process.stdout.write(
+        'cron: no answer from the bridge within 20s. Do NOT tell them it is set — run `tulip-wa reminders`.\n',
+      );
+      break;
+    }
+    if (!result.ok) {
+      process.stdout.write(`NOT SCHEDULED — ${result.error ?? 'refused'}\n`);
+      process.exit(1);
+    }
+    const item = result.items[0];
+    process.stdout.write(
+      `repeating: ${item?.text ?? expression}\nfirst one ${item?.url ?? 'unknown'}\n` +
+        `id ${item?.title ?? '?'} — stop it with \`tulip-wa forget-reminder ${item?.title ?? '<id>'}\`\n`,
+    );
+    break;
+  }
+
+  /**
+   * What has actually been promised, from the bridge rather than from memory.
+   *
+   * Same reasoning as `sent`: the store is on a volume this container has no
+   * mount for, so the only thing here is a recollection, and a recollection is
+   * not evidence. Check before telling anybody what is set.
+   */
+  case 'reminders': {
+    requireCapability('schedule', 'reminders');
+    const id = queue({ kind: 'scheduleList' });
+    const result = await awaitResult(id, 15_000);
+    if (result === null) {
+      process.stdout.write('reminders: no answer from the bridge within 15s. Do not guess — try again.\n');
+      break;
+    }
+    if (!result.ok) {
+      process.stdout.write(`${result.error ?? 'reminders: refused'}\n`);
+      break;
+    }
+    if (result.items.length === 0) {
+      process.stdout.write(
+        'Nothing is scheduled for this conversation. If you told somebody you would remind them, you have not ' +
+          'yet — set it now with `tulip-wa remind`.\n',
+      );
+      break;
+    }
+    process.stdout.write(`Promised to this chat (${String(result.items.length)}):\n`);
+    for (const item of result.items) {
+      const repeats = item.published === null ? '' : `  repeats: ${item.published}`;
+      process.stdout.write(`  ${item.title}  ${item.url}${repeats}\n    ${item.text}\n`);
+    }
+    break;
+  }
+
+  case 'forget-reminder': {
+    requireCapability('schedule', 'forget-reminder');
+    const target = (rest[0] ?? '').trim();
+    if (target.length === 0) {
+      die('tulip-wa forget-reminder: `tulip-wa forget-reminder <id>` — ids come from `tulip-wa reminders`.');
+    }
+    const id = queue({ kind: 'scheduleCancel', scheduleId: target });
+    const result = await awaitResult(id, 15_000);
+    if (result === null) {
+      process.stdout.write('forget-reminder: no answer from the bridge within 15s. It may still be set.\n');
+      break;
+    }
+    process.stdout.write(result.ok ? 'cancelled — it will not be sent\n' : `${result.error ?? 'refused'}\n`);
+    break;
+  }
+
   case 'page-image': {
     const slug = (rest[0] ?? '').trim().toLowerCase();
     const name = (rest[1] ?? '').trim().toLowerCase();
@@ -711,9 +889,30 @@ switch (command) {
 
   case 'whoami': {
     const { dir } = currentWorkspace();
+    const zone = currentTimezone();
+    // The clock, because this is the command reached for when something is
+    // unclear and the clock is the thing most likely to be silently wrong:
+    // the container runs UTC and the people do not.
+    let there = '';
+    try {
+      there = new Intl.DateTimeFormat('en-GB', {
+        timeZone: zone,
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+        timeZoneName: 'short',
+      }).format(new Date());
+    } catch {
+      there = 'unknown';
+    }
     process.stdout.write(
       `You are answering one conversation, working in ${dir}.\n` +
-        `Its identity is deliberately opaque: no phone number or name reaches this container.\n`,
+        `Its identity is deliberately opaque: no phone number or name reaches this container.\n` +
+        `Their local time is ${there} (${zone}). Your shell is UTC — ${new Date().toISOString()} — ` +
+        `which is the same moment and NOT the time to quote to anybody.\n`,
     );
     break;
   }

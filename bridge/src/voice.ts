@@ -15,7 +15,7 @@
  * the equivalence is by construction rather than by two copies that agree
  * today.
  */
-import { spokenLanguageFor } from '@tulip/shared';
+import { LANGUAGE_LIMITS, isUnspoken, spokenLanguageFor } from '@tulip/shared';
 import type { Config } from './config.js';
 
 export interface ResolvedVoice {
@@ -47,4 +47,45 @@ export function resolveVoice(config: Config, language: string): ResolvedVoice {
   const perLanguage = spoken === null ? '' : (config.agent.voices[spoken.name] ?? '').trim();
   const voiceId = perLanguage || config.agent.voiceId;
   return { boost, voiceId, spoken, usingFallback: perLanguage.length === 0 };
+}
+
+/**
+ * Should this be written rather than spoken?
+ *
+ * The provider tunes pronunciation for more languages than it has usable mouths
+ * for, and this deployment has withdrawn a few more on top of that. Swedish is
+ * the clearest case: there is a `language_boost` and not one Swedish voice, so
+ * a "Swedish voice note" was a Spanish or English mouth sounding out Swedish
+ * words with the vowels nudged. That is not an accent, it is an impression —
+ * and it is worse than not speaking, because a text message loses only the
+ * audio while this loses the credibility of everything around it.
+ *
+ * So the caller sends the words as text, which is the same fallback a synthesis
+ * failure and a spent daily allowance already take: **the message is never
+ * lost, only the audio.**
+ *
+ * **Keyed on the boost, not on the row, and that is the whole correctness
+ * argument.** An earlier version asked whether the *row* was flagged, which
+ * quietly meant a language with no row was always spoken — so withdrawing
+ * Vietnamese and Turkish from `SPOKEN_LANGUAGES` removed them from the panel
+ * and left them being read aloud by whichever default voice was configured.
+ * Removing a row is a statement about what an operator can configure; it is not
+ * a statement about what leaves the building. `UNSPOKEN_BOOSTS` is the second.
+ *
+ * The operator override still wins where it can exist: naming a voice for a row
+ * — a cloned one, or one the catalogue gained since that table was written — is
+ * choosing a mouth, and this must not overrule it. That path is only reachable
+ * for a language that *has* a row, which is the correct shape: to start
+ * speaking a withdrawn language you add the row back and take it off the list.
+ *
+ * A language that is merely unfamiliar is *not* unspoken. The provider accepts
+ * far more boosts than this deployment has opinions about, and treating an
+ * unknown one as unspeakable would silently demote most of the world to text.
+ */
+export function voiceless(resolved: ResolvedVoice): boolean {
+  // An explicitly chosen mouth always wins.
+  if (!resolved.usingFallback) return false;
+  if (isUnspoken(resolved.boost)) return true;
+  if (resolved.spoken === null) return false;
+  return LANGUAGE_LIMITS[resolved.spoken.name as keyof typeof LANGUAGE_LIMITS]?.voiceless === true;
 }

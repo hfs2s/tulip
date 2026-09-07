@@ -83,6 +83,10 @@ import {
   pageGrant,
   memoryList,
   memoryForget,
+  scheduleView,
+  scheduleOwner,
+  scheduleCancel,
+  scheduleCreate,
   personaDocs,
   restorePage,
   clearPagePassword,
@@ -688,6 +692,35 @@ export function startPanel(deps: ApiDeps): Server | null {
         if (url.pathname === '/api/memory/forget' && req.method === 'POST') {
           const result = memoryForget(url.searchParams.get('id') ?? '');
           return send(res, headers, result.ok ? 200 : 404, result);
+        }
+        // Messages promised for later. Filtered exactly as Memory and Media
+        // are: every row names its chat, so `strip` removes the ones this
+        // viewer may not see. Note the shape — a bare array here, unlike
+        // `/api/media/list`, which wraps its items in `{ total, items }` and
+        // was once filtered as though it did not.
+        if (url.pathname === '/api/schedule' && req.method === 'GET') {
+          const listed = scheduleView(deps);
+          return send(res, headers, 200, { items: strip(listed.items, (e) => (e['chatKey'] as string | null) ?? null) });
+        }
+        // Addressed by id rather than by `?key=`, so the gate above — which
+        // catches every route naming a conversation in a `key` parameter —
+        // cannot see this one. The check is therefore made by hand, and it
+        // answers "no such reminder" rather than "not yours", for the same
+        // reason a hidden chat 404s: the other answer confirms it exists.
+        if (url.pathname === '/api/schedule/cancel' && req.method === 'POST') {
+          const id = url.searchParams.get('id') ?? '';
+          const owner = scheduleOwner(id);
+          if (owner !== null && hidden(owner)) {
+            return send(res, headers, 404, { ok: false, message: 'No such reminder.' });
+          }
+          const result = scheduleCancel(id);
+          return send(res, headers, result.ok ? 200 : 404, result);
+        }
+        // `?key=` on purpose, so the hidden-chat gate above applies to it
+        // without a second copy of the rule.
+        if (url.pathname === '/api/schedule/create' && req.method === 'POST') {
+          const result = scheduleCreate(deps, url.searchParams.get('key') ?? '', await readBody(req));
+          return send(res, headers, result.ok ? 200 : 400, result);
         }
         if (url.pathname === '/api/pages' && req.method === 'GET') {
           return send(res, headers, 200, pagesList(deps));

@@ -1,6 +1,9 @@
 {
   "_comment": "Copy to config.json. That file is gitignored: it names real phone numbers, and this is a public repository. Every key is optional and every default is the restrictive one.",
 
+  "_timezone": "The wall clock the people using this deployment are actually on. NOT a preference: the box runs UTC, both containers run UTC, and every stored timestamp is a UTC instant — so left unset this would resolve 'remind me at 9am' to 9am UTC, which is 11am to somebody in Madrid. It is what reminders are resolved against, what the panel renders times in, and what the agent is told in current.json so that a time it confirms in words is the time that arrives. An IANA name; an abbreviation like CEST or an offset like +02:00 is refused at startup.",
+  "timezone": "Europe/Madrid",
+
   "_audience": "everyone:true means anyone who messages this number is answered, and every inbound message becomes untrusted input to an agent holding a shell. That is the configuration Tulip is designed for and the one docs/THREAT-MODEL.md assumes. Set false to fall back to the numbers list.",
   "audience": {
     "everyone": true,
@@ -30,7 +33,14 @@
     "newSendersPerHour": 30,
     "outboundPerTurn": 8,
     "outboundPerChatPerHour": 60,
-    "turnTimeoutMs": 600000
+    "turnTimeoutMs": 600000,
+
+    "_reminders": "A reminder is a promise to interrupt somebody later, so these refuse rather than truncate — over the cap the agent is told the number it hit, in words it can pass on. scheduleGraceMs is how late a reminder missed during downtime may still be delivered: inside it, it goes out with a note saying it is late; outside it, it is recorded as missed in the feed. It is never silently dropped.",
+    "scheduledPerChat": 10,
+    "scheduledTotal": 100,
+    "scheduleMinLeadMs": 60000,
+    "scheduleMaxHorizonDays": 400,
+    "scheduleGraceMs": 7200000
   },
 
   "_panel": "The control panel can read every message and hold delivery, and it authenticates with one bearer token. `host` is the bind address INSIDE the container and should stay 0.0.0.0 — binding it to 127.0.0.1 there makes the panel unreachable rather than safer, because Docker forwards a published port to the container's ethernet address, not its loopback. What limits exposure is the publish line in docker-compose.yml, `127.0.0.1:8791:8791`. Reach it over an SSH tunnel; if you publish it more widely, put something that authenticates in front.",

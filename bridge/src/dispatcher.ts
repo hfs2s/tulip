@@ -504,13 +504,19 @@ export class Dispatcher extends EventEmitter {
       search: this.deps.config.agent.search,
       crossChat: this.deps.config.agent.crossChat,
       recall: this.deps.config.agent.recall,
+      schedule: this.deps.config.agent.schedule,
     },
     // What `!reset` moves. Read per turn rather than held, so a reset taken
     // while a chat is idle applies to its very next message.
     state.generation(chatKey),
     // Only meaningful in `observe`: the other modes are gated by the bridge, so
     // nothing reaches the agent it did not already decide to send.
-    this.deps.config.groups.replyTo === 'observe' ? this.deps.config.groups.reactivity : null);
+    this.deps.config.groups.replyTo === 'observe' ? this.deps.config.groups.reactivity : null,
+    // The wall clock the people in this chat are living on. Carried per turn for
+    // the same reason as the reactivity dial — an operator changing it should
+    // not have to restart a session — and read here rather than in the agent
+    // because the agent's container runs UTC and has no way to know otherwise.
+    this.deps.config.timezone);
 
     this.inFlight = { turnId: turn.turnId, chatKey, startedAt: now };
     this.deps.limiter.spendTurn(chatKey, now);

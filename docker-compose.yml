@@ -73,6 +73,15 @@ services:
       target: bridge
     networks: [wan]
     environment:
+      # The clock every human-facing timestamp is rendered from.
+      #
+      # Both containers default to Etc/UTC while the Pi is Europe/Madrid, so
+      # until this was set the terminal read 12:01 with 14:02 on the wall clock
+      # beside it. Nothing on disk changes: every stored timestamp is an ISO
+      # instant or epoch milliseconds, both TZ-independent by construction, so
+      # this moves what a person reads and not what is written. Storage stays
+      # UTC on purpose — it is the only form that is unambiguous across DST.
+      TZ: ${TULIP_TIMEZONE:-Europe/Madrid}
       # Deliberately here and not in the agent. The agent asks for a GIF by
       # search phrase; the bridge does the searching, so the key never enters
       # the container the threat model assumes an attacker owns, and no new
@@ -212,6 +221,15 @@ services:
       - "egress:172.31.240.10"
 
     environment:
+      # The agent's own clock, and the reason it is not left at the default.
+      #
+      # `date` in the session read UTC while the people it is talking to are two
+      # hours ahead, so a request for "9am" became 9am UTC and would have
+      # arrived at 11am for them — on time by the agent's clock and late by
+      # everyone else's, with nothing recording the disagreement. The scheduler
+      # carries an explicit zone per entry; this is so the shell and the model
+      # agree with it rather than quietly working in a third one.
+      TZ: ${TULIP_TIMEZONE:-Europe/Madrid}
       # The only credential in this container, and the only one that has to be.
       # Whichever is used, it is reachable by anyone who achieves code execution
       # here — the threat model assumes they do — so it should be dedicated and
