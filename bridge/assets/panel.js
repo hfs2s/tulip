@@ -468,7 +468,7 @@ function lineFor(e) {
   var kind = e.kind === 'in' ? (e.accepted ? 'in' : 'refused') : e.kind;
   var row = node('div', 'line');
   row.appendChild(node('div', 'when', hhmm(e.ts)));
-  row.appendChild(node('div', 'tag ' + kind, kind === 'out' ? 'Tulip' : kind === 'in' ? 'received' : kind));
+  row.appendChild(node('div', 'tag ' + kind, kind === 'out' ? '2LP' : kind === 'in' ? 'received' : kind));
   var body = node('div', 'said');
   if (e.kind === 'event') body.textContent = (e.event || 'event') + (e.detail ? ' — ' + e.detail : '');
   else if (e.kind === 'delivered') body.textContent = 'Handed over ' + plural(e.count, 'message') + '.';
@@ -2075,7 +2075,7 @@ function composer() {
  * button is rendered at all, because a control that cannot work is worse than
  * one that is missing.
  *
- * Written here against Tulip's own tokens rather than vendoring hfs2s's
+ * Written here against 2LP's own tokens rather than vendoring hfs2s's
  * `dictate.js`: that file injects a stylesheet built on a different palette,
  * so the button would arrive in another product's colours.
  */
@@ -2795,11 +2795,11 @@ function fitTerminal() {
 }
 
 /**
- * Tulip's brief, as the agent receives it.
+ * 2LP's brief, as the agent receives it.
  *
  * Thirty-three kilobytes of prose across four documents, one of which is twenty
  * on its own. Printed end to end it is unreadable — not badly styled, actually
- * unreadable: an operator looking for what Tulip believes about groups has no
+ * unreadable: an operator looking for what 2LP believes about groups has no
  * way in but a scroll bar.
  *
  * So one part at a time, with its own headings beside it as a way in. The two
@@ -2812,7 +2812,7 @@ function fitTerminal() {
 var personaPart = 0;
 
 async function renderPersona() {
-  var p = head('persona', 'Persona', 'What Tulip has been told to be. These four are assembled in order into the brief, which is written when the session starts — so a session already running keeps the version it began with, and editing these changes nothing until it restarts.'), mine = renderToken;
+  var p = head('persona', 'Persona', 'What 2LP has been told to be. These four are assembled in order into the brief, which is written when the session starts — so a session already running keeps the version it began with, and editing these changes nothing until it restarts.'), mine = renderToken;
 
   var data;
   try { data = await api('/api/persona'); } catch (err) { p.appendChild(node('p', 'empty', err.message)); return; }
@@ -3070,7 +3070,7 @@ function noteSource(n) {
 
 async function renderMemory() {
   var p = head('memory', 'Memory',
-    'What Tulip has chosen to write down. Unlike the conversations themselves these survive a restart, and every one of them is assembled into the brief it starts each session with — so a note that is wrong is repeated to everybody, and taking it out is the point of this page.'), mine = renderToken;
+    'What 2LP has chosen to write down. Unlike the conversations themselves these survive a restart, and every one of them is assembled into the brief it starts each session with — so a note that is wrong is repeated to everybody, and taking it out is the point of this page.'), mine = renderToken;
 
   var data;
   try {
@@ -3087,7 +3087,7 @@ async function renderMemory() {
   if (!notes.length) {
     var none = node('div', 'card');
     none.appendChild(node('p', 'empty',
-      'Nothing written down yet. Tulip records a note when it decides something is worth carrying between conversations, or when you ask it to remember something.'));
+      'Nothing written down yet. 2LP records a note when it decides something is worth carrying between conversations, or when you ask it to remember something.'));
     p.appendChild(none);
     return;
   }
@@ -3138,7 +3138,7 @@ async function renderMemory() {
         var edge = node('div', 'memedge');
         edge.appendChild(node('span', null,
           'Below this line: kept, but not carried. Only the newest ' + MEMORY_IN_BRIEF
-          + ' notes go into the brief Tulip starts a session with.'));
+          + ' notes go into the brief 2LP starts a session with.'));
         grid.appendChild(edge);
       }
 
@@ -4111,7 +4111,7 @@ function contactsField(parent, values, onSave, ctx) {
 
   edit.addEventListener('click', function () {
     openModal('Contacts',
-      'Somebody here can be messaged first — an introduction, or passing something on. This does not let them message Tulip: that is the Audience list, deliberately separate, so adding a destination can never widen who reaches the agent. If you want them to be able to reply, add their number under Audience as well.',
+      'Somebody here can be messaged first — an introduction, or passing something on. This does not let them message 2LP: that is the Audience list, deliberately separate, so adding a destination can never widen who reaches the agent. If you want them to be able to reply, add their number under Audience as well.',
       function (body) {
         var list = node('div');
 
@@ -4192,11 +4192,11 @@ function contactsField(parent, values, onSave, ctx) {
       });
   });
 
-  var hint = 'The only people Tulip may write to out of the blue. It is shown the name and never the number, so it cannot message anyone who is not on this list — and being asked to, however convincingly, is not the same as being allowed to.';
+  var hint = 'The only people 2LP may write to out of the blue. It is shown the name and never the number, so it cannot message anyone who is not on this list — and being asked to, however convincingly, is not the same as being allowed to.';
   if (ctx.crossChat === false) {
     // The dependency was stated on the switch and not here, so a list built
     // with the switch off changed nothing and said nothing.
-    hint = 'The only people Tulip may write to out of the blue — but nothing here does anything while “Message other chats” is off. It is shown the name and never the number.';
+    hint = 'The only people 2LP may write to out of the blue — but nothing here does anything while “Message other chats” is off. It is shown the name and never the number.';
     summary.insertBefore(node('span', 'badge off', 'not in effect'), summary.firstChild);
   }
   field(parent, 'Contacts', hint, summary);
@@ -4359,7 +4359,7 @@ async function renderSettings() {
   primer.appendChild(node('p', 'sub', 'Three words used throughout this page.'));
   [['A turn', 'One reply the agent works on, from reading a message to finishing its answer. It is the expensive unit: each turn is a request to Claude that somebody pays for. Several messages that arrive together are answered in a single turn.'],
    ['A chat', 'One conversation, with one person or one group. A single Claude Code session answers all of them, so it carries every chat at once — what keeps one out of another is the persona rather than the architecture.'],
-   ['Refused silently', 'When Tulip turns a message away it sends nothing back — no reply, no error. Telling an unknown number that this line is live is itself information, so refusals are invisible from the outside. If somebody says they messaged and got nothing, the Log page is where you find out why.']
+   ['Refused silently', 'When 2LP turns a message away it sends nothing back — no reply, no error. Telling an unknown number that this line is live is itself information, so refusals are invisible from the outside. If somebody says they messaged and got nothing, the Log page is where you find out why.']
   ].forEach(function (row) {
     var d = node('dl', 'define');
     d.appendChild(node('dt', null, row[0]));
@@ -4371,14 +4371,14 @@ async function renderSettings() {
   // ── Audience ──────────────────────────────────────────────────────────────
   var audience = node('div', 'card');
   audience.appendChild(node('h2', null, 'Audience'));
-  audience.appendChild(node('p', 'sub', 'Who is allowed to message Tulip at all. This is the outermost gate: somebody not on it is refused before the agent is ever asked, and refused silently. Everything else on this page assumes a message got past here.'));
+  audience.appendChild(node('p', 'sub', 'Who is allowed to message 2LP at all. This is the outermost gate: somebody not on it is refused before the agent is ever asked, and refused silently. Everything else on this page assumes a message got past here.'));
 
   // Off, with both lists empty, is a legal configuration that answers nobody —
   // and every refusal is silent by design, so from outside it is identical to
   // the bot being down. Said here rather than left to be discovered.
   if (!s.audience.everyone && s.audience.numbers.length === 0 && s.audience.jids.length === 0) {
     var shut = node('div', 'warnbar');
-    shut.appendChild(node('strong', null, 'Nobody can reach Tulip.'));
+    shut.appendChild(node('strong', null, 'Nobody can reach 2LP.'));
     shut.appendChild(document.createTextNode(' "Open to anyone" is off and both allow lists are empty, so every direct message is refused — silently, as refusals always are.'));
     audience.appendChild(shut);
   }
@@ -4407,7 +4407,7 @@ async function renderSettings() {
   // looking for how to add another admin.
   var ops = node('div', 'card');
   ops.appendChild(node('h2', null, 'Operators'));
-  ops.appendChild(node('p', 'sub', 'You, essentially — the numbers that can control Tulip from WhatsApp rather than just talk to it. Send !help from one of them for the list; !hold stops delivery, !block stops one conversation, !status reports what is happening. These commands are handled by the bridge before the agent sees anything, which is the point: you need them precisely when the agent is the problem. This list is never widened by “Open to anyone”.'));
+  ops.appendChild(node('p', 'sub', 'You, essentially — the numbers that can control 2LP from WhatsApp rather than just talk to it. Send !help from one of them for the list; !hold stops delivery, !block stops one conversation, !status reports what is happening. These commands are handled by the bridge before the agent sees anything, which is the point: you need them precisely when the agent is the problem. This list is never widened by “Open to anyone”.'));
 
   if (s.operators.numbers.length === 0 && s.operators.jids.length === 0) {
     var noOps = node('div', 'warnbar');
@@ -4440,8 +4440,8 @@ async function renderSettings() {
   // ── Groups ────────────────────────────────────────────────────────────────
   var groups = node('div', 'card');
   groups.appendChild(node('h2', null, 'Groups'));
-  groups.appendChild(node('p', 'sub', 'Group chats work differently from the rest of this page: they do not consult the Audience list. Whoever added Tulip to the room decided who can reach it, so anyone in that group can — including people you have never allowed individually. Turning this on widens the audience independently of everything above.'));
-  field(groups, 'Answer in groups', 'Whether Tulip pays attention to group chats at all. Off means group messages are ignored entirely, however Tulip was added to the room.',
+  groups.appendChild(node('p', 'sub', 'Group chats work differently from the rest of this page: they do not consult the Audience list. Whoever added 2LP to the room decided who can reach it, so anyone in that group can — including people you have never allowed individually. Turning this on widens the audience independently of everything above.'));
+  field(groups, 'Answer in groups', 'Whether 2LP pays attention to group chats at all. Off means group messages are ignored entirely, however 2LP was added to the room.',
     liveSwitch(s.groups.enabled, function (on, input) {
       saveSettings({ groups: { enabled: on } }, function () { input.checked = !on; });
     }));
@@ -4498,7 +4498,7 @@ async function renderSettings() {
   slider.step = '1';
   slider.value = String(s.groups.reactivity);
   slider.className = 'slider';
-  slider.setAttribute('aria-label', 'How readily Tulip speaks up in a group');
+  slider.setAttribute('aria-label', 'How readily 2LP speaks up in a group');
 
   function sayLevel(v) {
     var lv = levels[v] || { name: '', description: '' };
@@ -4526,12 +4526,12 @@ async function renderSettings() {
   toneWrap.appendChild(slider);
   toneWrap.appendChild(toneSaid);
 
-  field(groups, 'Group mode', 'When Tulip should speak up in a group.  ·  Mentions: only when somebody @-mentions it — a real WhatsApp mention, the kind you make by tapping the name, not the letters typed out — or replies to one of its messages. The quietest setting, and the one most likely to look broken, because typing “Juan” is not a mention.  ·  Triggers: the above, plus any message containing one of the trigger words below.  ·  Judgement: Tulip follows the whole conversation and decides for itself. It answers a question nobody else has answered when it actually knows, settles a factual disagreement, reacts to something funny — and stays silent for everything else, which is most things. This is the setting that behaves like a person in the room. It is also the expensive one: every message becomes a paid turn whether or not it replies, though messages arriving together are batched into one.', modeSeg);
-  toneRow = field(groups, 'How readily it speaks up', 'Judgement hands Tulip every message in the group and lets it decide whether to answer. This is how forward that decision should be. It takes effect on the next message — no restart — and the words below are the words Tulip is given, not a paraphrase of them.', toneWrap);
+  field(groups, 'Group mode', 'When 2LP should speak up in a group.  ·  Mentions: only when somebody @-mentions it — a real WhatsApp mention, the kind you make by tapping the name, not the letters typed out — or replies to one of its messages. The quietest setting, and the one most likely to look broken, because typing “Juan” is not a mention.  ·  Triggers: the above, plus any message containing one of the trigger words below.  ·  Judgement: 2LP follows the whole conversation and decides for itself. It answers a question nobody else has answered when it actually knows, settles a factual disagreement, reacts to something funny — and stays silent for everything else, which is most things. This is the setting that behaves like a person in the room. It is also the expensive one: every message becomes a paid turn whether or not it replies, though messages arriving together are batched into one.', modeSeg);
+  toneRow = field(groups, 'How readily it speaks up', 'Judgement hands 2LP every message in the group and lets it decide whether to answer. This is how forward that decision should be. It takes effect on the next message — no restart — and the words below are the words 2LP is given, not a paraphrase of them.', toneWrap);
   toneRow.hidden = s.groups.replyTo !== 'observe';
   listField(groups, 'Trigger words', 'Only used when Group mode is set to Trigger. Ignored otherwise.',
     s.groups.triggers || [], 'e.g. juan',
-    'A group message containing any of these is answered; everything else in the room is ignored. Upper and lower case do not matter, and a phrase with spaces works as well as a single word — “hey juan” is a fine trigger. Keep them distinctive: a word like “the” means Tulip answers almost everything.',
+    'A group message containing any of these is answered; everything else in the room is ignored. Upper and lower case do not matter, and a phrase with spaces works as well as a single word — “hey juan” is a fine trigger. Keep them distinctive: a word like “the” means 2LP answers almost everything.',
     function (next, revert) { saveSettings({ groups: { triggers: next } }, revert); },
     function (v) {
       // Collapse whitespace, but refuse an over-long phrase rather than
@@ -4547,14 +4547,14 @@ async function renderSettings() {
   // ── Reach ─────────────────────────────────────────────────────────────────
   var reach = node('div', 'card');
   reach.appendChild(node('h2', null, 'Reach'));
-  reach.appendChild(node('p', 'sub', 'Whether Tulip can start a conversation, or only ever answer one. By default a reply can go nowhere except back to the person who just wrote — the agent is never told who it is talking to, so it cannot name a different destination even if somebody talks it into trying. This card is where you relax that.'));
-  field(reach, 'Message other chats', 'Lets Tulip write to the contacts below, and pass something on to a conversation it already knows. It carries what it was told here into somewhere else; it does not fetch anything back — that is the setting below. Worth thinking about before turning on: anything somebody tells Tulip can then be repeated elsewhere, and the person who said it will not know.',
+  reach.appendChild(node('p', 'sub', 'Whether 2LP can start a conversation, or only ever answer one. By default a reply can go nowhere except back to the person who just wrote — the agent is never told who it is talking to, so it cannot name a different destination even if somebody talks it into trying. This card is where you relax that.'));
+  field(reach, 'Message other chats', 'Lets 2LP write to the contacts below, and pass something on to a conversation it already knows. It carries what it was told here into somewhere else; it does not fetch anything back — that is the setting below. Worth thinking about before turning on: anything somebody tells 2LP can then be repeated elsewhere, and the person who said it will not know.',
     liveSwitch(s.agent && s.agent.crossChat, function (on, input) {
       saveSettings({ agent: { crossChat: on } }, function () { input.checked = !on; });
     }));
 
   field(reach, 'Read other chats',
-    'Lets you ask Tulip to read a conversation back to you, on demand. This used to be the one exception to chat isolation, when a chat it had not been handed was genuinely unreadable. That is no longer the shape of things — one session carries every conversation, so what this switch adds is the ability to fetch a transcript deliberately rather than the ability to know anything new. It answers only you, only in a direct message, and never in a group, where the reply would be somebody’s private messages read out to a room. Every use is written to the feed. Leave it off unless you are actively using it.',
+    'Lets you ask 2LP to read a conversation back to you, on demand. This used to be the one exception to chat isolation, when a chat it had not been handed was genuinely unreadable. That is no longer the shape of things — one session carries every conversation, so what this switch adds is the ability to fetch a transcript deliberately rather than the ability to know anything new. It answers only you, only in a direct message, and never in a group, where the reply would be somebody’s private messages read out to a room. Every use is written to the feed. Leave it off unless you are actively using it.',
     liveSwitch(s.agent && s.agent.recall, function (on, input) {
       saveSettings({ agent: { recall: on } }, function () { input.checked = !on; });
     }));
@@ -4572,7 +4572,7 @@ async function renderSettings() {
   // ── Limits ────────────────────────────────────────────────────────────────
   var limits = node('div', 'card');
   limits.appendChild(node('h2', null, 'Limits'));
-  limits.appendChild(node('p', 'sub', 'Ceilings on what one person can make Tulip do. These decide what gets refused — they are about volume and cost, never about who is allowed to write in. That is Audience, above. Somebody over a limit is refused silently, and their next message is accepted once they are back under it.'));
+  limits.appendChild(node('p', 'sub', 'Ceilings on what one person can make 2LP do. These decide what gets refused — they are about volume and cost, never about who is allowed to write in. That is Audience, above. Somebody over a limit is refused silently, and their next message is accepted once they are back under it.'));
   // Bounds match the schema in panel-api.ts exactly. A narrower slider looks
   // like guidance and behaves like a trap: the input clamps a larger configured
   // value to its own maximum, and the first nudge writes the clamp.
@@ -4583,12 +4583,12 @@ async function renderSettings() {
    ['turnsPerDay', 'Turns per day, per person', 1, 10000, null, 10,
     'The most one person can cost you in a day. This is the money setting: each turn is a paid request to Claude, so it caps spend per person more directly than anything else here.'],
    ['newSendersPerHour', 'New people per hour', 1, 1000, null, 1,
-    'How many numbers that have never written before are taken on in an hour, counted across everyone. This is what blunts a flood of throwaway numbers; it does nothing to people already talking to Tulip.'],
+    'How many numbers that have never written before are taken on in an hour, counted across everyone. This is what blunts a flood of throwaway numbers; it does nothing to people already talking to 2LP.'],
    ['imagesPerDay', 'Pictures per day, everyone', 0, 1000, null, 1,
-    'A hard ceiling on generated pictures across all conversations. Unlike the limits above this is not per person — the bill is rarely one sender being expensive, it is many being reasonable, and a per-person cap cannot bound a total. Past it Tulip says it has made as many as it can today. 0 stops pictures entirely.'],
+    'A hard ceiling on generated pictures across all conversations. Unlike the limits above this is not per person — the bill is rarely one sender being expensive, it is many being reasonable, and a per-person cap cannot bound a total. Past it 2LP says it has made as many as it can today. 0 stops pictures entirely.'],
    ['transcriptionsPerDay', 'Voice notes transcribed per day, everyone', 0, 5000, null, 10,
-    'The same ceiling for turning inbound voice notes into words, also counted across everybody. Past it a voice note still arrives, and Tulip is told it could not be read — so it says so rather than answering as though nothing was sent. 0 stops transcription entirely.'],
-   ['outboundPerTurn', 'Replies Tulip may send per turn', 1, 100, null, 1,
+    'The same ceiling for turning inbound voice notes into words, also counted across everybody. Past it a voice note still arrives, and 2LP is told it could not be read — so it says so rather than answering as though nothing was sent. 0 stops transcription entirely.'],
+   ['outboundPerTurn', 'Replies 2LP may send per turn', 1, 100, null, 1,
     'One turn can produce several messages — a sentence, then a photo, then a follow-up. This caps how many. It bounds an agent that has been talked into spamming somebody exactly as it bounds a chatty one.'],
    ['outboundPerChatPerHour', 'Replies per conversation, per hour', 1, 1000, null, 1,
     'The same ceiling measured over an hour rather than a turn, so a run of turns cannot add up to a flood.'],
@@ -4632,11 +4632,11 @@ async function renderSettings() {
   // ── Capabilities ──────────────────────────────────────────────────────────
   var tools = node('div', 'card');
   tools.appendChild(node('h2', null, 'Capabilities'));
-  tools.appendChild(node('p', 'sub', 'Extra things Tulip can do beyond sending words. Each one needs two separate permissions: an account key must exist, and you must allow its use. A switch marked “no key set” will not do anything until somebody adds the key — keys live outside this panel and changing one needs the container restarted, while these switches take effect immediately. Tulip itself has no internet connection: it asks, and the bridge performs the request on its behalf, so no key is ever inside the machine running the agent.'));
+  tools.appendChild(node('p', 'sub', 'Extra things 2LP can do beyond sending words. Each one needs two separate permissions: an account key must exist, and you must allow its use. A switch marked “no key set” will not do anything until somebody adds the key — keys live outside this panel and changing one needs the container restarted, while these switches take effect immediately. 2LP itself has no internet connection: it asks, and the bridge performs the request on its behalf, so no key is ever inside the machine running the agent.'));
 
-  [['search', 'Look things up on the web', 'Lets Tulip search the web (through Exa) when it needs a fact it does not have. The thing to know: a web page can be written specifically to be read by an AI and to contain instructions aimed at it. Unlike a message, there is no sender behind it you can block, so this is the widest door on this card.'],
-   ['images', 'Generate pictures', 'Lets Tulip make an image and send it. Every picture is billed, so this is the switch most able to cost you money quickly — the per-turn and per-hour reply limits above are what bound it.'],
-   ['voice', 'Send voice notes', 'Lets Tulip answer with a spoken voice note instead of text. Also billed per use. If the speech fails, the same words are sent as text, so nobody loses their reply.']
+  [['search', 'Look things up on the web', 'Lets 2LP search the web (through Exa) when it needs a fact it does not have. The thing to know: a web page can be written specifically to be read by an AI and to contain instructions aimed at it. Unlike a message, there is no sender behind it you can block, so this is the widest door on this card.'],
+   ['images', 'Generate pictures', 'Lets 2LP make an image and send it. Every picture is billed, so this is the switch most able to cost you money quickly — the per-turn and per-hour reply limits above are what bound it.'],
+   ['voice', 'Send voice notes', 'Lets 2LP answer with a spoken voice note instead of text. Also billed per use. If the speech fails, the same words are sent as text, so nobody loses their reply.']
   ].forEach(function (row) {
     var keyed = s.tools.keyed[row[0]];
     var wrap = node('div');
@@ -4912,7 +4912,7 @@ function mountFlow() {
       u_worldHeight: 0
     }, undefined, FLOW);
   } catch (err) {
-    console.warn('[tulip] mesh gradient did not mount:', err && err.message ? err.message : err);
+    console.warn('[2lp] mesh gradient did not mount:', err && err.message ? err.message : err);
   }
 }
 
@@ -4924,7 +4924,7 @@ async function mountPaper() {
 
   try {
     var noise = await ready(PaperShaders.getShaderNoiseTexture ? PaperShaders.getShaderNoiseTexture() : null);
-    if (!noise) { console.warn('[tulip] paper texture: no noise source, skipping'); return; }
+    if (!noise) { console.warn('[2lp] paper texture: no noise source, skipping'); return; }
     var blank = await loadImage(PaperShaders.emptyPixel);
 
     new PaperShaders.ShaderMount(host, PaperShaders.paperTextureFragmentShader, {
@@ -4954,7 +4954,7 @@ async function mountPaper() {
       u_worldHeight: 0
     }, undefined, DRIFT);
   } catch (err) {
-    console.warn('[tulip] paper texture did not mount:', err && err.message ? err.message : err);
+    console.warn('[2lp] paper texture did not mount:', err && err.message ? err.message : err);
   }
 }
 
