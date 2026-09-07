@@ -1,7 +1,7 @@
 /**
  * A voice per language.
  *
- * One mouth for eighteen languages is one mouth that is wrong for seventeen of
+ * One mouth for every language is one mouth that is wrong for nearly all of
  * them.
  * The map is keyed on what the agent *says* rather than on what goes to the
  * provider, and Cebuano is why: it and Filipino send the same boost, because
@@ -49,10 +49,10 @@ describe('finding the row', () => {
   it('is null for a language this deployment does not speak', () => {
     // Valid for the provider, but not one of the rows — so there is no voice,
     // and the caller falls back to the default rather than guessing. Japanese
-    // used to be the example here and is now a language Juan speaks; Korean is
+    // used to be the example here and is now a language Juan speaks; Hebrew is
     // the same case, and swapping it in is the point of having the test.
-    expect(spokenLanguageFor('Korean')).toBeNull();
-    expect(spokenLanguageFor('Thai')).toBeNull();
+    expect(spokenLanguageFor('Hebrew')).toBeNull();
+    expect(spokenLanguageFor('Malay')).toBeNull();
     expect(spokenLanguageFor('Klingon')).toBeNull();
     expect(spokenLanguageFor('')).toBeNull();
     expect(spokenLanguageFor('   ')).toBeNull();

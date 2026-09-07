@@ -9,7 +9,7 @@
  * rather than merely broken, and nothing about its output would look off.
  *
  * The other half is that it spends real money per press. A control that bills
- * on click and is presented as a row of eighteen buttons needs a ceiling that
+ * on click and is presented as a long row of buttons needs a ceiling that
  * is tested rather than assumed, and it needs its refusals to be *sentences* —
  * the operator is holding the setting that caused the failure, so "voice id not
  * exist" is the whole answer they came for and must not be flattened into
@@ -137,7 +137,7 @@ describe('what it refuses', () => {
     // and the sentence is the one thing that is not the operator's to choose.
     const { deps, preview } = await harness();
 
-    const result = await preview(deps, { language: 'Korean' });
+    const result = await preview(deps, { language: 'Hebrew' });
 
     expect(result.ok).toBe(false);
     expect(spoken).toHaveLength(0);

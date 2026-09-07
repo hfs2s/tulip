@@ -3994,7 +3994,7 @@ async function saveSettings(patch, revert) {
  *
  * Saved per row on blur rather than behind one Save button. Each row is
  * independent, an operator changes one and listens to it, and a modal that
- * demands all eighteen be right before any of them applies is a modal that gets
+ * demands every row be right before any of them applies is a modal that gets
  * abandoned halfway.
  *
  * **Play is on the row, next to the field it auditions.** That adjacency is the
@@ -4009,7 +4009,7 @@ async function saveSettings(patch, revert) {
  *     a press that appears to do nothing is a press an operator repeats, and
  *     each repeat costs money.
  *   · **One voice at a time.** Starting a row stops whatever was talking.
- *     Eighteen rows that can all speak at once is not a control surface.
+ *     A whole matrix that can speak at once is not a control surface.
  *   · **It waits for the row to save.** Blurring the field starts a save and
  *     pressing the button is what blurs it, so without this the preview races
  *     the change it is meant to demonstrate — and would sometimes play the
@@ -5014,8 +5014,10 @@ async function renderSettings() {
   var open = node('button', 'sm', 'Voices by language…');
   open.type = 'button';
   open.addEventListener('click', function () { openVoiceMatrix(s); });
+  var spokenCount = (s.spokenLanguages || []).length;
   field(tools, 'Voice per language',
-    'One voice for eighteen languages is one voice that is wrong for seventeen of them. Set a voice id '
+    'One voice for ' + spokenCount + ' languages is one voice that is wrong for '
+    + Math.max(0, spokenCount - 1) + ' of them. Set a voice id '
     + 'for each language Juan speaks and press Play on the row to hear it — a real recording, generated '
     + 'when you press it, with whatever that row resolves to. Anything left blank uses the default above, '
     + 'and Play auditions that too. Cebuano and Filipino send the same setting to the provider — there is '

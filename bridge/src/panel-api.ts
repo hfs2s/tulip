@@ -1223,8 +1223,8 @@ const VOICE_ID_MESSAGE = 'letters, digits, spaces, brackets, dots, dashes and un
  *
  * Low on purpose. This is not abuse protection — everything here is already
  * behind the panel's token — it is protection against the shape of the control
- * itself: a row of Play buttons invites a run down the list, and eighteen
- * languages clicked in twenty seconds is eighteen billed synthesis calls. Six a
+ * itself: a row of Play buttons invites a run down the list, and every language
+ * clicked in quick succession is a separate billed synthesis call. Six a
  * minute is faster than anyone can listen and slow enough that a stuck finger
  * costs pennies rather than a bill.
  */

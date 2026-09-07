@@ -41,9 +41,12 @@ describe('every spoken language can be heard', () => {
   });
 });
 
-describe('the languages added alongside the original nine', () => {
+describe('the languages added after the original nine', () => {
   it('finds each of them by name', () => {
-    for (const name of ['Dutch', 'German', 'Arabic', 'Mandarin', 'Russian', 'Japanese']) {
+    for (const name of [
+      'Dutch', 'German', 'Arabic', 'Mandarin', 'Russian', 'Japanese',
+      'Czech', 'Greek', 'Hindi', 'Korean', 'Polish', 'Thai', 'Ukrainian',
+    ]) {
       expect(spokenLanguageFor(name)?.name, name).toBe(name);
     }
   });

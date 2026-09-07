@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -127,7 +127,16 @@ describe('atomic writes', () => {
   });
 
   it('throws, and cleans up, when the target cannot be written', () => {
-    expect(() => writeFileAtomic('/proc/definitely-not-writable/x', 'y')).toThrow();
+    // Renaming a file over an existing directory fails after the temporary has
+    // been written, which exercises the cleanup path without relying on a
+    // special filesystem. Node 22 can loop inside recursive mkdir on /proc,
+    // which made the old fixture hang the entire suite on Raspberry Pi OS.
+    const root = scratch();
+    const target = join(root, 'directory');
+    mkdirSync(target);
+
+    expect(() => writeFileAtomic(target, 'y')).toThrow();
+    expect(readdirSync(root).filter((f) => f.includes('.tmp'))).toEqual([]);
   });
 });
 

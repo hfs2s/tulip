@@ -144,9 +144,9 @@ export const SPOKEN_LANGUAGES = [
   { name: 'Portuguese', boost: 'Portuguese' },
   { name: 'French', boost: 'French' },
   { name: 'Italian', boost: 'Italian' },
-  // The second nine. Added together, and each one checked against the
-  // provider's live catalogue rather than against what its name suggests —
-  // which is how the three honest gaps below were found instead of guessed at.
+  // Every row is checked against the provider's live catalogue and then
+  // synthesised with speech-2.8-turbo. A language boost alone is not enough:
+  // the row only belongs here when the catalogue also has a male voice for it.
   { name: 'Dutch', boost: 'Dutch' },
   { name: 'German', boost: 'German' },
   { name: 'Arabic', boost: 'Arabic' },
@@ -155,6 +155,13 @@ export const SPOKEN_LANGUAGES = [
   { name: 'Mandarin', boost: 'Chinese' },
   { name: 'Russian', boost: 'Russian' },
   { name: 'Japanese', boost: 'Japanese' },
+  { name: 'Czech', boost: 'Czech' },
+  { name: 'Greek', boost: 'Greek' },
+  { name: 'Hindi', boost: 'Hindi' },
+  { name: 'Korean', boost: 'Korean' },
+  { name: 'Polish', boost: 'Polish' },
+  { name: 'Thai', boost: 'Thai' },
+  { name: 'Ukrainian', boost: 'Ukrainian' },
 ] as const;
 
 export type SpokenLanguage = (typeof SPOKEN_LANGUAGES)[number]['name'];
@@ -162,8 +169,8 @@ export type SpokenLanguage = (typeof SPOKEN_LANGUAGES)[number]['name'];
 /**
  * One sentence per language, for hearing what a voice actually sounds like.
  *
- * The panel's test bench speaks these. They are the same sentence in sixteen
- * languages rather than eighteen different sentences, because the thing being
+ * The panel's test bench speaks these. They are the same sentence in every
+ * language rather than a collection of unrelated lines, because the thing being
  * compared is the mouth and not the words — and they are a real introduction
  * rather than "testing, one two three", so what an operator hears is what a
  * person on WhatsApp would hear.
@@ -189,6 +196,13 @@ export const LANGUAGE_SAMPLES: Readonly<Record<SpokenLanguage, string>> = {
   Mandarin: '你好，我是胡安。我是一个乐于助人的助手，这就是我说你的语言时的声音。',
   Russian: 'Здравствуйте, меня зовут Хуан. Я полезный помощник, и вот как я звучу, когда говорю на вашем языке.',
   Japanese: 'こんにちは、フアンです。お役に立てるアシスタントです。あなたの言語で話すと、このように聞こえます。',
+  Czech: 'Dobrý den, jmenuji se Juan. Jsem užitečný asistent a takhle zním, když mluvím vaším jazykem.',
+  Greek: 'Γεια σας, είμαι ο Χουάν. Είμαι ένας χρήσιμος βοηθός και έτσι ακούγομαι όταν μιλάω τη γλώσσα σας.',
+  Hindi: 'नमस्ते, मैं हुआन हूँ। मैं एक मददगार सहायक हूँ, और आपकी भाषा बोलते समय मेरी आवाज़ ऐसी सुनाई देती है।',
+  Korean: '안녕하세요, 저는 후안입니다. 저는 도움을 드리는 비서이고, 여러분의 언어로 말하면 이렇게 들립니다.',
+  Polish: 'Cześć, jestem Juan. Jestem pomocnym asystentem i tak brzmię, gdy mówię w twoim języku.',
+  Thai: 'สวัสดีครับ ผมชื่อฮวน ผมเป็นผู้ช่วยที่พร้อมช่วยเหลือ และนี่คือเสียงของผมเมื่อพูดภาษาของคุณ',
+  Ukrainian: 'Вітаю, я Хуан. Я корисний помічник, і ось як я звучу, коли розмовляю вашою мовою.',
 };
 
 /**
