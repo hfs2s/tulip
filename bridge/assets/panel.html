@@ -1297,9 +1297,21 @@
           background-size:100% 26px, 100% 26px, 100% 10px, 100% 10px;
           background-attachment:local, local, scroll, scroll}
 
+    /* `display:block` here beats the `hidden` attribute's own `display:none`,
+       so the scrim stayed in the layout whenever the menu was shut — fixed,
+       covering everything below the top bar, at z-index 28 and `opacity:0`.
+       An invisible element still takes taps: every control on every page was
+       being pressed through a sheet of glass, while the rail, which sits above
+       it, kept working. That is exactly the report — "only the navigation".
+
+       Two guards, because either alone would have been enough and neither was
+       there. `[hidden]` now genuinely hides it, and while it is present but
+       transparent it no longer intercepts anything. */
     .nav-scrim{display:block;position:fixed;inset:var(--bar) 0 0;z-index:28;
-               background:rgba(8,8,10,.55);opacity:0;transition:opacity .18s ease}
-    .nav-scrim.open{opacity:1}
+               background:rgba(8,8,10,.55);opacity:0;pointer-events:none;
+               transition:opacity .18s ease}
+    .nav-scrim[hidden]{display:none}
+    .nav-scrim.open{opacity:1;pointer-events:auto}
 
     /* With the menu open the page behind it must not move: a swipe that starts
        on the scrim was scrolling the document rather than the menu. */
