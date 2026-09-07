@@ -614,3 +614,71 @@ describe('a store that cannot be trusted', () => {
     expect(states['good']).toBe('done');
   });
 });
+
+/**
+ * Whose promise it is.
+ *
+ * `createdBy` and `requestedBy` answer different questions and were briefly one
+ * field. The bug that separated them: an operator kept a promise somebody had
+ * made to a person in a chat, and the page credited the operator for it.
+ */
+describe('attribution', () => {
+  it('records who asked, separately from who created it', async () => {
+    const h = await harness();
+    const key = h.chats.keyFor('15551110001@s.whatsapp.net');
+    const made = h.createSchedule(
+      h.config,
+      { chatKey: key, spec: tomorrowAt9, text: 'the meetup is on Monday', createdBy: 'operator', requestedBy: 'Daniel S' },
+      NOW,
+    );
+    expect(made.ok).toBe(true);
+    // Both, and they disagree — which is the whole point of the pair.
+    expect(made.ok && made.entry.createdBy).toBe('operator');
+    expect(made.ok && made.entry.requestedBy).toBe('Daniel S');
+  });
+
+  it('keeps null rather than a name-shaped hole', async () => {
+    const h = await harness();
+    const key = h.chats.keyFor('15551110002@s.whatsapp.net');
+    for (const blank of [undefined, null, '', '   ']) {
+      const made = h.createSchedule(
+        h.config,
+        { chatKey: key, spec: tomorrowAt9, text: 'x', createdBy: 'agent', requestedBy: blank },
+        NOW,
+      );
+      expect(made.ok && made.entry.requestedBy, JSON.stringify(blank)).toBeNull();
+    }
+  });
+
+  it('reads an entry written before the field existed', async () => {
+    // The migration case, and the one that would lose a real reminder: the
+    // store already held Daniel's when this shipped. A strict schema with no
+    // default would fail to parse it and the entry would silently vanish.
+    const h = await harness();
+    const key = h.chats.keyFor('15551110003@s.whatsapp.net');
+    h.createSchedule(h.config, { chatKey: key, spec: tomorrowAt9, text: 'older', createdBy: 'agent' }, NOW);
+
+    const onDisk = JSON.parse(readFileSync(h.scheduleFile, 'utf8')) as { entries: Record<string, unknown>[] };
+    for (const row of onDisk.entries) delete row['requestedBy'];
+    writeFileSync(h.scheduleFile, JSON.stringify(onDisk));
+
+    const back = h.readSchedule();
+    expect(back).toHaveLength(1);
+    expect(back[0]?.requestedBy).toBeNull();
+    expect(back[0]?.text).toBe('older');
+  });
+
+  it('carries the name into what the panel renders', async () => {
+    const h = await harness();
+    const key = h.chats.keyFor('15551110004@s.whatsapp.net');
+    h.createSchedule(
+      h.config,
+      { chatKey: key, spec: tomorrowAt9, text: 'x', createdBy: 'operator', requestedBy: 'Daniel S' },
+      NOW,
+    );
+    const view = h.scheduleView({ chats: h.chats } as never);
+    expect(view.items[0]?.['requestedBy']).toBe('Daniel S');
+    // The two travel together: the sentence on the card needs both halves.
+    expect(view.items[0]?.['chatName']).not.toBeUndefined();
+  });
+});

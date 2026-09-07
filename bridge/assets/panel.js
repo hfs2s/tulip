@@ -5132,11 +5132,19 @@ async function renderSchedule() {
     p.appendChild(upcoming);
   }
 
+  // Shown even when empty, which is the point. A section that appears only once
+  // something has fired is indistinguishable from a page that keeps no history
+  // at all — and "did that reminder actually go out" is the question this page
+  // exists to answer. The empty state says how much is kept, so nobody has to
+  // guess whether an old one was dropped or never existed.
+  p.appendChild(node('h3', 'schedhead', 'Already run'));
   if (settled.length) {
-    p.appendChild(node('h3', 'schedhead', 'Already run'));
     var past = node('div', 'schedgrid');
     settled.forEach(function (e) { past.appendChild(scheduleCard(e, false)); });
     p.appendChild(past);
+  } else {
+    p.appendChild(node('p', 'empty',
+      'Nothing has run yet. Reminders stay here after they fire, and so do the ones that were missed or cancelled — the last 200 of them.'));
   }
 }
 
@@ -5148,6 +5156,95 @@ function scheduleShape(entry) {
   return 'One time';
 }
 
+/**
+ * Where this promise came from, as a sentence.
+ *
+ * Provenance is the evidence a person actually asked for this, which is the
+ * whole reason the page exists — a reminder nobody can trace is indistinguish-
+ * able from one the agent invented. So it reads as prose rather than a row of
+ * chips: the name is the load-bearing word and gets the only emphasis.
+ *
+ * It absorbs the old "Goes to <chat>" line rather than sitting beside it. A
+ * scheduled message can only ever be sent to the conversation that asked for
+ * it — that is enforced in the schema, not merely by convention — so "asked in"
+ * and "goes to" were two lines carrying one fact.
+ *
+ * Three shapes, and each is exactly as sure as the record allows:
+ *   · a named person, in a chat  — the ordinary case
+ *   · a chat with no name kept   — agent-made before names were recorded
+ *   · the operator, from here    — no chat to name; they were standing here
+ */
+function provenance(entry) {
+  var line = node('p', 'schedfrom');
+  var made = entry.createdAt ? ', ' + shortDate(entry.createdAt) : '';
+
+  line.title = 'Set ' + localFull(entry.createdAt, entry.timezone);
+
+  if (entry.requestedBy) {
+    line.appendChild(document.createTextNode('Asked by '));
+    // In a direct chat the conversation is named after the person, so spelling
+    // both out gives "Asked by Mira in Mira". Their name carries the link
+    // instead — same destination, one fewer word.
+    var sameName = entry.chatName
+      && entry.chatName.trim().toLowerCase() === entry.requestedBy.trim().toLowerCase();
+    if (sameName) {
+      var self = chatSource(entry);
+      self.classList.add('schedchatname');
+      line.appendChild(self);
+    } else {
+      line.appendChild(node('b', null, entry.requestedBy));
+      if (entry.chatName) {
+        line.appendChild(document.createTextNode(' in '));
+        line.appendChild(chatSource(entry));
+      }
+    }
+    line.appendChild(document.createTextNode(made));
+    return line;
+  }
+  if (entry.createdBy === 'operator') {
+    line.textContent = 'Set by you from the panel' + made;
+    return line;
+  }
+  if (entry.chatName) {
+    line.appendChild(document.createTextNode('Asked in '));
+    line.appendChild(chatSource(entry));
+    line.appendChild(document.createTextNode(made));
+    return line;
+  }
+  line.textContent = 'Asked in a conversation' + made;
+  return line;
+}
+
+/**
+ * The chat, as a way back into it.
+ *
+ * The question that follows "who asked for this" is almost always "what were
+ * they actually saying", and the answer is one page away. Making the name a
+ * control rather than a label is the difference between reading the promise and
+ * checking it.
+ *
+ * A button rather than an anchor: this is client-side navigation through `go`,
+ * and an `<a href>` that a click handler has to cancel is a link that misbehaves
+ * on middle-click and copy-link-address. Every entry on this page belongs to a
+ * chat the viewer is already allowed to see — the route filters by chat key
+ * before it renders — so this can never offer a door that then refuses to open.
+ */
+function chatSource(entry) {
+  var b = node('button', 'schedchat', entry.chatName);
+  b.type = 'button';
+  b.title = 'Open this conversation';
+  b.addEventListener('click', function () { go('chat/' + entry.chatKey); });
+  return b;
+}
+
+/** A date without the year, which is noise for something weeks away. */
+function shortDate(at) {
+  var d = at instanceof Date ? at : new Date(at);
+  if (isNaN(d.getTime())) return '';
+  try { return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(d); }
+  catch (err) { return ''; }
+}
+
 /** One entry, as a card. */
 function scheduleCard(entry, live) {
   var card = node('div', 'schedcard' + (live ? '' : ' past'));
@@ -5156,10 +5253,6 @@ function scheduleCard(entry, live) {
   // The state is the first thing read, so it leads. `missed` and `failed` are
   // the two that need to look different from across the room.
   top.appendChild(node('span', 'schedstate s-' + entry.state, entry.state));
-  // Who asked matters before somebody cancels the wrong one: an operator's own
-  // reminder and one the agent agreed to in a conversation are not the same
-  // thing to delete.
-  top.appendChild(node('span', 'schedwho', entry.createdBy === 'operator' ? 'you' : 'asked in chat'));
   card.appendChild(top);
 
   // The message itself, which is the only part a person on WhatsApp will see.
@@ -5179,7 +5272,7 @@ function scheduleCard(entry, live) {
   var shape = node('p', null, scheduleShape(entry));
   meta.appendChild(shape);
 
-  if (entry.chatName) meta.appendChild(node('p', null, 'Goes to ' + entry.chatName));
+  meta.appendChild(provenance(entry));
 
   if (entry.fireCount) {
     var sent = node('p', null, 'Sent ' + entry.fireCount + (entry.fireCount === 1 ? ' time' : ' times')
