@@ -89,6 +89,21 @@ export const ScheduleEntry = z
      * before somebody deletes the wrong one.
      */
     createdBy: z.enum(['agent', 'operator']),
+    /**
+     * Whose promise this is, by display name — distinct from `createdBy`, and
+     * deliberately so.
+     *
+     * `createdBy` answers a machine's question: may this fire while agent
+     * scheduling is switched off. This answers a person's: who is going to be
+     * disappointed if it does not. They come apart exactly when an operator
+     * sets a reminder somebody else asked for in a chat, which is the case that
+     * prompted this field — the page said "you" about a promise made to Daniel.
+     *
+     * Defaulted rather than required, for the entries already on disk when this
+     * shipped. Null is the honest reading of those: we know the chat, and we
+     * did not record the person.
+     */
+    requestedBy: z.string().max(80).nullable().default(null),
     createdAt: z.string().datetime(),
     /**
      * The zone this entry's times are *said* in.
@@ -209,6 +224,8 @@ export interface CreateInput {
   readonly spec: ScheduleSpecType;
   readonly text: string;
   readonly createdBy: 'agent' | 'operator';
+  /** Who asked for it, if a person did. See `ScheduleEntry.requestedBy`. */
+  readonly requestedBy?: string | null;
 }
 
 export type Created = { ok: true; entry: ScheduleEntry } | { ok: false; error: string };
@@ -302,6 +319,9 @@ export function createSchedule(config: Config, input: CreateInput, now = Date.no
     spec,
     text,
     createdBy: input.createdBy,
+    // Trimmed and emptied to null: a blank name renders as a sentence with a
+    // hole in it, which is worse than not claiming to know who asked.
+    requestedBy: (input.requestedBy ?? '').trim() || null,
     createdAt: new Date(now).toISOString(),
     timezone,
     nextAt: next.toISOString(),

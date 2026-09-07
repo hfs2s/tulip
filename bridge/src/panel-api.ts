@@ -939,6 +939,7 @@ export function scheduleView(deps: ApiDeps): { items: Array<Record<string, unkno
     describes: describeSpec(entry.spec, entry.timezone),
     text: entry.text,
     createdBy: entry.createdBy,
+    requestedBy: entry.requestedBy,
     createdAt: entry.createdAt,
     timezone: entry.timezone,
     nextAt: entry.nextAt,
@@ -1008,6 +1009,13 @@ const ScheduleRequest = z
     text: z.string().min(1).max(4096),
     /** Defaults to the deployment's zone; an operator may name another. */
     timezone: TimeZone.optional(),
+    /**
+     * Who asked, when that is somebody other than the operator setting it.
+     *
+     * The panel is often used to keep a promise made to a person in a chat, and
+     * without this the page credits the operator for it.
+     */
+    requestedBy: z.string().min(1).max(80).nullable().optional(),
   })
   .strict();
 
@@ -1035,7 +1043,13 @@ export function scheduleCreate(deps: ApiDeps, chatKey: string, body: unknown): {
     spec = { kind: 'once', at: resolved.at.toISOString() };
   }
 
-  const made = createSchedule(deps.config, { chatKey, spec, text, createdBy: 'operator' });
+  const made = createSchedule(deps.config, {
+    chatKey,
+    spec,
+    text,
+    createdBy: 'operator',
+    requestedBy: parsed.data.requestedBy ?? null,
+  });
   if (!made.ok) return { ok: false, message: made.error };
   feed.event(
     'schedule.created',
