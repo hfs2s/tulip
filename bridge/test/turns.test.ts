@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TurnRegistry } from '../src/turns.js';
+import { CLOSED_TURN_GRACE_MS, TurnRegistry } from '../src/turns.js';
 
 const T0 = Date.UTC(2026, 0, 1, 12, 0, 0);
 const TTL = 600_000; // ten minutes
@@ -91,11 +91,15 @@ describe('TurnRegistry — expiry', () => {
 
   // The agent's final message is often queued microseconds after the Stop hook
   // fires; refusing it would drop the actual reply.
-  it('still resolves a closed turn until it expires', () => {
+  it('resolves a closed turn only during the Stop-hook filesystem grace period', () => {
     const turns = registry();
     const turn = turns.open('15551234567@s.whatsapp.net', 'aaaaaaaaaaaaaaaa', T0);
     turns.close(turn.turnId, T0 + 5000);
-    expect(turns.resolve(turn.turnId, T0 + 6000).ok).toBe(true);
+    expect(turns.resolve(turn.turnId, T0 + 5000 + CLOSED_TURN_GRACE_MS).ok).toBe(true);
+    expect(turns.resolve(turn.turnId, T0 + 5001 + CLOSED_TURN_GRACE_MS)).toEqual({
+      ok: false,
+      reason: 'expired',
+    });
   });
 
   it('drops expired turns from memory rather than growing without bound', () => {
