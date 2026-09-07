@@ -3000,7 +3000,12 @@ async function renderMemory() {
         from ? 'Learned from ' + from : 'Learned in an unnamed group '));
       if (!from && n.chatKey) meta.appendChild(node('span', 'key', n.chatKey));
       meta.appendChild(document.createTextNode(', ' + ago(Date.now() - Date.parse(n.at))));
-      row.appendChild(meta);
+      // Provenance and the button share a row at the foot of the card, so the
+      // button has space of its own rather than sitting over the first line of
+      // the note. It keeps that space whether or not it is showing, so nothing
+      // shifts under the cursor when it appears.
+      var foot = node('div', 'memmeta');
+      foot.appendChild(meta);
 
       var bin = node('button', 'sm memforget', 'Forget');
       bin.type = 'button';
@@ -3009,7 +3014,8 @@ async function renderMemory() {
         if (!window.confirm('Forget this?\n\n' + n.text)) return;
         act('memory/forget', null, '?id=' + encodeURIComponent(n.id));
       });
-      row.appendChild(bin);
+      foot.appendChild(bin);
+      row.appendChild(foot);
       grid.appendChild(row);
     });
   }
