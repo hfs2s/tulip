@@ -682,3 +682,92 @@ describe('attribution', () => {
     expect(view.items[0]?.['chatName']).not.toBeUndefined();
   });
 });
+
+/**
+ * The evidence a person asked.
+ *
+ * `requestedBy` is a claim and `sourceText` is what backs it. The bridge reads
+ * both from its own feed rather than accepting them in the action, because
+ * evidence supplied by the party being checked proves nothing — an agent may
+ * ask for a reminder, but must not be able to author the sentence that vouches
+ * for it.
+ */
+describe('the request behind a reminder', () => {
+  it('keeps the original message and when it was sent', async () => {
+    const h = await harness();
+    const key = h.chats.keyFor('15551110005@s.whatsapp.net');
+    const asked = '2026-09-07T11:53:43.000Z';
+    const made = h.createSchedule(
+      h.config,
+      {
+        chatKey: key,
+        spec: tomorrowAt9,
+        text: 'the meetup is on Monday',
+        createdBy: 'agent',
+        requestedBy: 'Daniel S',
+        sourceText: 'Juan, remind us to attend the meetup on 28th. Can you do that?',
+        sourceAt: asked,
+      },
+      NOW,
+    );
+    expect(made.ok && made.entry.sourceText).toContain('remind us to attend');
+    expect(made.ok && made.entry.sourceAt).toBe(asked);
+  });
+
+  it('stays null rather than half-recorded when there is no request', async () => {
+    const h = await harness();
+    const key = h.chats.keyFor('15551110006@s.whatsapp.net');
+    const made = h.createSchedule(
+      h.config,
+      { chatKey: key, spec: tomorrowAt9, text: 'x', createdBy: 'operator' },
+      NOW,
+    );
+    expect(made.ok && made.entry.sourceText).toBeNull();
+    expect(made.ok && made.entry.sourceAt).toBeNull();
+  });
+
+  it('reads an entry written before the request was recorded', async () => {
+    // Same migration hazard as `requestedBy`: the live reminder predates these
+    // fields, and a strict schema without defaults would drop it on read.
+    const h = await harness();
+    const key = h.chats.keyFor('15551110007@s.whatsapp.net');
+    h.createSchedule(h.config, { chatKey: key, spec: tomorrowAt9, text: 'older', createdBy: 'agent' }, NOW);
+
+    const onDisk = JSON.parse(readFileSync(h.scheduleFile, 'utf8')) as { entries: Record<string, unknown>[] };
+    for (const row of onDisk.entries) {
+      delete row['sourceText'];
+      delete row['sourceAt'];
+      delete row['requestedBy'];
+    }
+    writeFileSync(h.scheduleFile, JSON.stringify(onDisk));
+
+    const back = h.readSchedule();
+    expect(back).toHaveLength(1);
+    expect(back[0]?.sourceText).toBeNull();
+    expect(back[0]?.sourceAt).toBeNull();
+    expect(back[0]?.text).toBe('older');
+  });
+
+  it('sends the quotation to the panel with a local time beside it', async () => {
+    const h = await harness();
+    const key = h.chats.keyFor('15551110008@s.whatsapp.net');
+    h.createSchedule(
+      h.config,
+      {
+        chatKey: key,
+        spec: tomorrowAt9,
+        text: 'x',
+        createdBy: 'agent',
+        requestedBy: 'Daniel S',
+        sourceText: 'remind us please',
+        sourceAt: '2026-09-07T11:53:43.000Z',
+      },
+      NOW,
+    );
+    const view = h.scheduleView({ chats: h.chats } as never);
+    expect(view.items[0]?.['sourceText']).toBe('remind us please');
+    // Rendered server-side in the entry's zone, so the card does not re-derive
+    // timezone maths in the browser.
+    expect(String(view.items[0]?.['sourceAtLocal'])).toMatch(/CEST|CET/);
+  });
+});
