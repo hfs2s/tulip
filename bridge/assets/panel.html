@@ -235,50 +235,104 @@
   .said{white-space:pre-wrap;overflow-wrap:anywhere}
   .why{font-size:12.5px;color:var(--warn);margin-top:3px}
 
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:12px}
-  .tile{background:var(--panel);border:1px solid var(--line-soft);border-radius:0;overflow:hidden}
-  .tile{position:relative}
-  .tile .tag{position:absolute;top:8px;left:8px;z-index:1;
-             font-size:10.5px;letter-spacing:.02em;padding:3px 7px;
-             border-radius:0;background:rgba(8,8,10,.72);
-             color:var(--faint);border:1px solid var(--line)}
-  .tile .tag.sent{color:var(--accent);border-color:var(--accent)}
-  .tile img,.tile video{width:100%;height:120px;object-fit:cover;display:block;background:var(--raise)}
-  .tile .none{height:120px;display:grid;place-items:center;color:var(--faint);font-size:12px}
-  .tile .meta{padding:8px 10px;font-size:11.5px;color:var(--faint)}
+  /* ── Media ──────────────────────────────────────────────────────────────────
+     Two directions on one page, so direction is the division rather than a chip
+     in the corner of a thumbnail — which is where it was, and which two dozen
+     tiles made invisible.
+
+     Outbound leads and is the loud half: those are files Juan made on his own
+     account and sent to somebody, and they appear nowhere else in the panel. So
+     they take the accent and sit raised, and what people sent in sits flat on
+     the page. That is the material distinction Memory already uses for notes it
+     keeps but does not carry — a difference in surface rather than one more
+     coloured word. */
+  .mediaband{margin:30px 0 14px;padding-bottom:9px;border-bottom:2px solid var(--line)}
+  .mediaband:first-child{margin-top:0}
+  .mediaband.out{border-bottom-color:var(--accent)}
+  .mediaband-top{display:flex;align-items:baseline;gap:14px}
+  .mediaband-name{font:400 16px/1.2 var(--display);letter-spacing:-.02em;margin:0}
+  .mediaband.out .mediaband-name{color:var(--accent)}
+  .mediaband-count{margin-left:auto;flex:none;font-size:12px;color:var(--faint)}
+  .mediaband-why{margin:5px 0 0;font-size:12.5px;color:var(--faint);max-width:72ch}
+
+  /* Kind, under a direction. A recording has no thumbnail, so it cannot live in
+     a picture grid: the split is about what a card can show, not about what the
+     file is. */
+  .mediakind{font:400 12.5px/1.2 var(--display);color:var(--faint);margin:18px 0 9px}
+
+  .mediagrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));
+             gap:14px;align-items:start}
+  /* Square and hairline like Memory and Pages, with one difference carrying the
+     page: a rail down the leading edge, in the accent when Juan made the file. */
+  .mediacard{position:relative;margin:0;min-width:0;background:transparent;
+             border:1px solid var(--line-soft);border-left:2px solid var(--line)}
+  .mediacard.out,.voice.out{background:var(--raise);border-left-color:var(--accent)}
+  /* Three edges named separately, not `border-color`: the shorthand would beat
+     the rule above on order and take the rail with it on hover. */
+  .mediacard:hover,.voice:hover{border-top-color:var(--line);border-right-color:var(--line);
+                                border-bottom-color:var(--line)}
+  .mediacard img,.mediacard video{width:100%;height:150px;object-fit:cover;display:block;
+                                  background:var(--panel)}
+  .mediablank{height:150px;display:grid;place-items:center;color:var(--faint);font-size:12px}
+  .mediacap{padding:10px 12px 11px}
+  .mediacard .bin{position:absolute;top:8px;right:8px;z-index:1;background:rgba(8,8,10,.72)}
+
+  /* The two lines every attachment gets, wherever it is shown: which way it
+     went, then who it was with, how big it is and when. */
+  .mediawho{display:block;font:400 12.5px/1.3 var(--display);color:var(--dim)}
+  .mediacard.out .mediawho,.voice.out .mediawho{color:var(--accent)}
+  .mediameta{display:block;margin-top:3px;font-size:11.5px;color:var(--faint);
+             overflow-wrap:anywhere}
+  .mediameta .key{font-size:11px}
 
   /* ── Voice notes ────────────────────────────────────────────────────────────
-     Full-width rows rather than tiles. A recording has no thumbnail, so a
-     square in the picture grid is a player floating in empty space — and since
-     they are transcribed now, the words are the part worth reading, which a
-     148px column cannot carry. */
-  .subhead{font:400 13px/1.2 var(--display);letter-spacing:.02em;color:var(--faint);
-           text-transform:uppercase;margin:22px 0 10px}
-  .subhead:first-child{margin-top:0}
-  /* Several per row: a voice note is a line of text with a player behind it,
-     not a picture, so it does not need a picture's width. */
-  .voicegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-  .voice-open{display:block;width:100%;text-align:left;background:transparent;
-              border:0;padding:12px 14px;cursor:pointer;color:inherit;font:inherit}
-  .voice-open:hover{background:var(--raise)}
-  .voice-open:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-  .voice-player{padding:0 14px 12px}
-  .voice-player audio{width:100%;height:36px;display:block}
-  .voice-foot{display:flex;justify-content:flex-end;padding:0 10px 8px}
-  /* The card is a frame now; its padding belongs to the parts inside it, which
-     are a full-width button and a player that must sit flush under it. */
-  .voice{background:var(--panel);border:1px solid var(--line-soft);border-radius:0;
+     Wider cards than the pictures get, because the transcript is the card. An
+     inbound recording is transcribed on the way in and those words are usually
+     the only readable thing about it; an outbound one has none, and says why
+     rather than leaving a blank where a sentence should be. */
+  .voicegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
+             gap:14px;align-items:start}
+  /* The card is a frame; its padding belongs to the parts inside it, which are a
+     full-width button and a player that must sit flush under it. */
+  .voice{background:transparent;border:1px solid var(--line-soft);
+         border-left:2px solid var(--line);border-radius:0;
          overflow:hidden;display:flex;flex-direction:column}
-  .voice-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .voice-head .who{font-size:13px;color:var(--ink);min-width:0;overflow-wrap:anywhere}
-  .voice-head .tag{font-size:10.5px;letter-spacing:.02em;padding:3px 7px;
-                   border-radius:0;color:var(--faint);border:1px solid var(--line)}
-  .voice-head .tag.sent{color:var(--accent);border-color:var(--accent)}
-  /* Pushed to the far end so the name and the tag stay together on the left. */
-  .voice-head .meta{font-size:11.5px;color:var(--faint);margin-left:auto}
-  .voice .said{margin:9px 0 0;padding:0 0 0 11px;border-left:2px solid var(--line);
-               font-size:13.5px;line-height:1.55;color:var(--dim)}
-  .voice .said.none{color:var(--faint);font-style:italic;border-left-style:dotted}
+  .voice-open{display:block;width:100%;text-align:left;background:transparent;
+              border:0;padding:13px 15px;cursor:pointer;color:inherit;font:inherit}
+  /* A translucent wash rather than `--raise`, which is the background an
+     outbound card already has and would light up nothing. */
+  .voice-open:hover{background:rgba(255,255,255,.03)}
+  .voice-open:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .voice-head{display:flex;align-items:baseline;gap:12px}
+  .voice-head .mediawho{flex:none}
+  /* Pushed to the far end, so direction stays at the leading edge of every card
+     and a scan down that edge answers the only question this page reorganised
+     itself around. */
+  .voice-head .mediameta{margin:0 0 0 auto;min-width:0;text-align:right}
+  .voice-player{padding:0 15px 12px}
+  .voice-player audio{width:100%;height:36px;display:block}
+  .voice-foot{display:flex;justify-content:flex-end;padding:0 11px 9px}
+  .voice .said{margin:10px 0 0;padding:0 0 0 11px;border-left:2px solid var(--line);
+               font-size:13.5px;line-height:1.55;color:var(--ink)}
+  .voice .said.none{color:var(--faint);font-size:12.5px;border-left-style:dotted}
+  /* Not a transcript and not an apology for the absence of one — that is in
+     the band. Just the one thing left to do with the card. */
+  .voice .said.cue{border-left:0;padding-left:0;margin-top:7px}
+
+  /* How many of each, on the control that exists to show one of them. A stat
+     row above would say the same numbers a second time. */
+  .segcount{margin-left:8px;font-size:11.5px;color:var(--faint)}
+  .seg button[aria-pressed=true] .segcount{color:var(--accent);opacity:.7}
+
+  .mediafoot{margin:26px 0 0;padding-top:14px;border-top:1px solid var(--line-soft);
+             font-size:12.5px;color:var(--faint)}
+
+  @media (max-width:900px){
+    /* Two thumbnails still fit across a phone, and a picture you cannot
+       recognise is not worth the row it sits in. */
+    .mediagrid{grid-template-columns:repeat(auto-fill,minmax(148px,1fr))}
+    .voicegrid{grid-template-columns:1fr}
+  }
 
   /* ── Delete ─────────────────────────────────────────────────────────────────
      Quiet until wanted. It removes a message somebody sent, with no trash and
@@ -287,7 +341,6 @@
        border-radius:0;width:30px;height:30px;line-height:1;padding:0;cursor:pointer;
        font-size:13px;opacity:.55;transition:opacity .15s,border-color .15s,color .15s}
   .bin:hover,.bin:focus-visible{opacity:1;color:var(--bad);border-color:var(--bad)}
-  .tile .bin{position:absolute;top:8px;right:8px;z-index:1;background:rgba(8,8,10,.72)}
   .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
   button.danger{border-color:var(--bad);color:var(--bad)}
   button.danger:hover:not(:disabled){background:var(--bad);color:var(--ground)}
