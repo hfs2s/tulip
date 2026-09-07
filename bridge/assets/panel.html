@@ -1045,52 +1045,67 @@
            padding:16px 0;border-bottom:1px solid var(--line-soft)}
   .toolrow:last-child{border-bottom:0}
   /* ── Memory ─────────────────────────────────────────────────────────────────
-     An audit surface. A note here is repeated into every conversation with
-     everybody, so the note itself is the loudest thing on the row and the
-     button that deletes it is the quietest — the reverse of a list you act on
-     more often than you read. */
-  .memfilter{width:100%;margin:0 0 14px;padding:11px 13px;background:var(--panel);
+     An audit surface. A note here is assembled into the brief Tulip starts every
+     session with, so it is repeated to everybody until somebody takes it out —
+     which makes the note itself the loudest thing on the card and the button
+     that deletes it the quietest.
+
+     A grid, because these are dozens of short unrelated statements with no
+     order between them beyond when they were written. In one column the eye
+     crosses the full width for a sentence that is often six words long, and
+     half of them fall off the screen. */
+  .memfilter{width:100%;margin:0 0 16px;padding:11px 13px;background:var(--panel);
              border:1px solid var(--line-soft);border-radius:0;color:var(--ink);
              font:inherit;font-size:13.5px}
   .memfilter::placeholder{color:var(--faint)}
   .memfilter:focus-visible{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
 
+  .memgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));
+           gap:12px;align-items:start}
+
   /* Time is the one real sequence here, so it is the one thing allowed to
-     divide the list. Sentence case: an operator says "Yesterday", not "YESTERDAY". */
-  .memday{font-family:var(--display);font-size:12.5px;font-weight:500;color:var(--faint);
-          margin:22px 0 10px;padding-bottom:7px;border-bottom:1px solid var(--line-soft)}
+     divide the list — full width, with the day's notes flowing beneath it.
+     Sentence case: an operator says "Yesterday", not "YESTERDAY". */
+  .memday{grid-column:1/-1;font-family:var(--display);font-size:12.5px;font-weight:500;
+          color:var(--faint);margin:16px 0 2px;padding-bottom:8px;
+          border-bottom:1px solid var(--line-soft)}
   .memday:first-child{margin-top:0}
 
-  .memnote{position:relative;padding:13px 92px 15px 0;border-bottom:1px solid var(--line-soft)}
-  .memnote:last-child{border-bottom:0}
-  /* 68ch, because these are sentences to be read rather than fields to be
-     scanned, and the panel's own measure is set for labels. */
-  .memtext{margin:0 0 5px;font-size:15px;line-height:1.55;color:var(--ink);max-width:68ch;
-           overflow-wrap:anywhere}
-  .memfrom{margin:0;font-size:12.5px;color:var(--faint)}
-  .memfrom .key{font-size:12px}
+  /* Square and hairline, like every other container here. Cards size to their
+     own text rather than to each other: clamping a note to make the grid tidy
+     would hide the end of a sentence, which is the one thing this page exists
+     to let somebody read. */
+  .memnote{position:relative;display:flex;flex-direction:column;gap:7px;
+           background:var(--raise);border:1px solid var(--line-soft);
+           padding:15px 16px 14px;min-width:0}
+  .memnote:hover{border-color:var(--line)}
+  .memtext{margin:0;font-size:14.5px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+  .memfrom{margin:0;font-size:12px;color:var(--faint);margin-top:auto}
+  .memfrom .key{font-size:11.5px}
 
-  /* Destructive, and quiet until you are on the row it belongs to. It keeps a
+  /* Destructive, and quiet until you are on the card it belongs to. Keeps a
      visible focus ring for the keyboard, which never hovers. */
-  .memforget{position:absolute;top:11px;right:0;opacity:0;transition:opacity .12s ease}
+  .memforget{position:absolute;top:10px;right:10px;opacity:0;transition:opacity .12s ease}
   .memnote:hover .memforget,.memforget:focus-visible{opacity:1}
   .memforget:hover{color:var(--bad);border-color:var(--bad)}
   @media (hover:none){.memforget{opacity:1}}
 
-  /* The one bold thing on the page: where the brief stops. Everything below is
-     stored and not carried, which nothing else in the panel says. */
-  .memedge{display:flex;align-items:center;gap:14px;margin:26px 0 4px;
-           font-size:12.5px;color:var(--warn)}
+  /* The one bold thing on the page: where the brief stops. Everything after it
+     is kept and not carried, which nothing else in the panel says. */
+  .memedge{grid-column:1/-1;display:flex;align-items:center;gap:14px;
+           margin:20px 0 4px;font-size:12.5px;color:var(--warn)}
   .memedge::after{content:'';flex:1;height:1px;background:var(--warn);opacity:.35}
+  .memnote.cold{background:transparent}
   .memnote.cold .memtext{color:var(--dim)}
   .memnote.cold .memfrom{opacity:.75}
 
   .memfoot{display:flex;align-items:center;justify-content:space-between;gap:16px;
-           padding-top:4px;font-size:12.5px}
+           margin-top:20px;padding-top:14px;border-top:1px solid var(--line-soft);
+           font-size:12.5px}
 
-  @media (max-width:640px){
-    .memnote{padding-right:0;padding-bottom:44px}
-    .memforget{top:auto;bottom:10px;opacity:1}
+  @media (max-width:900px){
+    .memgrid{grid-template-columns:1fr}
+    .memforget{opacity:1}
   }
 
   .empty{color:var(--faint);padding:20px 0}

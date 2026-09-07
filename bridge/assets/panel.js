@@ -2948,11 +2948,16 @@ async function renderMemory() {
   filter.setAttribute('aria-label', 'Filter notes');
   p.appendChild(filter);
 
-  var card = node('div', 'card');
-  p.appendChild(card);
+  // A grid rather than the page-wide card the rest of the panel uses. These are
+  // dozens of short, unrelated statements with no order between them beyond
+  // when they were written — a single column makes the eye travel the full
+  // width for a sentence that is often six words long, and pushes the older
+  // half off the screen entirely.
+  var grid = node('div', 'memgrid');
+  p.appendChild(grid);
 
   function paint() {
-    clear(card);
+    clear(grid);
     var q = filter.value.trim().toLowerCase();
     var shown = notes.filter(function (n) {
       return !q || (n.text || '').toLowerCase().indexOf(q) >= 0
@@ -2960,7 +2965,7 @@ async function renderMemory() {
     });
 
     if (!shown.length) {
-      card.appendChild(node('p', 'empty', 'No note matches that.'));
+      grid.appendChild(node('p', 'empty', 'No note matches that.'));
       return;
     }
 
@@ -2973,7 +2978,7 @@ async function renderMemory() {
       var stamp = when.toDateString();
       if (stamp !== day) {
         day = stamp;
-        card.appendChild(node('h3', 'memday', dayLabel(when.getTime())));
+        grid.appendChild(node('h3', 'memday', dayLabel(when.getTime())));
       }
 
       // Everything from here down is not in the brief. Drawn once, where the
@@ -2983,7 +2988,7 @@ async function renderMemory() {
         edge.appendChild(node('span', null,
           'Below this line: kept, but not carried. Only the newest ' + MEMORY_IN_BRIEF
           + ' notes go into the brief Tulip starts a session with.'));
-        card.appendChild(edge);
+        grid.appendChild(edge);
       }
 
       var row = node('div', 'memnote' + (notes.indexOf(n) >= MEMORY_IN_BRIEF ? ' cold' : ''));
@@ -3005,7 +3010,7 @@ async function renderMemory() {
         act('memory/forget', null, '?id=' + encodeURIComponent(n.id));
       });
       row.appendChild(bin);
-      card.appendChild(row);
+      grid.appendChild(row);
     });
   }
 
