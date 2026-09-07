@@ -284,6 +284,11 @@
   .mediameta{display:block;margin-top:3px;font-size:11.5px;color:var(--faint);
              overflow-wrap:anywhere}
   .mediameta .key{font-size:11px}
+  /* On a card they stack — the chat is an identity and the rest is arithmetic,
+     and a card wide enough for a thumbnail is not wide enough for both. On a
+     voice note they sit on one line at the far end, where there is room. */
+  .mediacap .mediawith,.mediacap .mediafacts{display:block}
+  .voice-head .mediafacts{margin-left:8px}
 
   /* ── Voice notes ────────────────────────────────────────────────────────────
      Wider cards than the pictures get, because the transcript is the card. An

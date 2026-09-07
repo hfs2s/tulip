@@ -2564,12 +2564,21 @@ function mediaWho(m) {
   return node('span', 'mediawho', sentByJuan(m) ? 'Juan sent' : 'Received');
 }
 
-/** Who it was with, how big, how long ago. */
+/**
+ * Who it was with, how big, how long ago.
+ *
+ * Two spans rather than one joined string, because the caption of a card stacks
+ * them and the head of a voice note sets them side by side. Run together, a
+ * chat with no name — sixteen hex characters — wrapped mid-identifier and took
+ * the size and the age with it, differently on every card.
+ */
 function mediaMeta(m) {
   var meta = node('span', 'mediameta');
-  if (m.chatName) meta.appendChild(document.createTextNode(m.chatName));
-  else meta.appendChild(node('span', 'key', m.chatKey || 'unnamed chat'));
-  meta.appendChild(document.createTextNode(' · ' + bytes(m.bytes) + ' · ' + ago(Date.now() - m.at)));
+  var with_ = node('span', 'mediawith');
+  if (m.chatName) with_.textContent = m.chatName;
+  else with_.appendChild(node('span', 'key', m.chatKey || 'unnamed chat'));
+  meta.appendChild(with_);
+  meta.appendChild(node('span', 'mediafacts', bytes(m.bytes) + ' · ' + ago(Date.now() - m.at)));
   return meta;
 }
 
