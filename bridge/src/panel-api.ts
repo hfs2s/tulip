@@ -27,6 +27,10 @@ import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { CurrentTurn, SHARED_WINDOW, TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
 import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES, parseConfig, Contact } from './config.js';
+import { LANGUAGE_LIMITS, LANGUAGE_SAMPLES } from '@tulip/shared';
+import { synthesise } from './minimax.js';
+import { claim } from './spend.js';
+import { resolveVoice } from './voice.js';
 import { deletePage, hashPagePassword, isUnpublished, listPages, pagesHost, republishPage, type PageSummary } from './pages.js';
 import { identities, matchesList } from './jid.js';
 import { forget, forgetAll, readMemory } from './memory.js';
@@ -988,6 +992,15 @@ export function settingsView(deps: ApiDeps): Json {
     // actually speaks, with the boost each one sends. Same reasoning as above —
     // the panel and the schema share one list rather than two that drift.
     spokenLanguages: SPOKEN_LANGUAGES,
+    // The line the test bench speaks for each of them. Sent rather than
+    // duplicated into the page, for the third time and the same reason: the
+    // sentence an operator reads on the row must be the sentence the bridge
+    // actually synthesises, or the bench is demonstrating something else.
+    voiceSamples: LANGUAGE_SAMPLES,
+    // Where the provider's catalogue falls short of what a row wants. Two
+    // entries today, both real limitations rather than settings nobody has
+    // filled in — see shared/src/languages.ts.
+    voiceLimits: LANGUAGE_LIMITS,
     groups: c.groups,
     limits: c.limits,
     delivery: c.delivery,
@@ -1005,6 +1018,137 @@ export function settingsView(deps: ApiDeps): Json {
       name: process.env['TULIP_MODEL'] || 'default',
       provider: process.env['ANTHROPIC_BASE_URL'] || 'api.anthropic.com',
     },
+  };
+}
+
+/**
+ * What a voice id may contain.
+ *
+ * This was `[A-Za-z0-9_-]`, modelled on the ids in front of us at the time, and
+ * it silently refused a working voice the moment the catalogue was read
+ * properly: `Chinese (Mandarin)_Reliable_Executive` is the provider's own
+ * spelling, spaces and brackets included. A save carrying it was rejected with
+ * a message about underscores, which reads as a typo rather than as a rule.
+ *
+ * Still a character class rather than free text — the value is written into a
+ * JSON request body and a log line, and a newline in either is a mess — but the
+ * class is now the one the provider actually uses.
+ */
+const VOICE_ID = /^[A-Za-z0-9 ()._-]*$/;
+const VOICE_ID_MESSAGE = 'letters, digits, spaces, brackets, dots, dashes and underscores only';
+
+// ─── The voice test bench ────────────────────────────────────────────────────
+
+/**
+ * How many previews may be generated in a rolling minute, across the panel.
+ *
+ * Low on purpose. This is not abuse protection — everything here is already
+ * behind the panel's token — it is protection against the shape of the control
+ * itself: a row of Play buttons invites a run down the list, and eighteen
+ * languages clicked in twenty seconds is eighteen billed synthesis calls. Six a
+ * minute is faster than anyone can listen and slow enough that a stuck finger
+ * costs pennies rather than a bill.
+ */
+const PREVIEW_PER_MINUTE = 6;
+const PREVIEW_WINDOW_MS = 60_000;
+
+/** Timestamps of recent previews. Module state, reset between tests. */
+let previews: number[] = [];
+
+/** Test seam, and the same one `spend.ts` offers for the same reason. */
+export function resetPreviewsForTests(): void {
+  previews = [];
+}
+
+export type VoicePreview =
+  | { ok: true; audio: Buffer; language: string; boost: string; voiceId: string; usingFallback: boolean; text: string }
+  | { ok: false; status: number; message: string };
+
+/**
+ * Speak one language's sample line, live, and hand back the audio.
+ *
+ * The point of this is equivalence: an operator pastes a voice id into the
+ * matrix, presses Play, and hears exactly what somebody on WhatsApp would hear.
+ * So it resolves the voice through `resolveVoice` — the same function the
+ * outbound path calls — rather than reading `config.agent.voices` itself. A
+ * bench with its own lookup would eventually demonstrate a voice nothing uses.
+ *
+ * Three things it deliberately does *not* do:
+ *
+ *   - **It does not cache.** Every press is a real request, because the whole
+ *     question being asked is "what does the provider do with this id *now*",
+ *     and a cached clip answers "what did it do before you changed the id".
+ *   - **It does not fail quietly.** The outbound path swallows a synthesis
+ *     failure and sends text instead, which is right there and wrong here: the
+ *     operator is holding the setting that caused it, and "voice id not exist"
+ *     is the entire answer they came for.
+ *   - **It does not send anything to anybody.** Nothing reaches WhatsApp; the
+ *     bytes go to the browser that asked.
+ *
+ * It does spend money, once per press, so it is metered twice — a rolling
+ * minute for the finger, and the deployment's own daily speech allowance for
+ * the bill. The daily unit is claimed *before* the request, like the outbound
+ * path, so a slow provider cannot let two through the last unit of the day;
+ * the cost is that a provider failure still spends one, which is the right way
+ * round for a meter whose job is bounding an invoice.
+ */
+export async function voicePreview(deps: ApiDeps, body: unknown, now = Date.now()): Promise<VoicePreview> {
+  const asked = typeof (body as { language?: unknown } | null)?.language === 'string'
+    ? (body as { language: string }).language.trim()
+    : '';
+  if (asked.length === 0) return { ok: false, status: 400, message: 'Name a language to hear.' };
+
+  // The bench speaks only languages this deployment has a row and a sample for.
+  // Free text would be a way to spend money on an arbitrary sentence, and the
+  // sentence is the one thing here that is not the operator's to choose.
+  const row = SPOKEN_LANGUAGES.find((l) => l.name.toLowerCase() === asked.toLowerCase());
+  if (row === undefined) {
+    return { ok: false, status: 400, message: `${asked} is not one of the languages this deployment speaks.` };
+  }
+  const text = LANGUAGE_SAMPLES[row.name];
+
+  if (!deps.config.agent.voice) {
+    return { ok: false, status: 409, message: 'Voice notes are switched off, so there is nothing to test. Turn them on above.' };
+  }
+  if ((process.env['MINIMAX_API_KEY'] ?? '').length === 0) {
+    return { ok: false, status: 409, message: 'No speech key is configured, so nothing can be spoken.' };
+  }
+
+  previews = previews.filter((t) => now - t < PREVIEW_WINDOW_MS);
+  if (previews.length >= PREVIEW_PER_MINUTE) {
+    const waitS = Math.max(1, Math.ceil((PREVIEW_WINDOW_MS - (now - (previews[0] as number))) / 1000));
+    return {
+      ok: false,
+      status: 429,
+      message: `That is ${PREVIEW_PER_MINUTE} previews in a minute, which is as fast as this will go — each one is billed. Try again in ${waitS}s.`,
+    };
+  }
+  if (!claim('voicePreview', deps.config.limits.voicePerDay, now)) {
+    return {
+      ok: false,
+      status: 429,
+      message: `Today's preview allowance of ${deps.config.limits.voicePerDay} is spent. It resets at midnight UTC.`,
+    };
+  }
+  previews.push(now);
+
+  const chosen = resolveVoice(deps.config, row.name);
+  log('panel.voicePreview', { language: row.name, boost: chosen.boost, voice: chosen.voiceId || '(deployment default)' });
+  const audio = await synthesise(text, chosen.voiceId, chosen.boost);
+  if (!audio.ok) {
+    // The provider's own complaint, verbatim. "Voice id not exist" is the
+    // sentence that tells an operator their paste was wrong, and replacing it
+    // with "the preview failed" throws away the only useful part.
+    return { ok: false, status: 502, message: audio.error };
+  }
+  return {
+    ok: true,
+    audio: audio.data,
+    language: row.name,
+    boost: chosen.boost,
+    voiceId: chosen.voiceId,
+    usingFallback: chosen.usingFallback,
+    text,
   };
 }
 
@@ -1092,7 +1236,7 @@ const SettingsPatch = z
       search: z.boolean().optional(),
       images: z.boolean().optional(),
       voice: z.boolean().optional(),
-      voiceId: z.string().max(128).regex(/^[A-Za-z0-9_-]*$/, 'letters, digits, dashes and underscores only').optional(),
+      voiceId: z.string().max(128).regex(VOICE_ID, VOICE_ID_MESSAGE).optional(),
       /**
        * A voice per spoken language. Keys are checked against the list rather
        * than accepted freely: an unknown key would be a setting nothing reads,
@@ -1106,7 +1250,7 @@ const SettingsPatch = z
        */
       voices: z.record(
         z.enum(SPOKEN_LANGUAGES.map((l: { name: string }) => l.name) as [string, ...string[]]),
-        z.string().max(128).regex(/^[A-Za-z0-9_-]*$/, 'letters, digits, dashes and underscores only'),
+        z.string().max(128).regex(VOICE_ID, VOICE_ID_MESSAGE),
       ).optional(),
       /**
        * Imported, not restated — and note it could not be restated as a regex

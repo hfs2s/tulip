@@ -52,7 +52,7 @@ import {
   writePageImage,
 } from './pages.js';
 import { addContact } from './contacts.js';
-import { spokenLanguageFor } from '@tulip/shared';
+import { resolveVoice } from './voice.js';
 import { remember } from './memory.js';
 import { recentMessages } from './history.js';
 import type { Limiter } from './ratelimit.js';
@@ -1079,16 +1079,13 @@ export class Outbox extends EventEmitter {
         // things and only one of them is the agent's business: which boost the
         // request carries, and which voice reads it. The second is an
         // operator's choice and the agent should not be able to name a voice.
-        const spoken = spokenLanguageFor(action.language || this.deps.config.agent.languageBoost);
-        const boost = spoken?.boost ?? (action.language || this.deps.config.agent.languageBoost);
-        const perLanguage = spoken === null
-          ? ''
-          : (this.deps.config.agent.voices[spoken.name] ?? '').trim();
-        const audio = await synthesise(
-          action.text,
-          perLanguage || this.deps.config.agent.voiceId,
-          boost,
-        );
+        //
+        // Resolved by `voice.ts` rather than here, so the panel's test bench
+        // and this line cannot disagree about which mouth a language gets. A
+        // bench that plays a different voice from the one an actual note uses
+        // is worse than no bench.
+        const chosen = resolveVoice(this.deps.config, action.language);
+        const audio = await synthesise(action.text, chosen.voiceId, chosen.boost);
         if (!audio.ok) {
           // Never drop the message: say it in text rather than stay silent.
           log('outbox.voiceFallback', { reason: audio.error });

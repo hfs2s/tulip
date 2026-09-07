@@ -711,6 +711,31 @@
   .vname b{display:block;font-weight:500;font-size:13px;color:var(--ink)}
   .vname small{display:block;font-size:11px;color:var(--faint);margin-top:1px}
   .vrow input{width:100%;font-size:12.5px}
+
+  /* The field and its audition control, which belong together: paste an id,
+     press play, hear the change. The button is fixed-width so eighteen rows of
+     them make a column rather than a ragged edge, and it holds its width
+     through "Generating…" — a button that grows as it works pushes the field
+     it sits beside, which reads as the page breaking. */
+  .vset{display:flex;align-items:center;gap:8px;min-width:0}
+  .vset input{flex:1;min-width:0}
+  .vplay{flex:none;width:112px;text-align:center;font-size:11.5px;padding:6px 8px;
+         border:1px solid var(--line);border-radius:0;background:transparent;
+         color:var(--dim);cursor:pointer;font-family:inherit;
+         transition:color .15s ease,border-color .15s ease,background .15s ease}
+  .vplay:hover:not(:disabled){color:var(--ink);border-color:var(--accent)}
+  .vplay:disabled{opacity:.55;cursor:default}
+  .vplay.on{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+
+  /* What the row is doing, and why it stopped. It spans both columns so the
+     provider's own refusal — "voice id not exist" is the whole answer an
+     operator came for — has room to be a sentence rather than a truncation.
+     Empty by default and empty is invisible: no reserved gap, no placeholder. */
+  .vsay{grid-column:1/-1;margin:2px 0 0;font-size:11px;line-height:1.55;
+        color:var(--faint);max-width:64ch}
+  .vsay:empty{display:none}
+  .vsay.bad{color:var(--bad)}
+
   @media (max-width:560px){
     .vrow{grid-template-columns:minmax(0,1fr);gap:5px}
   }
