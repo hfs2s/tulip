@@ -348,3 +348,42 @@ describe('taking a page down', () => {
     expect(isUnpublished('../../etc')).toBe(false);
   });
 });
+
+/**
+ * Slugs that name something on Object.prototype.
+ *
+ * `SLUG` matches `constructor`, and a plain object answers `map['constructor']`
+ * with a function rather than undefined. Found by a review of the password
+ * feature; the grants case turned out to be the worse of the two, because it
+ * does not fail closed — it throws out of the outbox handler.
+ */
+describe('a slug that collides with Object.prototype', () => {
+  const hostile = ['constructor', 'valueof', 'tostring'];
+
+  it('does not throw out of the authorisation check', () => {
+    const c = parseConfig({ operators: { numbers: ['15551234567'] }, pages: { open: true, grants: {} } });
+    for (const slug of hostile) {
+      expect(() => mayChange(c, slug, 'abcdef0123456789', null), slug).not.toThrow();
+    }
+  });
+
+  it('treats an unclaimed prototype-shaped slug as unclaimed, not as granted', () => {
+    const closed = parseConfig({ operators: { numbers: ['15551234567'] }, pages: { open: false, grants: {} } });
+    for (const slug of hostile) {
+      expect(mayChange(closed, slug, 'abcdef0123456789', null), slug).toBe(false);
+    }
+    const open = parseConfig({ operators: { numbers: ['15551234567'] }, pages: { open: true, grants: {} } });
+    for (const slug of hostile) {
+      expect(mayChange(open, slug, 'abcdef0123456789', null), slug).toBe(true);
+    }
+  });
+
+  it('leaves such a page unprotected rather than permanently unopenable', () => {
+    // Before the fix this was "protected" by a password that could not exist,
+    // so no request could ever open it.
+    for (const slug of hostile) {
+      const stored = Object.hasOwn({}, slug) ? ({} as Record<string, never>)[slug] : undefined;
+      expect(pageAuthorised(stored, undefined), slug).toBe(true);
+    }
+  });
+});

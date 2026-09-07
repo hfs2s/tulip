@@ -117,6 +117,24 @@ export function listPages(): PageSummary[] {
 
 
 /**
+ * Look a slug up in a config map without asking the prototype.
+ *
+ * A slug is attacker-adjacent — the agent chooses it, on behalf of whoever it
+ * is talking to — and `SLUG` happily matches `constructor`, `tostring` is not a
+ * problem but `constructor` is: a plain object answers `map['constructor']`
+ * with a function from `Object.prototype` rather than `undefined`.
+ *
+ * That is not theoretical in either place it is used. In `mayChange` the value
+ * is then called as `granted.includes(...)`, which throws a TypeError out of
+ * the outbox handler; in `pageAuthorised` a page named that way is treated as
+ * password-protected and no password can ever open it. One fails loudly and
+ * wrongly, the other fails quietly and permanently.
+ */
+function own<T>(map: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(map, key) ? map[key] : undefined;
+}
+
+/**
  * May this chat change this page?
  *
  * The whole of the authorisation decision, in one place, so the three verbs that
@@ -137,7 +155,7 @@ export function mayChange(
   chatKey: string,
   chat: { readonly jid: string; readonly altJid: string | null; readonly isGroup: boolean } | null,
 ): boolean {
-  const granted = config.pages.grants[slug];
+  const granted = own(config.pages.grants, slug);
   // An absent grant and an empty one are different answers: nobody has claimed
   // this page, versus somebody claimed it for no one.
   if (granted === undefined) return config.pages.open;
@@ -566,7 +584,7 @@ export function servePage(
   }
 
   // Before a single byte of the page is read from disk.
-  if (SLUG.test(slug) && !pageAuthorised(passwords[slug], req?.headers?.authorization)) {
+  if (SLUG.test(slug) && !pageAuthorised(own(passwords, slug), req?.headers?.authorization)) {
     res.writeHead(401, {
       ...common,
       // The realm is the slug, so a browser holding several pages' passwords

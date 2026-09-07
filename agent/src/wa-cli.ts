@@ -479,7 +479,7 @@ switch (command) {
   case 'page-password': {
     const slug = (rest[0] ?? '').trim();
     if (slug.length === 0) {
-      die('tulip-wa page-password: `tulip-wa page-password <name> <password>` — or no password to remove it');
+      die('tulip-wa page-password: `tulip-wa page-password <name> [password]` — give no password to remove one');
     }
     // Everything after the slug, so a password with spaces in it works. Joined
     // rather than taking rest[1] alone, which would silently protect a page

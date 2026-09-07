@@ -787,7 +787,7 @@ export function pagesList(deps: ApiDeps): Json {
       unpublished: isUnpublished(p.slug),
       // Whether, never what. The hash is not sent to the browser either — there
       // is nothing a panel could do with it but leak it.
-      hasPassword: deps.config.pages.passwords[p.slug] !== undefined,
+      hasPassword: Object.hasOwn(deps.config.pages.passwords, p.slug),
     })),
     // The chats a grant can name. Sent with the listing rather than fetched
     // separately so the picker never has to make an operator type a chat key —
