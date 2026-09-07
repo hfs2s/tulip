@@ -114,6 +114,24 @@ export class WhatsApp extends EventEmitter {
   }
 
   /**
+   * The live Baileys socket, or null while reconnecting.
+   *
+   * Exposed because parsing an inbound message genuinely needs it — group
+   * metadata and media download are socket calls — and the alternative in place
+   * until now was the dispatcher passing *this wrapper* with `as never`. That
+   * cast silenced the only check that would have caught it, and three things
+   * failed quietly for as long as it stood: `socket.user` was undefined so no
+   * @-mention or reply ever matched, and `socket.groupMetadata` did not exist so
+   * every group name resolved to null.
+   *
+   * Nullable on purpose. A caller must decide what to do without a socket
+   * rather than be handed something shaped like one that answers nothing.
+   */
+  get live(): WASocket | null {
+    return this.socket ?? null;
+  }
+
+  /**
    * Tear the current socket down before opening another.
    *
    * Leaving the old one alive means two clients on the same credentials, which
