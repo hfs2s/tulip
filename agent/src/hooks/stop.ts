@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { OutboxAction, outPaths, writeJsonAtomic } from '@tulip/shared';
+import { automaticFallbackTurn } from '../fallback.js';
 
 interface HookInput {
   last_assistant_message?: string;
@@ -75,13 +76,12 @@ function lastAssistantText(transcript: string | undefined): string {
 function relay(input: HookInput): void {
   if (existsSync(join(markers, 'spoke'))) return; // this turn already said something
 
-  let turnId: string;
-  try {
-    turnId = readFileSync(join(chatDir, '.markers', 'answering'), 'utf8').trim();
-  } catch {
-    return; // nothing routed here yet
-  }
-  if (turnId.length === 0) return;
+  // Direct messages need a safety net; groups do not. In a group, silence is a
+  // normal outcome and blindly relaying terminal prose can publish diagnostics
+  // or context from the shared session. The matching marker pair also refuses
+  // a hook whose conversation changed underneath it.
+  const turnId = automaticFallbackTurn(markers);
+  if (turnId === null) return;
 
   // Prefer the payload: the transcript file is flushed asynchronously and often
   // does not yet hold this turn's final block when the hook fires.

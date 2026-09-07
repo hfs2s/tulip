@@ -22,7 +22,7 @@
  * strangers can message it is not: "do not repeat one chat to another" is an
  * instruction, and instructions are what a prompt injection overrides.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inPaths, writeFileAtomic } from '@tulip/shared';
 
@@ -296,8 +296,12 @@ function localTime(): string {
  * whichever turn happened to be current when it got around to sending, and that
  * reply would be delivered to a different person.
  */
-export function setTurn(workspace: ChatWorkspace, turnId: string): void {
+export function setTurn(workspace: ChatWorkspace, turnId: string, allowAutomaticFallback: boolean): void {
   writeFileAtomic(workspace.turnFile, turnId, 0o644);
+  const fallback = join(workspace.dir, '.markers', 'fallback');
+  mkdirSync(join(workspace.dir, '.markers'), { recursive: true });
+  if (allowAutomaticFallback) writeFileAtomic(fallback, turnId, 0o644);
+  else rmSync(fallback, { force: true });
 }
 
 /**
@@ -311,6 +315,7 @@ export function setTurn(workspace: ChatWorkspace, turnId: string): void {
  */
 export function clearTurn(workspace: ChatWorkspace): void {
   writeFileAtomic(workspace.turnFile, '', 0o644);
+  rmSync(join(workspace.dir, '.markers', 'fallback'), { force: true });
 }
 
 export function readTurn(workspace: ChatWorkspace): string | null {

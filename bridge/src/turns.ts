@@ -78,11 +78,19 @@ export type Resolution =
 export type Cost = 'send' | 'tool' | 'free';
 
 /**
+ * A Stop hook writes its action before Claude reports the turn idle, but the
+ * bridge may observe those two writes in the opposite order. Keep a very small
+ * grace window for that filesystem race. A closed turn is not otherwise a
+ * capability: accepting it for the full turn TTL allowed a late hook from a
+ * misclassified turn to speak into a conversation that had already moved on.
+ */
+export const CLOSED_TURN_GRACE_MS = 2000;
+
+/**
  * Bounded, expiring store of open turns.
  *
- * A turn stays resolvable for a grace period after it closes: the agent's final
- * message is often queued microseconds after the Stop hook fires, and refusing
- * it would drop the actual reply.
+ * A turn stays resolvable only for the short filesystem grace period above
+ * after it closes. The ordinary TTL still bounds turns that remain open.
  */
 export class TurnRegistry {
   private readonly turns = new Map<string, Turn>();
@@ -163,6 +171,9 @@ export class TurnRegistry {
     const turn = this.turns.get(turnId);
     if (!turn) return { ok: false, reason: 'unknown' };
     if (now - turn.openedAt > this.ttlMs) return { ok: false, reason: 'expired' };
+    if (turn.closedAt !== null && now - turn.closedAt > CLOSED_TURN_GRACE_MS) {
+      return { ok: false, reason: 'expired' };
+    }
     // Which budget applies is a property of the action, so the caller says.
     // `free` is for actions that deliver nothing and cost nothing — the typing
     // indicator — which must stay resolvable after either budget is spent, or

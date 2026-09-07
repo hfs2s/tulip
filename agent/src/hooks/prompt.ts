@@ -65,7 +65,6 @@ function catchUp(): void {
 
 try {
   mkdirSync(markers, { recursive: true });
-  writeFileSync(join(markers, 'busy'), String(Date.now()));
   rmSync(join(markers, 'spoke'), { force: true });
 
   // Bind the turn NOW, at the start, and let the Stop hook relay against this
@@ -79,11 +78,19 @@ try {
   // which the bridge resolves back to the conversation it actually belongs to.
   try {
     const turnId = readFileSync(join(process.env['TULIP_CHAT_DIR'] ?? '', '.turn'), 'utf8').trim();
-    if (turnId.length > 0) writeFileSync(join(markers, 'answering'), turnId);
-    else rmSync(join(markers, 'answering'), { force: true });
+    if (turnId.length > 0) {
+      // `answering` is the commit marker: write `busy` first so the supervisor
+      // cannot observe a submitted turn without also seeing it as live.
+      writeFileSync(join(markers, 'busy'), turnId);
+      writeFileSync(join(markers, 'answering'), turnId);
+    } else {
+      rmSync(join(markers, 'busy'), { force: true });
+      rmSync(join(markers, 'answering'), { force: true });
+    }
   } catch {
     // No turn routed here — an operator typing in the pane. The Stop hook then
     // finds nothing to relay against and stays quiet, which is correct.
+    rmSync(join(markers, 'busy'), { force: true });
     rmSync(join(markers, 'answering'), { force: true });
   }
 } catch {
