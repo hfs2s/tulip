@@ -600,8 +600,17 @@ export function startPanel(deps: ApiDeps): Server | null {
           return send(res, headers, result.ok ? 200 : 400, result);
         }
         if (url.pathname === '/api/media/list') {
-          const items = mediaList(deps, num('n', 120, 500)) as Array<{ chatKey?: string | null }>;
-          return send(res, headers, 200, strip(items, (m) => m.chatKey ?? null));
+          // `{ total, items }`, not a bare array — this filtered the wrapper as
+          // if it were the list and threw on every request, which is a dead
+          // Media page rather than a leak. Filter inside it, and recount:
+          // leaving `total` alone would tell a moderator how many attachments
+          // exist in conversations they are not shown.
+          const listed = mediaList(deps, num('n', 120, 500)) as {
+            total: number;
+            items: Array<{ chatKey?: string | null }>;
+          };
+          const items = strip(listed.items, (m) => m.chatKey ?? null);
+          return send(res, headers, 200, { total: unrestricted ? listed.total : items.length, items });
         }
         if (url.pathname === '/api/media') {
           mediaFile(
