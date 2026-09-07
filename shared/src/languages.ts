@@ -149,20 +149,6 @@ export const SPOKEN_LANGUAGES = [
   // which is how the three honest gaps below were found instead of guessed at.
   { name: 'Dutch', boost: 'Dutch' },
   { name: 'German', boost: 'German' },
-  /**
-   * Swedish is a row with no mouth.
-   *
-   * The provider has a Swedish `language_boost` and not one Swedish voice. The
-   * row is kept rather than withdrawn because the boost is real — it is what
-   * stops Swedish being read with an English mouth in *written* contexts — and
-   * because a language an operator can see and understand the limits of is
-   * better than one that has silently vanished.
-   *
-   * It is also in `UNSPOKEN_BOOSTS`, so nothing speaks it aloud in a fallback
-   * voice. Those two facts are the whole of the design: visible here, never
-   * spoken there, unless an operator pastes in a voice id of their own.
-   */
-  { name: 'Swedish', boost: 'Swedish' },
   { name: 'Arabic', boost: 'Arabic' },
   // Named for what the agent says, boosted with what the provider calls it.
   // `Chinese` is Mandarin here; Cantonese is `Chinese,Yue` and has no row.
@@ -199,7 +185,6 @@ export const LANGUAGE_SAMPLES: Readonly<Record<SpokenLanguage, string>> = {
   Indonesian: 'Halo, saya Juan. Saya asisten yang membantu, dan beginilah suara saya saat berbicara bahasa Anda.',
   Dutch: 'Hallo, ik ben Juan. Ik ben een behulpzame assistent, en zo klink ik als ik jouw taal spreek.',
   German: 'Hallo, ich bin Juan. Ich bin ein hilfsbereiter Assistent, und so klinge ich, wenn ich deine Sprache spreche.',
-  Swedish: 'Hej, jag heter Juan. Jag är en hjälpsam assistent, och så här låter jag när jag talar ditt språk.',
   Arabic: 'مرحبًا، أنا خوان. أنا مساعد مفيد، وهكذا أبدو عندما أتحدث لغتك.',
   Mandarin: '你好，我是胡安。我是一个乐于助人的助手，这就是我说你的语言时的声音。',
   Russian: 'Здравствуйте, меня зовут Хуан. Я полезный помощник, и вот как я звучу, когда говорю на вашем языке.',
@@ -275,10 +260,6 @@ export function isUnspoken(boost: string): boolean {
 export const LANGUAGE_LIMITS: Readonly<
   Partial<Record<SpokenLanguage, { readonly voiceless: boolean; readonly note: string }>>
 > = {
-  Swedish: {
-    voiceless: true,
-    note: 'The provider has no Swedish voice at all. Swedish is never spoken aloud — a request for it arrives as an ordinary text message instead. Paste a voice id here only if you have one you have actually heard.',
-  },
 };
 
 /**

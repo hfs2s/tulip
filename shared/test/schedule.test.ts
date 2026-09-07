@@ -416,7 +416,7 @@ describe('splitting <when> from <text>', () => {
 describe('a scheduled message cannot name another chat', () => {
   const base = {
     id: '11111111-2222-4333-8444-555555555555',
-    turnId: '11111111-2222-4333-8444-555555555556',
+    turnId: '11111111-2222-4333-8444-666666666666',
     kind: 'schedule' as const,
     spec: { kind: 'once' as const, at: '2026-09-26T07:00:00.000Z' },
     text: 'the meetup is on Monday',

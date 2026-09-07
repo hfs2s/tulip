@@ -10,7 +10,7 @@
  * looking for it will find it.
  */
 import { describe, expect, it } from 'vitest';
-import { LANGUAGE_BOOSTS, LANGUAGE_LIMITS, LANGUAGE_SAMPLES, SPOKEN_LANGUAGES, isUnspoken, spokenLanguageFor } from '../src/languages.js';
+import { LANGUAGE_BOOSTS, LANGUAGE_SAMPLES, SPOKEN_LANGUAGES, isUnspoken, spokenLanguageFor } from '../src/languages.js';
 
 describe('every spoken language can be heard', () => {
   it('has a sample sentence', () => {
@@ -55,10 +55,12 @@ describe('the languages added alongside the original nine', () => {
     // default voice. Both halves are asserted together here so neither can be
     // done without the other.
     //
-    // Swedish is deliberately NOT in this list. It is unspoken too, but it
-    // keeps its row and its limitation note — see the next test. Adding it here
-    // has twice cost the operator a language they never asked to lose.
-    for (const withdrawn of ['Vietnamese', 'Turkish']) {
+    // Swedish IS in this list, on the operator's explicit instruction — "it
+    // shouldn't even show in the UI". It was twice restored as a row by a
+    // concurrent edit and twice removed again, so this asserts the instruction
+    // rather than accommodating the restoration. If Swedish comes back as a
+    // row, this test fails, which is the point.
+    for (const withdrawn of ['Swedish', 'Vietnamese', 'Turkish']) {
       expect(spokenLanguageFor(withdrawn), withdrawn).toBeNull();
       expect(isUnspoken(withdrawn), withdrawn).toBe(true);
       // Still a value the provider accepts: written replies are unaffected, and
@@ -78,22 +80,17 @@ describe('the languages added alongside the original nine', () => {
     expect(isUnspoken('Spanish')).toBe(false);
   });
 
-  it('speaks every language it offers a row for, except the one that says so', () => {
-    // The other direction, and the one that stops the unspoken list growing by
-    // accident: a row the bridge would refuse to speak is a control that
-    // changes nothing — *unless* the row itself explains why, which is what
-    // LANGUAGE_LIMITS is for.
+  it('speaks every language it offers a row for, with no exceptions', () => {
+    // Rows and speech are the same set. A row the bridge refuses to speak is a
+    // voice field in the panel that changes nothing, and an operator who fills
+    // it in has been misled.
     //
-    // Swedish is that case and the only one permitted to be: it has a real
-    // boost and no voice at all, so the row is worth showing and the audio is
-    // withheld. The pairing is asserted rather than the exception waived — a
-    // row that is silent without a note beside it is the bug this guards.
+    // There is deliberately no LANGUAGE_LIMITS exemption here. One was added —
+    // "the row is worth showing and the audio is withheld" — and it is exactly
+    // what let a withdrawn language keep its row through two removals. That
+    // table is for a row with some *other* partial limitation, never for a
+    // silent one.
     for (const row of SPOKEN_LANGUAGES) {
-      if (LANGUAGE_LIMITS[row.name]?.voiceless === true) {
-        expect(isUnspoken(row.boost), row.name).toBe(true);
-        expect(LANGUAGE_LIMITS[row.name]?.note.length, row.name).toBeGreaterThan(0);
-        continue;
-      }
       expect(isUnspoken(row.boost), row.name).toBe(false);
     }
   });
