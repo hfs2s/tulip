@@ -2399,6 +2399,12 @@ function prunePending(view) {
 function paintChatLive() {
   paintConvoList();
   if (!composerKey()) return;
+  // Nothing has loaded yet — the first transcript is still in flight, or this
+  // tab was hidden when the conversation was opened and `refreshThread`
+  // declined to read. `paintHead(null)` throws on `view.chat`, once per poll,
+  // and the thread stays on "Reading the session…" with an exception behind it
+  // rather than anything an operator could act on.
+  if (!chatView) return;
   paintHead(chatView);
   var sig = signature(chatView);
   if (sig === chatSig) return;
@@ -4393,6 +4399,27 @@ async function refresh() {
   // every five seconds would restart the one and lose the other.
   else if (route === 'terminal') paintSessionLive();
 }
+
+/**
+ * Catch up when the tab comes back.
+ *
+ * `refreshThread` declines to read while `document.hidden` — a background tab is
+ * not a reader, and a tab left open for a week should not keep the bridge
+ * tailing a file. What was missing is the other half: nothing noticed when the
+ * tab became visible again.
+ *
+ * That matters more than the poll interval suggests, because browsers freeze
+ * timers in hidden tabs. Open a conversation in a background tab — a
+ * middle-click, or a link opened while looking at something else — and the one
+ * fetch is skipped, the poll that would retry it is frozen, and switching to
+ * the tab shows "Reading the session…" over a conversation that loaded fine
+ * everywhere else. Nothing recovers it but a reload.
+ */
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden) return;
+  void refresh();
+  if (route === 'chat' && chatOpen) { void refreshThread(); startChatPoll(); }
+});
 
 // ── Shader backdrop ─────────────────────────────────────────────────────────
 // Optional by design: the bundle is vendored at image build time and is simply
