@@ -690,7 +690,19 @@ export function startPanel(deps: ApiDeps): Server | null {
           return send(res, headers, result.ok ? 200 : 400, result);
         }
         if (url.pathname === '/api/settings' && req.method === 'POST') {
-          const result = updateSettings(deps, await readBody(req));
+          const body = await readBody(req);
+          // The privacy section is the operator's own, and everything else here
+          // would be pointless without this: another moderator — or anyone with
+          // the token — could otherwise POST `privacy.owner: null` through
+          // Settings and read what it was hiding a second later. The narrow
+          // routes above are already gated; this is the broad one that would
+          // have let them round it.
+          const touchesPrivacy =
+            typeof body === 'object' && body !== null && 'privacy' in (body as Record<string, unknown>);
+          if (touchesPrivacy && !unrestricted) {
+            return send(res, headers, 403, { ok: false, message: 'Not yours to change.' });
+          }
+          const result = updateSettings(deps, body);
           return send(res, headers, result.ok ? 200 : 400, result);
         }
 

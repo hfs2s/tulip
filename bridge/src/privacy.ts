@@ -9,11 +9,19 @@
  * Three things about this are worth stating plainly, because each is a limit
  * rather than a detail:
  *
- * **It can only work under Access.** The bearer token is a secret, not an
- * identity: everyone holding it is the same anonymous caller, and there is
- * nothing to filter on. Anyone given the token bypasses this entirely, which is
- * a deliberate trade — the token is the operator's own way in over an SSH
- * tunnel and the way back in when Access is down.
+ * **It can only work under Access, and the token is not a way in.** The bearer
+ * token is a secret, not an identity: everyone holding it is the same anonymous
+ * caller. It was briefly treated as the owner, so that the operator's SSH
+ * tunnel kept working — but that made the token a bypass, and a secret that
+ * three other people may hold is not a credential to hang this on. A private
+ * chat is now shown to one verified address and to nothing else.
+ *
+ * The cost is real and is the operator's to accept: reaching the panel with
+ * `?t=<token>` shows the *unprivileged* view, so the private chats are hidden
+ * from the operator too, and so is the terminal. Recovery when Access is
+ * unavailable is editing `privacy.owner` to null in `config/config.json` on the
+ * host — deliberately a thing you do at the machine, because anything reachable
+ * from the panel with the token would be the same bypass again.
  *
  * **It is a display rule, not containment.** Every message is still on the same
  * disk, in the same files, readable by anyone with a shell on the host. This
@@ -46,14 +54,22 @@ const normalise = (email: string): string => email.trim().toLowerCase();
  * True when the feature is off, when the caller holds the token, and for the
  * owner. Everyone else is a moderator with a narrower view.
  *
- * Note the direction of the default: an unconfigured deployment, an unreadable
- * config, or an owner nobody matches all resolve to "show everything", exactly
- * as the panel behaved before this existed. A privacy rule that fails *closed*
- * would lock an operator out of their own panel on a typo.
+ * The direction of the default still matters: an unconfigured deployment — no
+ * owner, or a blank one — resolves to "show everything", exactly as the panel
+ * behaved before this existed, so switching the feature on is the only thing
+ * that can hide anything.
+ *
+ * Once an owner *is* set, though, this fails closed: an address that does not
+ * match, and the token, both get the narrow view. That is the point of setting
+ * it, and it is why the recovery path is at the machine rather than in the
+ * panel.
  */
 export function isOwner(privacy: Privacy, viewer: Viewer): boolean {
   if (privacy.owner === null || privacy.owner.trim().length === 0) return true;
-  if (viewer.who === null) return true;
+  // No identity, so not the owner. The token says its holder knows a secret;
+  // it cannot say which person that is, and this whole feature is about which
+  // person it is.
+  if (viewer.who === null) return false;
   return normalise(viewer.who) === normalise(privacy.owner);
 }
 
