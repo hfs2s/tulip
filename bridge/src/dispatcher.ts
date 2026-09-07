@@ -189,7 +189,15 @@ export class Dispatcher extends EventEmitter {
     // yet: parsing needs the chat key in order to file attachments under it.
     const chatKey = chats.keyFor(chatJid.split(':')[0] ?? chatJid, isGroupChat, now, senderPnOf(message));
 
-    const envelope = await toEnvelope(message, wa as never, {
+    // The live socket, not the wrapper. Passing the wrapper — which was done
+    // with `as never` — left `socket.user` undefined and `socket.groupMetadata`
+    // absent, so mentions never matched and group names were always null.
+    const socket = wa.live;
+    if (socket === null) {
+      log('dispatch.noSocket', { chatKey, note: 'reconnecting; this message is recorded and will be handled on the next pass' });
+      return;
+    }
+    const envelope = await toEnvelope(message, socket, {
       chatKey,
       mediaRoot: inPaths.media,
       maxMediaBytes: config.limits.maxMediaBytes,

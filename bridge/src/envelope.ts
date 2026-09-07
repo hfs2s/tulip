@@ -239,6 +239,25 @@ export function senderPnOf(message: WAMessage): string | null {
  * Parse one Baileys message. Never throws: a message that cannot be understood
  * still produces an envelope, so it is recorded rather than lost.
  */
+/**
+ * Our own identifiers, from whatever we were handed.
+ *
+ * The parameter is typed `WASocket` and the dispatcher passes the wrapper class
+ * with `as never`, which silenced the one check that would have caught it: the
+ * wrapper exposes `me`, not `user`, so `socket.user` was undefined, `selfIds`
+ * was empty, and **nothing ever matched**. Every @-mention and every reply to us
+ * has been invisible for as long as that cast has been there — `mentionsMe` was
+ * false for all of them, which is why trigger words worked and mentions did not.
+ *
+ * Read from both shapes rather than trusting either. The cast is gone from the
+ * call site, so the types now say what is actually passed; this stays because
+ * one of the two is the live socket and the other is the wrapper around it, and
+ * a future caller will reasonably hand over whichever it holds.
+ */
+function selfIdentities(socket: WASocket): string[] {
+  return identities(socket.user?.id, socket.user?.lid);
+}
+
 export async function toEnvelope(
   message: WAMessage,
   socket: WASocket,
@@ -263,7 +282,7 @@ export async function toEnvelope(
   const raw = extractText(content).trim();
   const text = raw.length > ctx.maxInboundChars ? `${raw.slice(0, ctx.maxInboundChars)}\n[truncated]` : raw;
 
-  const selfIds = identities(socket.user?.id, socket.user?.lid);
+  const selfIds = selfIdentities(socket);
   let mentionsMe = false;
   let quoted: Envelope['quoted'] = null;
 
@@ -295,6 +314,11 @@ export async function toEnvelope(
     // that is invisible from outside and impossible to reason about from a
     // transcript. Identifiers are masked: enough to compare, not enough to be a
     // record of who was in the room.
+    if (selfIds.length === 0) {
+      log('mention.noIdentity', {
+        note: 'we do not know our own jid, so no mention or reply can ever match — this is a bug, not a quiet room',
+      });
+    }
     if (!mentionsMe && group) {
       const mask = (v: string): string => (v.length > 10 ? `${v.slice(0, 4)}…${v.slice(-8)}` : v);
       log('mention.missed', {

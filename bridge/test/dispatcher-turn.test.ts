@@ -59,7 +59,19 @@ function build(overrides: Record<string, unknown> = {}) {
   });
   const chats = new ChatRegistry(join(dir, 'salt'), join(dir, 'chats.json'));
   const dispatcher = new Dispatcher({
-    wa: { sendText: async () => {}, typing: async () => {}, readReceipt: async () => {} } as never,
+    wa: {
+      sendText: async () => {},
+      typing: async () => {},
+      readReceipt: async () => {},
+      // `live` is what the dispatcher hands to `toEnvelope`. It used to pass the
+      // wrapper itself with `as never`, so `user` was undefined and no mention
+      // could ever match; the stub now carries the identity a real socket does,
+      // which is what lets a mention test mean anything.
+      live: {
+        user: { id: '15551234567@s.whatsapp.net', lid: '111111111111111:1@lid' },
+        groupMetadata: async () => ({ subject: null }),
+      },
+    } as never,
     chats,
     limiter: new Limiter(
       { messagesPerHour: 1000, burst: 100, turnsPerDay: 1000, newSendersPerHour: 1000, outboundPerChatPerHour: 1000 },
