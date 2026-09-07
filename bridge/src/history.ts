@@ -41,3 +41,31 @@ export function recentMessages(chatKey: string, limit: number): RecalledMessage[
       text: (e.text ?? '').trim(),
     }));
 }
+
+/**
+ * The last thing a person actually said in this chat, as the bridge recorded it.
+ *
+ * Used to stamp a reminder with the request that caused it, and it reads the
+ * bridge's own feed rather than taking the agent's word for it — deliberately.
+ * The point of showing the original message is to prove a human asked; evidence
+ * supplied by the party being checked proves nothing. A compromised agent can
+ * ask for a reminder, but it cannot invent the sentence that appears beneath it
+ * or the name attached to that sentence.
+ *
+ * Outbound is excluded: the agent's own reply is not a request. Null when the
+ * chat has nothing inbound in the scanned window, and the card then says only
+ * what it can stand behind.
+ */
+export function lastInbound(chatKey: string): RecalledMessage | null {
+  const said = feed
+    .recent(SCAN)
+    .filter((e) => e.chatKey === chatKey && e.kind === 'in' && e.accepted === true)
+    .filter((e) => typeof e.text === 'string' && e.text.trim().length > 0);
+  const latest = said[said.length - 1];
+  if (latest === undefined) return null;
+  return {
+    from: latest.from ?? 'someone',
+    at: new Date(latest.ts).toISOString(),
+    text: (latest.text ?? '').trim(),
+  };
+}

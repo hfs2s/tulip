@@ -1195,6 +1195,17 @@
   .schedwhen{color:var(--dim)!important}
   .schedwhen b{color:var(--ink);font-weight:500}
   .schednote{color:var(--warn)!important;line-height:1.5}
+  /* Somebody else's words. The left rule is the whole device — no italics, no
+     quote marks, no tinted panel — because the card is already dense and one
+     hairline says "quotation" as clearly as three treatments would.
+     Clamped to four lines; clicking opens it. See sourceQuote(). */
+  .schedquote{margin:2px 0 2px;padding:1px 0 1px 12px;border-left:2px solid var(--line);
+              color:var(--dim);font-size:13px;line-height:1.5;cursor:pointer;
+              overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;
+              -webkit-line-clamp:4;overflow-wrap:anywhere}
+  .schedquote.open{display:block;-webkit-line-clamp:none}
+  .schedquote:hover{border-left-color:var(--line)}
+
   .schedfrom{color:var(--faint)}
   .schedfrom b{color:var(--dim);font-weight:500}
   /* Inline in a sentence, so it inherits its size and colour and earns its

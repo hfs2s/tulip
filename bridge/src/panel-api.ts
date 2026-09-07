@@ -940,6 +940,10 @@ export function scheduleView(deps: ApiDeps): { items: Array<Record<string, unkno
     text: entry.text,
     createdBy: entry.createdBy,
     requestedBy: entry.requestedBy,
+    sourceText: entry.sourceText,
+    sourceAt: entry.sourceAt,
+    sourceAtLocal:
+      entry.sourceAt === null ? null : formatLocal(Date.parse(entry.sourceAt), entry.timezone),
     createdAt: entry.createdAt,
     timezone: entry.timezone,
     nextAt: entry.nextAt,
@@ -1016,6 +1020,9 @@ const ScheduleRequest = z
      * without this the page credits the operator for it.
      */
     requestedBy: z.string().min(1).max(80).nullable().optional(),
+    /** The request that caused it, verbatim. See `ScheduleEntry.sourceText`. */
+    sourceText: z.string().min(1).max(1000).nullable().optional(),
+    sourceAt: z.string().datetime().nullable().optional(),
   })
   .strict();
 
@@ -1049,6 +1056,8 @@ export function scheduleCreate(deps: ApiDeps, chatKey: string, body: unknown): {
     text,
     createdBy: 'operator',
     requestedBy: parsed.data.requestedBy ?? null,
+    sourceText: parsed.data.sourceText ?? null,
+    sourceAt: parsed.data.sourceAt ?? null,
   });
   if (!made.ok) return { ok: false, message: made.error };
   feed.event(

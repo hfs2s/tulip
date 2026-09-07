@@ -104,6 +104,20 @@ export const ScheduleEntry = z
      * did not record the person.
      */
     requestedBy: z.string().max(80).nullable().default(null),
+    /**
+     * The message that caused this, verbatim, and when it was sent.
+     *
+     * "Asked by Daniel S" is a claim; this is the evidence for it. Without the
+     * sentence itself an operator cannot tell a reminder somebody requested
+     * from one the agent decided to create, and telling those apart is the
+     * whole reason this page exists.
+     *
+     * Captured by the bridge from its own feed, never accepted from the agent —
+     * see `lastInbound`. Capped well below the inbound limit because this is a
+     * quotation on a card, not a transcript.
+     */
+    sourceText: z.string().max(1000).nullable().default(null),
+    sourceAt: z.string().datetime().nullable().default(null),
     createdAt: z.string().datetime(),
     /**
      * The zone this entry's times are *said* in.
@@ -226,6 +240,9 @@ export interface CreateInput {
   readonly createdBy: 'agent' | 'operator';
   /** Who asked for it, if a person did. See `ScheduleEntry.requestedBy`. */
   readonly requestedBy?: string | null;
+  /** The request itself, verbatim, and when it was sent. */
+  readonly sourceText?: string | null;
+  readonly sourceAt?: string | null;
 }
 
 export type Created = { ok: true; entry: ScheduleEntry } | { ok: false; error: string };
@@ -322,6 +339,8 @@ export function createSchedule(config: Config, input: CreateInput, now = Date.no
     // Trimmed and emptied to null: a blank name renders as a sentence with a
     // hole in it, which is worse than not claiming to know who asked.
     requestedBy: (input.requestedBy ?? '').trim() || null,
+    sourceText: ((input.sourceText ?? '').trim() || null)?.slice(0, 1000) ?? null,
+    sourceAt: input.sourceAt ?? null,
     createdAt: new Date(now).toISOString(),
     timezone,
     nextAt: next.toISOString(),

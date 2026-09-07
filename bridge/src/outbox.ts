@@ -64,7 +64,7 @@ import { addContact } from './contacts.js';
 import { resolveVoice, voiceless } from './voice.js';
 import { remember } from './memory.js';
 import { cancelSchedule, createSchedule, schedulesFor } from './schedule.js';
-import { recentMessages } from './history.js';
+import { lastInbound, recentMessages } from './history.js';
 import type { Limiter } from './ratelimit.js';
 import type { Cost, Turn, TurnRegistry } from './turns.js';
 import type { Config } from './config.js';
@@ -738,11 +738,18 @@ export class Outbox extends EventEmitter {
           });
           break;
         }
+        // Who asked, and what they actually said — read from the bridge's own
+        // feed rather than accepted from the action. The agent may ask for a
+        // reminder; it may not author the evidence that a person requested one.
+        const asked = lastInbound(turn.chatKey);
         const made = createSchedule(this.deps.config, {
           chatKey: turn.chatKey,
           spec: action.spec,
           text: action.text,
           createdBy: 'agent',
+          requestedBy: asked?.from ?? null,
+          sourceText: asked?.text ?? null,
+          sourceAt: asked?.at ?? null,
         });
         if (!made.ok) {
           log('schedule.refused', { chatKey: turn.chatKey, reason: made.error.slice(0, 80) });

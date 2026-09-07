@@ -5157,6 +5157,32 @@ function scheduleShape(entry) {
 }
 
 /**
+ * The request, in the words it was actually made in.
+ *
+ * "Asked by Daniel S" is a claim; this is the evidence for it. It is what lets
+ * an operator tell a reminder somebody requested from one the agent decided to
+ * create on its own — and the bridge captures it from its own feed, so a
+ * compromised agent cannot author the sentence that vouches for it.
+ *
+ * Set as a quotation rather than more body text: it is somebody else's voice,
+ * and the card already has a first-person message on it that will be sent. The
+ * rule is a structural cue, not decoration.
+ *
+ * Clamped, unlike the memory cards, which deliberately never clamp. The
+ * difference is what the card is *for*: there the note is the subject, here the
+ * subject is the reminder and this is its footnote. A thousand characters of
+ * request would bury the thing that actually fires. Full text on hover, and it
+ * opens on click for anyone who wants all of it.
+ */
+function sourceQuote(entry) {
+  if (!entry.sourceText) return null;
+  var q = node('blockquote', 'schedquote', entry.sourceText);
+  q.title = entry.sourceAtLocal ? 'Sent ' + entry.sourceAtLocal : entry.sourceText;
+  q.addEventListener('click', function () { q.classList.toggle('open'); });
+  return q;
+}
+
+/**
  * Where this promise came from, as a sentence.
  *
  * Provenance is the evidence a person actually asked for this, which is the
@@ -5176,7 +5202,8 @@ function scheduleShape(entry) {
  */
 function provenance(entry) {
   var line = node('p', 'schedfrom');
-  var made = entry.createdAt ? ', ' + shortDate(entry.createdAt) : '';
+  var said = entry.sourceAt || entry.createdAt;
+  var made = said ? ', ' + shortDate(said) : '';
 
   line.title = 'Set ' + localFull(entry.createdAt, entry.timezone);
 
@@ -5272,6 +5299,8 @@ function scheduleCard(entry, live) {
   var shape = node('p', null, scheduleShape(entry));
   meta.appendChild(shape);
 
+  var quoted = sourceQuote(entry);
+  if (quoted) meta.appendChild(quoted);
   meta.appendChild(provenance(entry));
 
   if (entry.fireCount) {
