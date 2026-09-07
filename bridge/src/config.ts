@@ -402,6 +402,23 @@ const Pages = z
      * granting it to no one, without deleting it.
      */
     grants: z.record(PageSlug, z.array(GrantEntry).max(20)).default({}),
+    /**
+     * Slug to a salted hash of the password a visitor must type to see it.
+     *
+     * A hash, never the password. This object is rendered by the panel and
+     * written to a file an operator may well open in front of somebody; a page
+     * password in plain text there is a password shoulder-surfed. The panel
+     * takes the password once, hashes it, and can afterwards only tell you
+     * whether one is set — which is all it should be able to tell you.
+     *
+     * Checked in `pages.ts` at request time, because a page genuinely cannot
+     * check its own: it is served under `connect-src 'none'` and
+     * `form-action 'none'`, so it can neither call out nor post, and any check
+     * written into it would sit in source the visitor already has.
+     */
+    passwords: z
+      .record(PageSlug, z.object({ salt: z.string().max(64), hash: z.string().max(256) }).strict())
+      .default({}),
   })
   .strict()
   .default({});

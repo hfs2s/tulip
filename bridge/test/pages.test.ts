@@ -7,7 +7,7 @@
  * whole feature stays off until a hostname is configured — because the hostname
  * is what keeps agent JavaScript off the panel's origin.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
@@ -17,7 +17,8 @@ process.env['TULIP_STATE_DIR'] = root;
 process.env['TULIP_IN_DIR'] = join(root, 'in');
 process.env['TULIP_OUT_DIR'] = join(root, 'out');
 
-const { publishPage, listPages, deletePage, isPagesRequest, SLUG, mayChange } = await import('../src/pages.js');
+const { publishPage, listPages, deletePage, isPagesRequest, SLUG, mayChange,
+  hashPagePassword, pageAuthorised, unpublishPage, republishPage, isUnpublished } = await import('../src/pages.js');
 const { parseConfig } = await import('../src/config.js');
 const { outPaths } = await import('@tulip/shared');
 
@@ -228,32 +229,34 @@ describe('who may change a page', () => {
   });
 
   describe('granted by number, for somebody who has never written', () => {
-    const MIRA = '34666861142';
-    const c = () => config({ grants: { members: [MIRA] } });
+    // A documentation number, not anybody's. This fixture held a real one for
+    // two commits; `npm run check:secrets` is what caught it.
+    const GRANTEE = '15551234567';
+    const c = () => config({ grants: { members: [GRANTEE] } });
 
     it('matches the phone jid the chat arrived under', () => {
-      expect(mayChange(c(), 'members', 'anykey', direct(MIRA + '@s.whatsapp.net'))).toBe(true);
+      expect(mayChange(c(), 'members', 'anykey', direct(GRANTEE + '@s.whatsapp.net'))).toBe(true);
     });
 
     // The case the whole feature turns on: WhatsApp hands most modern clients
     // over as an opaque linked id, and the number is only known as the alt.
     it('matches when only the linked id arrived and the number is the alt', () => {
-      expect(mayChange(c(), 'members', 'anykey', direct('221133445566778@lid', MIRA + '@s.whatsapp.net'))).toBe(true);
+      expect(mayChange(c(), 'members', 'anykey', direct('111111111111111@lid', GRANTEE + '@s.whatsapp.net'))).toBe(true);
     });
 
     it('matches a linked id granted directly', () => {
-      const byLid = config({ grants: { members: ['221133445566778@lid'] } });
-      expect(mayChange(byLid, 'members', 'anykey', direct('221133445566778@lid'))).toBe(true);
+      const byLid = config({ grants: { members: ['111111111111111@lid'] } });
+      expect(mayChange(byLid, 'members', 'anykey', direct('111111111111111@lid'))).toBe(true);
     });
 
     it('does not match somebody else', () => {
-      expect(mayChange(c(), 'members', 'anykey', direct('34600000000@s.whatsapp.net'))).toBe(false);
+      expect(mayChange(c(), 'members', 'anykey', direct('15559876543@s.whatsapp.net'))).toBe(false);
     });
 
     // A group's jid belongs to the room, not to a member, so a number must never
     // authorise everybody in it.
     it('never authorises a group, whatever its jid looks like', () => {
-      expect(mayChange(c(), 'members', 'anykey', { jid: MIRA + '@g.us', altJid: null, isGroup: true })).toBe(false);
+      expect(mayChange(c(), 'members', 'anykey', { jid: GRANTEE + '@g.us', altJid: null, isGroup: true })).toBe(false);
     });
 
     it('refuses when the chat is not known at all', () => {
@@ -264,5 +267,84 @@ describe('who may change a page', () => {
   it('rejects a grant that is not an identifier, rather than storing it', () => {
     expect(() => parseConfig({ pages: { grants: { members: ['../../etc/passwd'] } } })).toThrow();
     expect(() => parseConfig({ pages: { grants: { 'Not A Slug': [GROUP] } } })).toThrow();
+  });
+});
+
+/**
+ * The password gate.
+ *
+ * A page cannot check its own password — it is served under `connect-src 'none'`
+ * and `form-action 'none'`, so it can neither call out nor post, and anything
+ * written into it is visible to whoever opened it. The comparison happens on the
+ * side that decides whether to send the bytes, and these are the cases that
+ * decide whether that is worth anything.
+ */
+describe('pageAuthorised', () => {
+  const stored = hashPagePassword('correct horse');
+
+  it('lets an unprotected page through without a header', () => {
+    expect(pageAuthorised(undefined, undefined)).toBe(true);
+  });
+
+  it('accepts the right password', () => {
+    const header = 'Basic ' + Buffer.from('anyone:correct horse').toString('base64');
+    expect(pageAuthorised(stored, header)).toBe(true);
+  });
+
+  it('keeps a password with spaces intact', () => {
+    // The CLI joins everything after the slug, so a passphrase is normal. If the
+    // split were on the wrong colon this would pass with "correct" alone.
+    const header = 'Basic ' + Buffer.from('anyone:correct').toString('base64');
+    expect(pageAuthorised(stored, header)).toBe(false);
+  });
+
+  it('refuses the wrong password', () => {
+    expect(pageAuthorised(stored, 'Basic ' + Buffer.from('a:wrong').toString('base64'))).toBe(false);
+  });
+
+  it('refuses a missing, malformed or non-Basic header rather than throwing', () => {
+    for (const header of [undefined, '', 'Basic', 'Basic !!!not base64!!!', 'Bearer abc',
+      'Basic ' + Buffer.from('nocolon').toString('base64')]) {
+      expect(pageAuthorised(stored, header), String(header)).toBe(false);
+    }
+  });
+
+  it('does not store the password itself', () => {
+    // The config is rendered by the panel and written to a file an operator may
+    // open in front of somebody.
+    expect(JSON.stringify(stored)).not.toContain('correct horse');
+  });
+
+  it('salts, so the same password twice does not produce the same hash', () => {
+    expect(hashPagePassword('same').hash).not.toBe(hashPagePassword('same').hash);
+  });
+});
+
+describe('taking a page down', () => {
+  it('stops serving it, and says nothing about why', () => {
+    // 404, not 403: somebody holding an old link learns nothing about whether
+    // the page was withdrawn or never existed.
+    build('gone-soon');
+    expect(unpublishPage('gone-soon').ok).toBe(true);
+    expect(isUnpublished('gone-soon')).toBe(true);
+  });
+
+  it('keeps every byte, because the instruction arrived as a chat message', () => {
+    build('kept', { 'index.html': '<h1>still here</h1>' });
+    unpublishPage('kept');
+    expect(readFileSync(join(root, 'out', 'pages', 'kept', 'index.html'), 'utf8')).toContain('still here');
+  });
+
+  it('can be put back', () => {
+    build('returning');
+    unpublishPage('returning');
+    expect(republishPage('returning')).toBe(true);
+    expect(isUnpublished('returning')).toBe(false);
+  });
+
+  it('refuses a page that does not exist, and a slug that escapes', () => {
+    expect(unpublishPage('never-made').ok).toBe(false);
+    expect(unpublishPage('../../etc').ok).toBe(false);
+    expect(isUnpublished('../../etc')).toBe(false);
   });
 });

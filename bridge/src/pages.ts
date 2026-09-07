@@ -27,7 +27,8 @@
  */
 import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve, sep } from 'node:path';
-import type { ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { outPaths } from '@tulip/shared';
 import type { Config } from './config.js';
 import { identities, matchesList } from './jid.js';
@@ -309,6 +310,137 @@ export function publishPage(slug: string): Published {
   return { ok: true, url: `https://${host}/${slug}/` };
 }
 
+/**
+ * Unpublishing, and why it is a marker rather than a deletion.
+ *
+ * A page can now be taken down by whoever was granted it, from a WhatsApp
+ * message. That is a good capability and a bad thing to make irreversible: the
+ * instruction arrives as natural language, it is acted on by a model, and the
+ * person who sent it is not looking at a confirmation dialog. So the verb stops
+ * the page being *served* and leaves every byte on disk, and the panel — where
+ * there is a human, a list and a confirm — is the only place that removes
+ * anything permanently.
+ *
+ * A file rather than a config entry, deliberately. It lives beside the page it
+ * belongs to, so a page restored from a backup carries its own state, and there
+ * is no second place to forget to update when a page is deleted for real.
+ */
+const UNPUBLISHED = '.unpublished';
+
+function pageDir(slug: string): string | null {
+  if (!SLUG.test(slug)) return null;
+  const root = resolve(outPaths.pages);
+  const target = resolve(root, slug);
+  return target.startsWith(root + sep) ? target : null;
+}
+
+/** Is this page currently withheld from visitors? */
+export function isUnpublished(slug: string): boolean {
+  const dir = pageDir(slug);
+  return dir !== null && existsSync(join(dir, UNPUBLISHED));
+}
+
+/** Stop serving a page. Reversible; nothing is removed. */
+export function unpublishPage(slug: string): Published {
+  const dir = pageDir(slug);
+  if (dir === null || !existsSync(dir)) return { ok: false, error: 'there is no page by that name' };
+  try {
+    writeFileSync(join(dir, UNPUBLISHED), new Date().toISOString());
+    log('pages.unpublished', { slug });
+    return { ok: true, url: '' };
+  } catch (err) {
+    log('pages.unpublishFailed', { slug, err: String((err as Error).message) });
+    return { ok: false, error: 'the page could not be taken down' };
+  }
+}
+
+/** Serve it again. */
+export function republishPage(slug: string): boolean {
+  const dir = pageDir(slug);
+  if (dir === null) return false;
+  try {
+    rmSync(join(dir, UNPUBLISHED), { force: true });
+    log('pages.republished', { slug });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Per-page passwords, checked here because nowhere else can.
+ *
+ * A page cannot check its own password. It is served under `connect-src 'none'`
+ * and `form-action 'none'`, so it can neither call anything nor post anywhere —
+ * and a check written in its own JavaScript would sit in the source the visitor
+ * has already downloaded. The only place a secret can be compared is the side
+ * that decides whether to send the bytes at all, which is here.
+ *
+ * HTTP Basic, for the same reason: it is the one authentication scheme that
+ * needs no page, no form and no fetch, so it survives that CSP untouched. The
+ * browser's own dialog is not pretty. It is real, which the alternative was not.
+ *
+ * The stored value is a salted hash. The operator types a password once and the
+ * config keeps something that cannot be read back out of it — the panel renders
+ * the whole config, and a page password in plain text there is a password
+ * shoulder-surfed.
+ */
+export interface PagePassword {
+  readonly salt: string;
+  readonly hash: string;
+}
+
+export function hashPagePassword(password: string): PagePassword {
+  const salt = randomBytes(16).toString('hex');
+  return { salt, hash: scryptSync(password, salt, 32).toString('hex') };
+}
+
+function passwordMatches(stored: PagePassword, offered: string): boolean {
+  let candidate: Buffer;
+  try {
+    candidate = scryptSync(offered, stored.salt, 32);
+  } catch {
+    return false;
+  }
+  let expected: Buffer;
+  try {
+    expected = Buffer.from(stored.hash, 'hex');
+  } catch {
+    return false;
+  }
+  // Lengths must match before timingSafeEqual, which throws rather than
+  // returning false when they do not.
+  if (expected.length !== candidate.length) return false;
+  return timingSafeEqual(expected, candidate);
+}
+
+/**
+ * Whether this request may see this page.
+ *
+ * Returns true when the page is not protected at all, which is the common case
+ * and must stay cheap.
+ */
+export function pageAuthorised(
+  stored: PagePassword | undefined,
+  authorization: string | undefined,
+): boolean {
+  if (stored === undefined) return true;
+  const raw = (authorization ?? '').trim();
+  if (!/^Basic /i.test(raw)) return false;
+  let decoded: string;
+  try {
+    decoded = Buffer.from(raw.slice(6).trim(), 'base64').toString('utf8');
+  } catch {
+    return false;
+  }
+  // "user:password" — the user half is ignored. There is one password per page
+  // and no notion of who is typing it, and pretending otherwise in the prompt
+  // would suggest an account somebody could go and ask for.
+  const separator = decoded.indexOf(':');
+  if (separator < 0) return false;
+  return passwordMatches(stored, decoded.slice(separator + 1));
+}
+
 export function deletePage(slug: string): boolean {
   if (!SLUG.test(slug)) return false;
   const root = resolve(outPaths.pages);
@@ -360,7 +492,14 @@ const KIT_PREFIX = '_kit';
 // output only, and a path into the source tree resolves to nothing at runtime.
 const KIT_DIR = new URL('./web/pagekit/', import.meta.url).pathname;
 
-export function servePage(res: ServerResponse, url: URL): void {
+export function servePage(
+  res: ServerResponse,
+  url: URL,
+  // Optional so every existing caller and test keeps working: a deployment with
+  // no protected pages behaves exactly as it did.
+  req?: IncomingMessage,
+  passwords: Readonly<Record<string, PagePassword>> = {},
+): void {
   const parts = url.pathname.split('/').filter((p) => p.length > 0);
 
   const common = {
@@ -418,6 +557,26 @@ export function servePage(res: ServerResponse, url: URL): void {
   }
 
   const slug = parts[0] ?? '';
+
+  // Taken down, and indistinguishable from never having existed. A visitor
+  // holding an old link learns nothing about whether it was withdrawn.
+  if (SLUG.test(slug) && isUnpublished(slug)) {
+    res.writeHead(404, { ...common, 'content-type': 'text/plain; charset=utf-8' }).end('Not found\n');
+    return;
+  }
+
+  // Before a single byte of the page is read from disk.
+  if (SLUG.test(slug) && !pageAuthorised(passwords[slug], req?.headers?.authorization)) {
+    res.writeHead(401, {
+      ...common,
+      // The realm is the slug, so a browser holding several pages' passwords
+      // keeps them apart instead of offering the wrong one.
+      'www-authenticate': `Basic realm="${slug}", charset="UTF-8"`,
+      'content-type': 'text/plain; charset=utf-8',
+    }).end('This page is password protected.\n');
+    return;
+  }
+
   if (!SLUG.test(slug)) {
     res.writeHead(404, { 'content-type': 'text/plain' }).end('no such page\n');
     return;

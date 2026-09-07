@@ -97,6 +97,21 @@ export const VERBS: readonly Verb[] = [
       'Served on its own hostname, never the panel’s.',
   },
   {
+    name: 'page-delete', args: '<name>', group: 'make',
+    summary: 'take a page down, reversibly',
+    detail:
+      'The link starts answering "not found" at once. Nothing is deleted — the files stay, and an operator can ' +
+      'put the page back from the panel. Only pages you have been granted.',
+  },
+  {
+    name: 'page-password', args: '<name> [password]', group: 'make',
+    summary: 'put a password in front of a page, or take one off',
+    detail:
+      'Visitors are asked for it before the page loads, checked by the bridge — a page cannot check its own, ' +
+      'because anything written into it is visible to whoever opened it. Give no password to remove one. ' +
+      'Never repeat the password back in a message.',
+  },
+  {
     name: 'page-image', args: '<page> <name> <prompt>', group: 'make',
     summary: 'generate a picture into a page',
     detail: 'Prints the filename to reference. Five per page.',
