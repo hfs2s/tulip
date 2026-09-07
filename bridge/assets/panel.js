@@ -100,6 +100,7 @@ async function act(action, key, rawPath, payload) {
     toast(body.message || 'Done.');
   } catch (err) { toast(err.message, true); return; }
   refresh();
+  repaintAfterChange();
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────────
@@ -3331,7 +3332,7 @@ function openPageSettings(page, data) {
     claim.appendChild(node('span', 'meta', 'leave this page unclaimed'));
     claim.appendChild(liveSwitch(page.grantedTo === null, function (on, input) {
       input.disabled = true;
-      void savePageGrant(page.slug, on ? null : [], function () { input.checked = !on; input.disabled = false; });
+      void savePageGrant(page.slug, on ? null : [], function () { input.checked = !on; input.disabled = false; }, page);
     }));
     body.appendChild(claim);
 
@@ -3344,7 +3345,7 @@ function openPageSettings(page, data) {
         input.disabled = true;
         var next = (page.grantedTo || []).filter(function (k) { return k !== c.chatKey; });
         if (on) next.push(c.chatKey);
-        void savePageGrant(page.slug, next, function () { input.checked = !on; input.disabled = false; });
+        void savePageGrant(page.slug, next, function () { input.checked = !on; input.disabled = false; }, page);
       }));
       body.appendChild(line);
     });
@@ -3362,7 +3363,7 @@ function openPageSettings(page, data) {
       off.addEventListener('click', function () {
         off.disabled = true;
         var next = page.grantedTo.filter(function (k) { return k !== g.entry; });
-        void savePageGrant(page.slug, next, function () { off.disabled = false; });
+        void savePageGrant(page.slug, next, function () { off.disabled = false; }, page);
       });
       line.appendChild(off);
       body.appendChild(line);
@@ -3383,7 +3384,7 @@ function openPageSettings(page, data) {
       go.disabled = true;
       var next = (page.grantedTo || []).slice();
       if (next.indexOf(raw) === -1) next.push(raw);
-      void savePageGrant(page.slug, next, function () { go.disabled = false; });
+      void savePageGrant(page.slug, next, function () { go.disabled = false; }, page);
     });
     add.appendChild(go);
     body.appendChild(add);
@@ -3465,7 +3466,7 @@ function openPageSettings(page, data) {
  * deleting it. The whole list is sent because the bridge rebuilds the map from
  * it; sending a delta would make two writers of the same object.
  */
-async function savePageGrant(slug, chats, revert) {
+async function savePageGrant(slug, chats, revert, page) {
   try {
     var body = await api('/api/pages/grant?slug=' + encodeURIComponent(slug), {
       method: 'POST',
@@ -3478,7 +3479,12 @@ async function savePageGrant(slug, chats, revert) {
     if (revert) revert();
     return;
   }
+  // The modal is still open and still holding this object, so correcting the
+  // list here is what makes the switches truthful without closing it. The
+  // repaint below rebuilds the cards behind it.
+  if (page) page.grantedTo = chats;
   refresh();
+  repaintAfterChange();
 }
 
 
@@ -4719,6 +4725,26 @@ async function renderLog() {
 // must not wait for it — that was why a refresh on Settings, Messages, Media or
 // Log showed an empty page until something happened to trigger a re-render.
 var NEEDS_STATE = { overview: 1, chats: 1 };
+
+/**
+ * Pages that fetch their own data rather than reading the state snapshot.
+ *
+ * They are not in NEEDS_STATE because a five-second poll should not rebuild
+ * them — but that also meant nothing rebuilt them after a *change*. Toggling a
+ * page's grant saved correctly, `refresh()` updated the snapshot, and this page
+ * was never asked to re-read: the card kept its old data and the settings modal
+ * kept the object it had closed over, so reopening it showed the state from
+ * before the toggle. Only a reload put it right.
+ *
+ * Excludes chat and terminal on purpose — those own a poll and a text box, and
+ * rebuilding them would restart the one and empty the other.
+ */
+var SELF_FETCHING = { pages: 1, memory: 1, media: 1, persona: 1, verbs: 1, log: 1 };
+
+/** Re-read the current page after something changed it. */
+function repaintAfterChange() {
+  if (SELF_FETCHING[route]) render();
+}
 
 function render() {
   if (NEEDS_STATE[route] && !state) return;
