@@ -1049,6 +1049,7 @@ const SettingsPatch = z
       enabled: z.boolean().optional(),
       replyTo: z.enum(['mention', 'trigger', 'observe']).optional(),
       triggers: z.array(z.string().min(1).max(32)).max(8).optional(),
+      reactivity: z.number().int().min(0).max(4).optional(),
     }).strict().optional(),
     limits: z.object({
       messagesPerHour: z.number().int().min(1).max(1000).optional(),

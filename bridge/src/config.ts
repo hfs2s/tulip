@@ -106,6 +106,18 @@ const Groups = z
      * carries that, and `tulip-wa quiet` is how it says nothing deliberately.
      */
     replyTo: z.enum(['mention', 'trigger', 'observe']).default('mention'),
+    /**
+     * How readily the agent speaks up, in `observe` mode only.
+     *
+     * The other two modes are already gated by the bridge — nothing reaches the
+     * agent that was not a mention or a trigger — so a dial there would be
+     * describing a decision it does not get to make.
+     *
+     * See shared/src/reactivity.ts for the levels and, more to the point, for
+     * the sentences. Each level's text is shown to the operator and given to
+     * the agent unchanged, so the thing being tuned is the thing described.
+     */
+    reactivity: z.number().int().min(0).max(4).default(2),
     triggers: z.array(z.string().min(1).max(32)).max(8).default([]),
   })
   .strict()

@@ -41,6 +41,7 @@ export function publishTurn(
   batch: InboxBatchType,
   can?: CurrentTurnType['can'],
   generation = 0,
+  reactivity: number | null = null,
 ): void {
   const validated = InboxBatch.parse(batch);
   writeJsonAtomic(inPaths.batch(validated.turnId), validated, 0o644);
@@ -53,6 +54,9 @@ export function publishTurn(
     batch: `batches/${validated.turnId}.json`,
     startedAt: new Date().toISOString(),
     generation,
+    // Only for a group, and only in `observe` mode. A direct chat has no tone to
+    // set — the agent answers the person who wrote to it.
+    reactivity: validated.isGroup ? reactivity : null,
     // Omitted rather than guessed when the caller does not say: every field
     // defaults to on, and the bridge refuses for real regardless.
     ...(can === undefined ? {} : { can }),
