@@ -82,6 +82,9 @@ import {
   memoryList,
   memoryForget,
   personaDocs,
+  restorePage,
+  clearPagePassword,
+  setPagePassword,
 } from './panel-api.js';
 
 const COOKIE = 'tulip_token';
@@ -346,7 +349,7 @@ export function startPanel(deps: ApiDeps): Server | null {
           res.writeHead(405, { 'content-type': 'text/plain' }).end('pages are read-only\n');
           return;
         }
-        servePage(res, url);
+        servePage(res, url, req, deps.config.pages.passwords);
         return;
       }
 
@@ -574,6 +577,19 @@ export function startPanel(deps: ApiDeps): Server | null {
         }
         if (url.pathname === '/api/pages/delete' && req.method === 'POST') {
           const result = pageDelete(url.searchParams.get('slug') ?? '');
+          return send(res, headers, result.ok ? 200 : 404, result);
+        }
+        if (url.pathname === '/api/pages/restore' && req.method === 'POST') {
+          const result = restorePage(url.searchParams.get('slug') ?? '');
+          return send(res, headers, result.ok ? 200 : 404, result);
+        }
+        if (url.pathname === '/api/pages/lock' && req.method === 'POST') {
+          const body = await readBody(req);
+          const result = setPagePassword(deps, url.searchParams.get('slug') ?? '', body);
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        if (url.pathname === '/api/pages/unlock' && req.method === 'POST') {
+          const result = clearPagePassword(deps, url.searchParams.get('slug') ?? '');
           return send(res, headers, result.ok ? 200 : 404, result);
         }
         if (url.pathname === '/api/pages/grant' && req.method === 'POST') {

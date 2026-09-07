@@ -465,6 +465,34 @@ switch (command) {
     break;
   }
 
+  case 'page-delete': {
+    const slug = (rest[0] ?? '').trim();
+    if (slug.length === 0) die('tulip-wa page-delete: `tulip-wa page-delete <name>` — the page to take down');
+    const id = queue({ kind: 'pageDelete', slug });
+    const result = await awaitResult(id, 20_000);
+    if (result === null) { process.stdout.write('page-delete: no answer from the bridge within 20s.\n'); break; }
+    if (!result.ok) { process.stdout.write(`${result.error ?? 'page-delete: refused'}\n`); break; }
+    for (const item of result.items ?? []) process.stdout.write(`${item.text ?? ''}\n`);
+    break;
+  }
+
+  case 'page-password': {
+    const slug = (rest[0] ?? '').trim();
+    if (slug.length === 0) {
+      die('tulip-wa page-password: `tulip-wa page-password <name> <password>` — or no password to remove it');
+    }
+    // Everything after the slug, so a password with spaces in it works. Joined
+    // rather than taking rest[1] alone, which would silently protect a page
+    // with the first word only.
+    const password = rest.slice(1).join(' ');
+    const id = queue({ kind: 'pagePassword', slug, password });
+    const result = await awaitResult(id, 20_000);
+    if (result === null) { process.stdout.write('page-password: no answer from the bridge within 20s.\n'); break; }
+    if (!result.ok) { process.stdout.write(`${result.error ?? 'page-password: refused'}\n`); break; }
+    for (const item of result.items ?? []) process.stdout.write(`${item.text ?? ''}\n`);
+    break;
+  }
+
   case 'page': {
     const slug = (rest[0] ?? '').trim().toLowerCase();
     if (slug.length === 0) die('tulip-wa page: name the page, e.g. `tulip-wa page party-plan`');

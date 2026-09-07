@@ -444,6 +444,38 @@ export const OutboxAction = z.discriminatedUnion('kind', [
        * agent told to link a stylesheet still wrote its own, which is what a
        * strong prior about self-contained HTML does to a line of prose.
        */
+      /**
+       * Take a page down, reversibly.
+       *
+       * Unpublishing rather than deleting, because this arrives as a sentence
+       * in a chat, is acted on by a model, and nobody is looking at a confirm
+       * dialog. The files stay; only the panel removes anything for good.
+       */
+      kind: z.literal('pageDelete'),
+      slug: z.string().min(3).max(48).regex(/^[a-z0-9][a-z0-9-]*$/, 'lowercase letters, digits and dashes'),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
+       * Put a password in front of a page, or take one off.
+       *
+       * The bridge hashes it and keeps only the hash — the agent's container is
+       * the one an attacker is assumed to own, and this action is the last
+       * moment the plaintext exists anywhere the agent can see. An empty string
+       * removes the password, which is why it is not `.min(1)`.
+       */
+      kind: z.literal('pagePassword'),
+      slug: z.string().min(3).max(48).regex(/^[a-z0-9][a-z0-9-]*$/, 'lowercase letters, digits and dashes'),
+      password: z.string().max(128),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
       kind: z.literal('pageNew'),
       slug: z.string().min(3).max(48).regex(/^[a-z0-9][a-z0-9-]*$/, 'lowercase letters, digits and dashes'),
       title: z.string().min(1).max(120),

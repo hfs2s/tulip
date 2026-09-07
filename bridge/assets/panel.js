@@ -79,12 +79,24 @@ async function api(path, options) {
   }
   return body;
 }
-async function act(action, key, rawPath) {
+/**
+ * POST an action and say what came back.
+ *
+ * `payload` is a JSON body, and the only caller that needs one is the page
+ * password — which must not travel as a query parameter, because a query string
+ * is the part of a URL that ends up in access logs and browser history.
+ */
+async function act(action, key, rawPath, payload) {
   try {
     var path = rawPath !== undefined
       ? '/api/' + action + rawPath
       : '/api/action/' + encodeURIComponent(action) + (key ? '?key=' + encodeURIComponent(key) : '');
-    var body = await api(path, { method: 'POST' });
+    var options = { method: 'POST' };
+    if (payload !== undefined) {
+      options.headers = { 'content-type': 'application/json' };
+      options.body = JSON.stringify(payload);
+    }
+    var body = await api(path, options);
     toast(body.message || 'Done.');
   } catch (err) { toast(err.message, true); return; }
   refresh();
@@ -2930,7 +2942,10 @@ function appendPageRow(card, page, data) {
   link.target = '_blank';
   link.rel = 'noopener noreferrer';
   row.appendChild(link);
-  row.appendChild(node('span', 'meta', plural(page.files, 'file') + ' · ' + bytes(page.bytes) + ' · ' + ago(Date.now() - page.at)));
+  var state = plural(page.files, 'file') + ' · ' + bytes(page.bytes) + ' · ' + ago(Date.now() - page.at);
+  if (page.unpublished) state += ' · taken down — the link says it does not exist';
+  if (page.hasPassword) state += ' · password protected';
+  row.appendChild(node('span', 'meta', state));
 
   var open = false;
   var editor = node('div', 'card');
@@ -2945,6 +2960,44 @@ function appendPageRow(card, page, data) {
     who.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
   row.appendChild(who);
+
+  // Taken down by whoever was granted it — that happens through a chat message,
+  // not a click here, so this is where an operator finds out and can undo it.
+  if (page.unpublished) {
+    var back = node('button', 'sm', 'Put back');
+    back.type = 'button';
+    back.addEventListener('click', function () {
+      act('pages/restore', null, '?slug=' + encodeURIComponent(page.slug));
+    });
+    row.appendChild(back);
+  }
+
+  // Per page, and "whether" rather than "what": the stored value is a salted
+  // hash and is never sent to this page. A password cannot be checked by the
+  // page it protects — served under connect-src 'none' and form-action 'none',
+  // it can neither call out nor post, and anything written into it is visible
+  // to whoever opened it — so the bridge asks for it before sending any bytes.
+  var lock = node('button', 'sm', page.hasPassword ? 'Change password' : 'Add password');
+  lock.type = 'button';
+  lock.addEventListener('click', function () {
+    var typed = window.prompt(
+      'Password for “' + page.slug + '”\n\n'
+      + 'Visitors are asked for it before the page loads. Anyone you give the link to also needs this.');
+    if (typed === null) return;
+    if (!typed.trim()) { toast('Nothing typed — the password is unchanged.'); return; }
+    act('pages/lock', null, '?slug=' + encodeURIComponent(page.slug), { password: typed });
+  });
+  row.appendChild(lock);
+
+  if (page.hasPassword) {
+    var unlock = node('button', 'sm', 'Remove password');
+    unlock.type = 'button';
+    unlock.addEventListener('click', function () {
+      if (!window.confirm('Remove the password on “' + page.slug + '”?\n\nAnyone with the link will be able to read it.')) return;
+      act('pages/unlock', null, '?slug=' + encodeURIComponent(page.slug));
+    });
+    row.appendChild(unlock);
+  }
 
   var bin = node('button', 'sm danger', 'Delete');
   bin.type = 'button';

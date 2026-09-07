@@ -41,7 +41,9 @@ import { claim } from './spend.js';
 import {
   imageCount,
   MAX_IMAGES_PER_PAGE,
+  hashPagePassword,
   mayChange,
+  unpublishPage,
   NO_NEW_PAGES,
   NOT_YOURS,
   publishPage,
@@ -264,6 +266,8 @@ export interface OutboxDeps {
   readonly limiter: Limiter;
   /** Resolve the newest inbound message in a chat, so `react` has a target. */
   readonly lastMessageIn: (chatKey: string) => { id: string; participant?: string } | null;
+  /** Persist page passwords. Injected so the outbox does not reach into the panel's API. */
+  readonly setPagePasswords: (passwords: Readonly<Record<string, { salt: string; hash: string }>>) => void;
 }
 
 /**
@@ -773,6 +777,57 @@ export class Outbox extends EventEmitter {
               }],
             }
           : { ok: false, error: made.error });
+        break;
+      }
+
+      case 'pageDelete': {
+        // Same grant as changing it. Taking a page down is a smaller act than
+        // rewriting it, and anyone who may do the second may do the first.
+        if (!mayChange(this.deps.config, action.slug, turn.chatKey, this.deps.chats.get(turn.chatKey))) {
+          log('pages.refused', { chatKey: turn.chatKey, slug: action.slug, verb: 'pageDelete' });
+          await this.answer(action.id, 'page', { ok: false, error: NOT_YOURS });
+          break;
+        }
+        const taken = unpublishPage(action.slug);
+        await this.answer(action.id, 'page', taken.ok
+          ? {
+              ok: true,
+              items: [{
+                title: action.slug,
+                url: '',
+                published: null,
+                text: 'Taken down — the link now says the page does not exist. Nothing was deleted, so an operator can put it back.',
+              }],
+            }
+          : { ok: false, error: taken.error });
+        break;
+      }
+
+      case 'pagePassword': {
+        if (!mayChange(this.deps.config, action.slug, turn.chatKey, this.deps.chats.get(turn.chatKey))) {
+          log('pages.refused', { chatKey: turn.chatKey, slug: action.slug, verb: 'pagePassword' });
+          await this.answer(action.id, 'page', { ok: false, error: NOT_YOURS });
+          break;
+        }
+        const clearing = action.password.length === 0;
+        const passwords = { ...this.deps.config.pages.passwords };
+        if (clearing) delete passwords[action.slug];
+        else passwords[action.slug] = hashPagePassword(action.password);
+        this.deps.setPagePasswords(passwords);
+        // Never echoed back, not even to confirm. The reply travels through
+        // WhatsApp and sits in somebody's chat history afterwards.
+        log('pages.password', { chatKey: turn.chatKey, slug: action.slug, set: !clearing });
+        await this.answer(action.id, 'page', {
+          ok: true,
+          items: [{
+            title: action.slug,
+            url: '',
+            published: null,
+            text: clearing
+              ? 'Password removed — anyone with the link can read it again.'
+              : 'Password set. Visitors are asked for it before the page loads. Do not repeat it back to anyone in writing; send it the way you would any other password.',
+          }],
+        });
         break;
       }
 

@@ -27,7 +27,7 @@ import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 import { CurrentTurn, SHARED_WINDOW, TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
 import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES, parseConfig, Contact } from './config.js';
-import { deletePage, listPages, pagesHost, type PageSummary } from './pages.js';
+import { deletePage, hashPagePassword, isUnpublished, listPages, pagesHost, republishPage, type PageSummary } from './pages.js';
 import { identities, matchesList } from './jid.js';
 import { forget, forgetAll, readMemory } from './memory.js';
 import type { ChatRegistry } from './chats.js';
@@ -782,6 +782,12 @@ export function pagesList(deps: ApiDeps): Json {
       // Resolved here rather than in the browser, because only this side can
       // match a granted phone number against the jids a chat arrived under.
       grantedLabels: (grants[p.slug] ?? []).map((entry) => describeGrant(deps, entry)),
+      // Taken down by whoever was granted it. The files are still there; this
+      // is the state that says the link 404s.
+      unpublished: isUnpublished(p.slug),
+      // Whether, never what. The hash is not sent to the browser either — there
+      // is nothing a panel could do with it but leak it.
+      hasPassword: deps.config.pages.passwords[p.slug] !== undefined,
     })),
     // The chats a grant can name. Sent with the listing rather than fetched
     // separately so the picker never has to make an operator type a chat key —
@@ -1065,6 +1071,9 @@ const SettingsPatch = z
       // that matters. Duplicating those regexes here would be a second place to
       // keep them right.
       grants: z.record(z.string().max(64), z.array(z.string().max(64)).max(20)).optional(),
+      // Salted hashes, never plaintext — see the note on `pages.passwords`
+      // in config.ts. Same reasoning as grants for the loose shape here.
+      passwords: z.record(z.string().max(64), z.object({ salt: z.string().max(64), hash: z.string().max(256) })).optional(),
     }).strict().optional(),
     delivery: z.object({
       debounceMs: z.number().int().min(0).max(60_000).optional(),
@@ -1162,6 +1171,65 @@ const CONFIG_FILE = process.env['TULIP_CONFIG'] ?? '/config/config.json';
  * The file is rewritten from its own raw contents rather than from the parsed
  * object, so the `_comment` keys that document it survive the round trip.
  */
+/**
+ * Persist page passwords, and nothing else.
+ *
+ * A narrow door for the outbox, which has a live `config` but no business
+ * carrying the whole settings surface. Same writer as the panel, so the file
+ * keeps its comments and the running config and the file cannot disagree.
+ */
+/** Put a page back after it was taken down. */
+export function restorePage(slug: string): { ok: boolean; message: string } {
+  if (!republishPage(slug)) return { ok: false, message: 'No such page.' };
+  return { ok: true, message: 'Back online.' };
+}
+
+/**
+ * Take a page's password off, from the panel.
+ *
+ * Setting one from here is deliberately not offered. A password typed into the
+ * panel would be a password in a browser field, a request body and an operator's
+ * screen, to protect a page whose link they are about to send over WhatsApp
+ * anyway — the agent's verb sets it in the conversation where it is actually
+ * being shared. What an operator needs is the ability to *remove* one, because
+ * the alternative when a password is lost is editing config.json by hand.
+ */
+export function clearPagePassword(deps: ApiDeps, slug: string): { ok: boolean; message: string } {
+  const passwords = { ...deps.config.pages.passwords };
+  if (passwords[slug] === undefined) return { ok: false, message: 'That page has no password.' };
+  delete passwords[slug];
+  const written = setPagePasswords(deps, passwords);
+  return written.ok
+    ? { ok: true, message: 'Password removed. Anyone with the link can read it again.' }
+    : written;
+}
+
+/**
+ * Set one page's password, from the panel.
+ *
+ * Takes the plaintext, hashes it here, and keeps only the hash — this function
+ * is the last place the password exists. It arrives in a POST body rather than
+ * a query parameter on purpose: a query string is the part of a URL that ends
+ * up in access logs, proxy logs and browser history.
+ */
+export function setPagePassword(deps: ApiDeps, slug: string, body: unknown): { ok: boolean; message: string } {
+  const parsed = z.object({ password: z.string().min(1).max(128) }).safeParse(body);
+  if (!parsed.success) return { ok: false, message: 'A password is needed.' };
+  if (!listPages().some((p) => p.slug === slug)) return { ok: false, message: 'No such page.' };
+  const passwords = { ...deps.config.pages.passwords, [slug]: hashPagePassword(parsed.data.password) };
+  const written = setPagePasswords(deps, passwords);
+  return written.ok
+    ? { ok: true, message: 'Password set. Anyone you send the link to needs it too.' }
+    : written;
+}
+
+export function setPagePasswords(
+  deps: ApiDeps,
+  passwords: Readonly<Record<string, { salt: string; hash: string }>>,
+): { ok: boolean; message: string } {
+  return updateSettings(deps, { pages: { passwords } });
+}
+
 export function updateSettings(deps: ApiDeps, body: unknown): { ok: boolean; message: string } {
   const patch = SettingsPatch.safeParse(body);
   if (!patch.success) {

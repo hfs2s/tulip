@@ -20,6 +20,7 @@ import { ensureHandoffDirs, readCurrentTurn, readStatus } from './handoff.js';
 import { log } from './log.js';
 import { Outbox } from './outbox.js';
 import { startPanel } from './panel.js';
+import { setPagePasswords } from './panel-api.js';
 import { paths } from './paths.js';
 import { Limiter } from './ratelimit.js';
 import { TurnRegistry } from './turns.js';
@@ -122,6 +123,12 @@ async function main(): Promise<void> {
     config,
     chats,
     lastMessageIn: (chatKey) => currentDispatcher().lastMessageIn(chatKey),
+    // Through the panel's own writer, so the file keeps its comments and the
+    // running config cannot drift from what is on disk.
+    setPagePasswords: (passwords) => {
+      const result = setPagePasswords({ config, wa, chats, limiter, dispatcher: currentDispatcher }, passwords);
+      if (!result.ok) log('pages.passwordSaveFailed', { why: result.message });
+    },
   });
 
   wa.on('message', (message) => {
