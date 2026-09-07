@@ -267,14 +267,41 @@ export async function toEnvelope(
   let mentionsMe = false;
   let quoted: Envelope['quoted'] = null;
 
-  const context = asRecord(asRecord(content?.['extendedTextMessage'])?.['contextInfo']);
-  const mentioned = context?.['mentionedJid'];
-  if (Array.isArray(mentioned)) {
-    mentionsMe = mentioned.some((j) => {
-      const b = bare(String(j));
-      const u = userPart(String(j));
+  // `contextInfo` is read from the message root as well as from inside
+  // `extendedTextMessage`. WhatsApp puts it in either place depending on client
+  // and message shape, and reading only the nested one meant a real @-mention
+  // could arrive with `mentionsMe` false — which is what happened, and which
+  // looks from the outside exactly like the bot ignoring somebody.
+  const context =
+    asRecord(asRecord(content?.['extendedTextMessage'])?.['contextInfo'])
+    ?? asRecord(content?.['contextInfo']);
+
+  // Both spellings. Newer clients carry group mentions in `groupMentions`, as
+  // records rather than bare strings.
+  const mentionedRaw = [
+    ...(Array.isArray(context?.['mentionedJid']) ? (context['mentionedJid'] as unknown[]) : []),
+    ...(Array.isArray(context?.['groupMentions'])
+      ? (context['groupMentions'] as unknown[]).map((g) => asRecord(g)?.['groupJid'] ?? asRecord(g)?.['jid'])
+      : []),
+  ].filter((j): j is string => typeof j === 'string' && j.length > 0);
+
+  if (mentionedRaw.length > 0) {
+    mentionsMe = mentionedRaw.some((j) => {
+      const b = bare(j);
+      const u = userPart(j);
       return (b !== null && selfIds.includes(b)) || (u !== null && selfIds.includes(u));
     });
+    // Diagnostic, only when somebody was mentioned and it was not us — the case
+    // that is invisible from outside and impossible to reason about from a
+    // transcript. Identifiers are masked: enough to compare, not enough to be a
+    // record of who was in the room.
+    if (!mentionsMe && group) {
+      const mask = (v: string): string => (v.length > 10 ? `${v.slice(0, 4)}…${v.slice(-8)}` : v);
+      log('mention.missed', {
+        mentioned: mentionedRaw.map((j) => mask(bare(j) ?? j)).join(','),
+        self: selfIds.map(mask).join(','),
+      });
+    }
   }
 
   const quotedMessage = context?.['quotedMessage'];
