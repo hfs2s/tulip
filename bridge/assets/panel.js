@@ -525,17 +525,20 @@ function renderChats(s) {
     var bar = node('div', 'card');
     if (!v.on) {
       bar.appendChild(node('p', 'sub',
-        'Every moderator who can reach this panel sees every conversation. Claim yours to hide them — '
-        + 'it works against people signing in through Access, and not against anyone holding the panel token.'));
+        'Every moderator who can reach this panel sees every conversation. Claim yours to hide them from '
+        + 'everyone but you — including anyone holding the panel token, who is anonymous and gets the narrow '
+        + 'view. That includes you over an SSH tunnel, so keep signing in through Access.'));
       var claim = node('button', 'sm', 'Make my chats private');
       claim.type = 'button';
       claim.addEventListener('click', function () { act('privacy/claim', null, ''); });
       bar.appendChild(claim);
     } else {
       bar.appendChild(node('p', 'sub',
-        'Private conversations belong to ' + (v.who || 'the token holder')
-        + '. Other moderators do not see them anywhere in this panel, and do not get the Terminal page at all — '
-        + 'it is one live session carrying every chat, so it cannot be filtered.'));
+        'Private conversations belong to ' + (v.who || 'you')
+        + ' and are shown to that address alone. Everyone else — other moderators, and anyone reaching this '
+        + 'panel with the token — sees neither them nor the Terminal page, which is one live session carrying '
+        + 'every chat and so cannot be filtered. If Access is ever unavailable, clear privacy.owner in '
+        + 'config/config.json on the host.'));
       var release = node('button', 'sm', 'Turn privacy off');
       release.type = 'button';
       release.addEventListener('click', function () {

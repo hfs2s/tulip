@@ -30,11 +30,17 @@ describe('the owner, and the token holder', () => {
     expect(isOwner(on, { who: '  LES@Example.COM ' })).toBe(true);
   });
 
-  it('treats the bearer token as the owner', () => {
-    // The token is a secret, not an identity — there is nothing to filter on.
-    // This is the deliberate hole: anyone given the token bypasses all of it.
-    expect(isOwner(on, token)).toBe(true);
-    expect(canSee(on, token, MINE)).toBe(true);
+  it('does NOT treat the bearer token as the owner', () => {
+    // Reversed deliberately. The token says its holder knows a secret; it
+    // cannot say which person that is, and this feature is about which person
+    // it is. Treating it as the owner made it a bypass for everyone who has
+    // ever been given it.
+    //
+    // The cost is accepted rather than hidden: reaching the panel over an SSH
+    // tunnel with `?t=` shows the operator the unprivileged view of their own
+    // deployment. Recovery is at the machine, in config.json.
+    expect(isOwner(on, token)).toBe(false);
+    expect(canSee(on, token, MINE)).toBe(false);
   });
 });
 
@@ -55,6 +61,12 @@ describe('another moderator', () => {
 });
 
 describe('failing open, on purpose', () => {
+  it('still shows the token holder everything while the feature is off', () => {
+    // Which is what keeps an unconfigured deployment behaving exactly as it did.
+    expect(isOwner(off, token)).toBe(true);
+    expect(canSee(off, token, MINE)).toBe(true);
+  });
+
   it('shows everything when no owner is configured', () => {
     // The panel behaved this way before this existed, and an unconfigured
     // deployment must not change behaviour.
