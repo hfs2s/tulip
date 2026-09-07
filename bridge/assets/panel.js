@@ -2537,10 +2537,67 @@ function mediaBand(into, dir, items) {
     if (seen.length) {
       into.appendChild(node('h4', 'mediakind', heard.length === 1 ? 'Voice note' : 'Voice notes'));
     }
-    var voices = node('div', 'voicegrid');
-    heard.forEach(function (m) { voices.appendChild(voiceCard(m)); });
-    into.appendChild(voices);
+    // Sent notes open in one place rather than filling the band. There are far
+    // more of them than of anything else — every spoken reply leaves one — and
+    // a column of players is a list nobody reads. Received notes stay in the
+    // band: they carry a transcript, which is the readable half of this page.
+    if (out) {
+      var launch = node('button', 'sm voicelaunch', 'Open ' + plural(heard.length, 'voice note') + '…');
+      launch.type = 'button';
+      launch.addEventListener('click', function () { openVoiceModal(heard); });
+      into.appendChild(launch);
+    } else {
+      var voices = node('div', 'voicegrid');
+      heard.forEach(function (m) { voices.appendChild(voiceCard(m)); });
+      into.appendChild(voices);
+    }
   }
+}
+
+/**
+ * Every voice note we sent, with its words and its player.
+ *
+ * The players are here already rather than behind a per-row toggle: this is a
+ * modal somebody opened *to listen*, and a second click on each one is a click
+ * that answers nothing. `preload="none"` keeps that from fetching a dozen files
+ * on open — the browser fetches when play is pressed.
+ */
+function openVoiceModal(list) {
+  openModal('Voice notes 2LP sent', plural(list.length, 'note') + ', newest first.', function (body) {
+    // The language these are spoken in, changed where they are being listened
+    // to rather than three pages away in Settings.
+    var langRow = node('div', 'entry');
+    langRow.appendChild(node('span', 'value', 'Fallback language'));
+    langRow.appendChild(node('span', 'meta', 'used when a note arrives without one'));
+    var langs = [['', 'This deployment\u2019s default']].concat(
+      ((state && state.languages) || []).map(function (l) {
+        return [l, l === 'auto' ? 'Detect automatically' : l];
+      }));
+    langRow.appendChild(selectField(state && state.agent && state.agent.languageBoost, langs, function (v, revert) {
+      saveSettings({ agent: { languageBoost: v } }, revert);
+    }));
+    body.appendChild(langRow);
+
+    list.forEach(function (m) {
+      var row = node('div', 'voicerow');
+      var head = node('div', 'voice-head');
+      head.appendChild(mediaWho(m));
+      head.appendChild(mediaMeta(m));
+      row.appendChild(head);
+
+      // The words, when we kept them. Notes sent before the script was stored
+      // have none, and saying nothing is better than explaining the gap.
+      if (m.transcript) row.appendChild(node('blockquote', 'said', m.transcript));
+
+      var player = document.createElement('audio');
+      player.src = mediaSrc(m);
+      player.controls = true;
+      player.preload = 'none';
+      player.className = 'voiceplayer';
+      row.appendChild(player);
+      body.appendChild(row);
+    });
+  });
 }
 
 /** What is held, in one sentence, under everything it counts. */
@@ -2648,8 +2705,7 @@ function voiceCard(m) {
   toggle.appendChild(head);
 
   if (m.transcript) toggle.appendChild(node('blockquote', 'said', m.transcript));
-  else if (out) toggle.appendChild(node('div', 'said none cue', 'Play to hear it.'));
-  else toggle.appendChild(node('div', 'said none',
+  else if (!out) toggle.appendChild(node('div', 'said none',
     'No transcript — either transcription was off when this arrived, or it failed.'));
   card.appendChild(toggle);
 

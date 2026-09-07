@@ -232,6 +232,18 @@
   .slider:disabled::-webkit-slider-thumb{background:var(--faint);cursor:default}
   .slider:disabled::-moz-range-thumb{background:var(--faint);cursor:default}
   .slider:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+  /* ── Voice notes, in the modal ──────────────────────────────────────────────
+     Opened to listen, so each row is words then player with nothing to press
+     first. The rows are separated by a rule rather than boxed: they are a list
+     of one kind of thing, and a card each would be twelve frames around twelve
+     sentences. */
+  .voicelaunch{margin-top:4px}
+  .voicerow{padding:14px 0;border-bottom:1px solid var(--line-soft)}
+  .voicerow:last-child{border-bottom:0}
+  .voicerow .voice-head{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+  .voicerow .said{margin:0 0 10px;font-size:13.5px;line-height:1.5;color:var(--ink)}
+  .voiceplayer{width:100%;height:34px;display:block}
+
   .said{white-space:pre-wrap;overflow-wrap:anywhere}
   .why{font-size:12.5px;color:var(--warn);margin-top:3px}
 

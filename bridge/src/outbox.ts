@@ -1097,7 +1097,10 @@ export class Outbox extends EventEmitter {
           return;
         }
         await this.deps.wa.sendVoice(dest.jid, audio.data);
-        retainOutbound(dest.key, 'voice', audio.data);
+        // Keep the script. `action.text` is exactly what the voice says — it was
+        // synthesised from it a line ago — so the Media page can show the words
+        // instead of a play button and the phrase "Play to hear it".
+        retainOutbound(dest.key, 'voice', audio.data, undefined, action.text);
         feed.outbound(dest.key, 'voice', action.text);
         break;
       }

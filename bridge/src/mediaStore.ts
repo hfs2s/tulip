@@ -22,9 +22,9 @@
  * was delivered" rather than "what was attempted" — a file here is evidence
  * that somebody received it.
  */
-import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { writeFileAtomic } from '@tulip/shared';
+import { transcriptFor, writeFileAtomic } from '@tulip/shared';
 import { paths } from './paths.js';
 import { log } from './log.js';
 
@@ -45,7 +45,25 @@ const EXTENSIONS: Record<string, string> = {
  * message has already gone, and failing to file a copy of it must not turn a
  * delivered reply into an error the operator has to interpret.
  */
-export function retainOutbound(chatKey: string, kind: string, data: Buffer, mimetype?: string): void {
+export function retainOutbound(
+  chatKey: string,
+  kind: string,
+  data: Buffer,
+  mimetype?: string,
+  /**
+   * The words this file says, when we already know them.
+   *
+   * A voice note we sent was synthesised from text the agent wrote, so its
+   * "transcript" is not a transcription at all — it is the exact script, and it
+   * was being thrown away. The Media page then had nothing to show for an
+   * outbound note but a play button, and said so: "Play to hear it." Twelve of
+   * those in a column is a list you cannot read.
+   *
+   * Written to the same `<file>.txt` sidecar the inbound transcriber uses, so
+   * one reader serves both and `deleteMedia` already removes it.
+   */
+  words?: string,
+): void {
   if (!/^[0-9a-f]{16}$/.test(chatKey)) return;
   try {
     const extension = EXTENSIONS[kind] ?? extensionFor(mimetype) ?? 'bin';
@@ -54,7 +72,18 @@ export function retainOutbound(chatKey: string, kind: string, data: Buffer, mime
     // The timestamp orders the gallery and the random suffix keeps two sends in
     // the same millisecond from colliding.
     const name = `${String(Date.now())}-${Math.random().toString(36).slice(2, 8)}-${kind}.${extension}`;
-    writeFileAtomic(join(directory, name), data, 0o600);
+    const file = join(directory, name);
+    writeFileAtomic(file, data, 0o600);
+    const said = (words ?? '').trim();
+    if (said.length > 0) {
+      try {
+        writeFileSync(transcriptFor(file), said.slice(0, 4000), { mode: 0o644 });
+      } catch (err) {
+        // The audio is sent and kept either way; losing the script costs a
+        // readable list, not a message.
+        log('mediaOut.transcriptFailed', { err: String((err as Error).message) });
+      }
+    }
     sweep();
   } catch (err) {
     log('mediaOut.writeFailed', { err: String((err as Error).message) });
