@@ -24,22 +24,21 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { inPaths, writeFileAtomic } from '@tulip/shared';
+import { PERSONA_PARTS, PersonaFile, composePersona, inPaths, writeFileAtomic } from '@2lp/shared';
+import { log } from './log.js';
 
-/** Where per-chat workspaces and the persona live inside the agent container. */
+/** Where per-chat workspaces live inside the agent container, and the starter persona baked into it. */
 export const WORKSPACE_ROOT = process.env['TULIP_WORKSPACE'] ?? '/workspace';
 export const PERSONA_DIR = process.env['TULIP_PERSONA'] ?? '/persona';
-
-/** Assembled in this order: who she is, how she carries herself, how she works. */
-const PERSONA_PARTS = ['IDENTITY.md', 'VOICE.md', 'OPERATING.md', 'BOUNDARIES.md'] as const;
 
 /**
  * How many remembered notes the brief carries.
  *
- * Claude Code refuses to carry a CLAUDE.md past 40k characters, and the persona
- * is most of that already. Forty notes is a few thousand characters and leaves
- * the brief itself room; the rest stay in the store, and anything new arrives
- * through the prompt hook rather than by growing this file.
+ * Claude Code loads a CLAUDE.md whole, but warns past 40k characters that
+ * adherence suffers, and the persona is most of that already. Forty notes is a
+ * few thousand characters and leaves the brief itself room; the rest stay in
+ * the store, and anything new arrives through the prompt hook rather than by
+ * growing this file.
  */
 const MEMORY_IN_BRIEF = 40;
 
@@ -115,21 +114,39 @@ export function workspaceFor(chatKey: string): ChatWorkspace {
 }
 
 /**
- * Compose the persona from the version-controlled files.
+ * The persona as the bridge last published it: its version, `null` when
+ * nothing has ever been published, or `undefined` when a file is there and
+ * cannot be read.
  *
- * Kept as separate files rather than one blob so identity, voice, operating
- * notes and boundaries can be edited without disturbing each other — and so
- * that the boundaries section, which is the security-relevant half, is
- * reviewable on its own.
+ * Those three are kept apart on purpose. "Never published" is a fresh
+ * deployment and the starter baked into this image is right for it. "Present
+ * but unreadable" must not become the starter: that would put the repository's
+ * generic character in front of people mid-conversation because of one bad
+ * write. The caller keeps what it has instead.
  */
-function composePersona(): string {
-  const chunks: string[] = [];
-  for (const part of PERSONA_PARTS) {
-    const file = join(PERSONA_DIR, part);
-    if (!existsSync(file)) continue;
-    chunks.push(readFileSync(file, 'utf8').trim());
+export function publishedPersona(): PersonaFile | null | undefined {
+  let raw: string;
+  try {
+    raw = readFileSync(inPaths.persona, 'utf8');
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? null : undefined;
   }
-  return chunks.join('\n\n---\n\n');
+  try {
+    const parsed = PersonaFile.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The starter shipped in `persona/`, for a deployment where no operator has published one. */
+function starterPersona(): string {
+  return composePersona(
+    PERSONA_PARTS.flatMap((name) => {
+      const file = join(PERSONA_DIR, name);
+      return existsSync(file) ? [{ name, text: readFileSync(file, 'utf8') }] : [];
+    }),
+  );
 }
 
 /** Hook wiring, written into each chat workspace's `.claude/settings.json`. */
@@ -145,11 +162,12 @@ function settings(): unknown {
 /**
  * Create or refresh a chat's workspace.
  *
- * `CLAUDE.md` is regenerated on every spawn, so editing `persona/` and
- * restarting the container changes who Tulip is everywhere at once. Editing the
+ * `CLAUDE.md` is regenerated on every spawn from the persona the bridge
+ * published, and the pool respawns a session whose `personaVersion` no longer
+ * matches — so a save in the panel reaches the next message. Editing the
  * generated file does nothing, which the file says about itself.
  */
-export function ensureWorkspace(chatKey: string): ChatWorkspace {
+export function ensureWorkspace(chatKey: string): ChatWorkspace & { personaVersion: string | null } {
   const workspace = workspaceFor(chatKey);
   mkdirSync(join(workspace.dir, '.claude'), { recursive: true });
 
@@ -161,14 +179,22 @@ export function ensureWorkspace(chatKey: string): ChatWorkspace {
   // the whole memory into the first turn or skip a note entirely.
   markMemorySeen(workspace);
 
-  const persona = composePersona();
+  const published = publishedPersona();
+  if (published === undefined && existsSync(workspace.claudeMd)) {
+    // Unreadable: keep the brief this workspace already has rather than
+    // degrading to the starter. A null version means the next readable publish
+    // is treated as a change and respawns into it.
+    log('persona.unreadable', { chatKey, note: 'keeping the existing brief' });
+    return { ...workspace, personaVersion: null };
+  }
+  const persona = published ? composePersona(published.parts) : starterPersona();
   writeFileSync(
     workspace.claudeMd,
-    `${persona}${sharedMemory()}${localTime()}\n\n---\n\nThis file is regenerated from the persona directory every ` +
-      `time a session starts. Editing it here changes nothing; edit the persona instead.\n`,
+    `${persona}${sharedMemory()}${localTime()}\n\n---\n\nThis file is regenerated from the persona every time a ` +
+      `session starts. Editing it here changes nothing; the persona is edited on the panel's Persona page.\n`,
   );
 
-  return workspace;
+  return { ...workspace, personaVersion: published ? published.version : null };
 }
 
 /**

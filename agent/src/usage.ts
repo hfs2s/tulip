@@ -19,7 +19,7 @@
  */
 import { closeSync, fstatSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { UsageReport, UsageWindow } from '@tulip/shared';
+import type { UsageReport, UsageWindow } from '@2lp/shared';
 import { WORKSPACE_ROOT } from './workspace.js';
 import { log } from './log.js';
 

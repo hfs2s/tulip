@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "tulip": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/app/agent/dist/mcp.js"]
+    }
+  }
+}

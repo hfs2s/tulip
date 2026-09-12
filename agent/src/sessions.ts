@@ -15,17 +15,20 @@
  */
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { sessionUuidFor } from '@tulip/shared';
+import { fileURLToPath } from 'node:url';
+import { sessionUuidFor } from '@2lp/shared';
 import { seedClaudeConfig } from './claude-config.js';
 import { log } from './log.js';
 import { capture, killWindow, sendKey, spawnWindow, windowExists } from './tmux.js';
-import { ensureWorkspace, WORKSPACE_ROOT, type ChatWorkspace } from './workspace.js';
+import { ensureWorkspace, publishedPersona, WORKSPACE_ROOT, type ChatWorkspace } from './workspace.js';
 
 export interface Session {
   readonly chatKey: string;
   readonly window: string;
   readonly uuid: string;
   readonly workspace: ChatWorkspace;
+  /** The persona version its brief was built from. Null for the starter, or a brief kept because the persona was unreadable. */
+  readonly personaVersion: string | null;
   readonly startedAt: number;
   lastUsedAt: number;
   turns: number;
@@ -99,6 +102,23 @@ const RESULT_MARKER = /^\s*[●⎿]/;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The `tulip` MCP server — the verbs as typed tools — for chat sessions only.
+ *
+ * Only here, not on the console window: the console has no conversation bound
+ * to it, so every tool would refuse, and fifteen refusing tools are noise in the
+ * one session an operator debugs with.
+ *
+ * `--strict-mcp-config` is passed even when the file is missing. Without it
+ * Claude Code also loads a `.mcp.json` from the working directory, which is the
+ * agent's own writable workspace — a server it could choose for itself.
+ */
+const MCP_CONFIG = fileURLToPath(new URL('../mcp.json', import.meta.url));
+const MCP_ARGS: readonly string[] = [
+  ...(existsSync(MCP_CONFIG) ? ['--mcp-config', MCP_CONFIG] : []),
+  '--strict-mcp-config',
+];
+
 export interface PoolOptions {
   /** Windows resident at once. Beyond this, the least recently used is closed. */
   readonly maxLive: number;
@@ -138,8 +158,19 @@ export class SessionPool {
       await killWindow(existing.window);
       this.live.delete(chatKey);
     } else if (existing && (await windowExists(existing.window))) {
-      existing.lastUsedAt = Date.now();
-      return existing;
+      // A persona saved in the panel since this session started. Resumed, not
+      // reset: the same uuid, so the conversation is kept and only the brief is
+      // rebuilt. Unreadable (undefined) is never a reason to restart — the
+      // session keeps what it has.
+      const published = publishedPersona();
+      const now = published === undefined ? undefined : (published?.version ?? null);
+      if (now === undefined || now === existing.personaVersion) {
+        existing.lastUsedAt = Date.now();
+        return existing;
+      }
+      log('session.persona', { chatKey, from: existing.personaVersion, to: now, note: 'resuming under the new brief' });
+      await killWindow(existing.window);
+      this.live.delete(chatKey);
     }
     // The window is gone — the process died, or an operator closed it. Drop the
     // stale record and spawn again; the context is on disk under the same uuid.
@@ -158,6 +189,7 @@ export class SessionPool {
     const command = [
       'claude',
       ...(resuming ? ['--resume', uuid] : ['--session-id', uuid]),
+      ...MCP_ARGS,
       ...this.options.claudeArgs,
       ...(this.options.model === null ? [] : ['--model', this.options.model]),
     ];
@@ -183,6 +215,7 @@ export class SessionPool {
       window,
       uuid,
       workspace,
+      personaVersion: workspace.personaVersion,
       startedAt: Date.now(),
       lastUsedAt: Date.now(),
       turns: 0,

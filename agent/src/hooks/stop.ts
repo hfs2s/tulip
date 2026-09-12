@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { OutboxAction, outPaths, writeJsonAtomic } from '@tulip/shared';
+import { OutboxAction, outPaths, writeJsonAtomic } from '@2lp/shared';
 import { automaticFallbackTurn } from '../fallback.js';
 
 interface HookInput {

@@ -20,7 +20,7 @@
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { writeJsonAtomic } from '@tulip/shared';
+import { writeJsonAtomic } from '@2lp/shared';
 import { log } from './log.js';
 
 /** Where Claude Code keeps global state, honouring CLAUDE_CONFIG_DIR. */

@@ -60,12 +60,15 @@ export async function windowExists(window: string): Promise<boolean> {
 /**
  * Create the session, or a window inside it, running `command`.
  *
- * The window is sized explicitly and pinned. A tmux window defaults to
- * `window-size latest`, which lets any attaching client reflow it — and the
- * supervisor reads this pane to decide whether a turn is running, so a reflow
- * triggered by an operator opening a terminal would change what the parser
- * sees. `window-size` is a *window* option; setting it with a session target
- * fails with "no such window", which is why the target here is `session:window`.
+ * The window follows whoever is watching it. It used to be pinned, so that
+ * `capture-pane` gave the panel's old file-streamed terminal a predictable
+ * width; that terminal is a real pty over ttyd now, and pinning is exactly
+ * wrong for one — the client reflows and the window does not, so the operator
+ * reads the session through a hole. See the note beside `resize-window` below,
+ * which has to run before `window-size` is set rather than after.
+ *
+ * `window-size` is a *window* option; setting it with a session target fails
+ * with "no such window", which is why the target here is `session:window`.
  */
 export async function spawnWindow(
   window: string,
@@ -95,11 +98,27 @@ export async function spawnWindow(
   // `latest` means the window follows whichever client attached most recently,
   // and `default-size` is what it falls back to with nobody watching — which is
   // most of the time, and where the TUI still needs room to render.
-  await tmux(['set-option', '-w', '-t', paneTarget(window), 'window-size', 'latest']);
   // Global: `default-size` is not addressable with an exact-match session
   // target, and setting it per-session fails with "no such session".
   await tmux(['set-option', '-g', 'default-size', '200x50']);
+
+  // ── Order matters here, and getting it wrong is invisible ──────────────────
+  //
+  // `resize-window` fits the new window to whoever is watching now — and, as a
+  // documented side effect, pins that window to `window-size manual`. So it has
+  // to run *before* the option is set, never after. It used to run after, which
+  // meant every window this function creates was left on `manual` while the
+  // line above it claimed otherwise: the window kept whatever size it was given
+  // at birth and never followed the client again. An operator on a screen
+  // narrower than that saw the session through a hole, cut off down the right
+  // and along the bottom, and resizing the browser did nothing because the
+  // client resized and the window did not.
+  //
+  // The tell was that `console` was fine and every chat window was not — the
+  // idle path never calls `resize-window`, so it never tripped over this.
   await tmux(['resize-window', '-A', '-t', paneTarget(window)]);
+  await tmux(['set-option', '-w', '-t', paneTarget(window), 'window-size', 'latest']);
+
   await tmux(['set-option', '-t', `=${SESSION}`, 'history-limit', '20000']);
   // Set on the server, not the session: ttyd attaches with `new-session -A`, so
   // when no chat is live *it* creates the session and the per-session options

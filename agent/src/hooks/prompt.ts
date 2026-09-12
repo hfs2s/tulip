@@ -14,7 +14,7 @@
  */
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { MemoryFile, inPaths } from '@tulip/shared';
+import { MemoryFile, inPaths } from '@2lp/shared';
 import { catchUpText, notesSince } from '../memory-delta.js';
 
 const markers = join(process.env['TULIP_CHAT_DIR'] ?? '', '.markers');
