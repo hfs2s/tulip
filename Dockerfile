@@ -209,8 +209,8 @@ RUN apt-get update \
 # workspace's node_modules — this image renders hostile pages, and every package
 # it does not contain is one an exploit cannot go looking through.
 COPY --from=prod-deps /app/node_modules/zod ./node_modules/zod
-COPY --from=builder /app/shared/dist ./node_modules/@tulip/shared/dist
-COPY shared/package.json ./node_modules/@tulip/shared/package.json
+COPY --from=builder /app/shared/dist ./node_modules/@2lp/shared/dist
+COPY shared/package.json ./node_modules/@2lp/shared/package.json
 COPY --from=builder /app/browser/dist ./browser/dist
 COPY browser/package.json ./browser/
 
