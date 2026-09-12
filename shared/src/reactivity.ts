@@ -49,17 +49,17 @@ export const REACTIVITY: readonly ReactivityLevel[] = [
     value: 2,
     name: 'Considered',
     description:
-      'The default, and the one the persona was written for. Joins when it can be useful and stays out of ordinary conversation between other people. Silent most of the time — but a direct @-mention is always answered, at every level.',
+      'The default, and the one the persona was written for. Joins when it can be useful and stays out of ordinary conversation between other people. Silent most of the time — but a reaction is not speaking, and it still reacts to what lands; a direct @-mention is always answered, at every level.',
     instruction:
-      'Otherwise join in when you can be useful, and stay out of ordinary conversation between other people. When nobody has addressed you and you have nothing worth adding, run `tulip-wa quiet`.',
+      'Otherwise join in when you can be useful, and stay out of ordinary conversation between other people. When nobody has addressed you and you have nothing worth adding, run `tulip-wa quiet`. A reaction is not speaking: react to what lands even on a turn you go quiet for.',
   },
   {
     value: 3,
     name: 'Engaged',
     description:
-      'Behaves like a member of the group rather than a service. Picks up threads, adds to what people are saying, reacts to things. Noticeably more present, and sends noticeably more messages.',
+      'Behaves like a member of the group rather than a service. Picks up threads, adds to what people are saying, reacts freely to anything that lands. Noticeably more present, and sends noticeably more messages.',
     instruction:
-      'Behave like a member of this group rather than a service: pick things up, add to what people are saying, react when something deserves it. Still skip messages you would add nothing to.',
+      'Behave like a member of this group rather than a service: pick things up, add to what people are saying, react freely to anything that lands. Still skip messages you would add nothing to — but a reaction is not speaking, so reach for one before you skip.',
   },
   {
     value: 4,

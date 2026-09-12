@@ -71,6 +71,40 @@ const Destination = ChatKey.nullable().default(null);
 /** Identifies one delivery of one batch. Opaque to the agent; a UUID in practice. */
 export const TurnId = z.string().uuid();
 
+// ─── Callable plugins ────────────────────────────────────────────────────────
+//
+// Shared rather than written twice because three readers enforce them: the
+// bridge's config and manifest parsers, this file's `pluginCall` action, and
+// the agent's CLI and MCP tool, which refuse a bad name before anything is
+// queued. See bridge/src/pluginCalls.ts.
+
+/** A plugin's name, which is also its directory under the plugins mount. */
+export const PLUGIN_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
+/** One action a plugin offers, as its manifest names it. Same shape as a plugin name. */
+export const PLUGIN_ACTION = PLUGIN_NAME;
+/** An argument's name. A leading letter, so it can never be read as a flag or a number. */
+export const PLUGIN_ARG_NAME = /^[a-z][a-zA-Z0-9_]{0,39}$/;
+export const PLUGIN_MAX_ARGS = 10;
+export const PLUGIN_MAX_ARG_CHARS = 2000;
+/**
+ * The longest an operator may let a plugin take to answer. The agent's own wait
+ * is set from this, so a slow plugin is reported as slow rather than the call
+ * vanishing on the agent's side first.
+ */
+export const PLUGIN_MAX_TIMEOUT_MS = 300_000;
+
+/**
+ * Named arguments for one plugin call — strings only, and few of them.
+ *
+ * Strings because the plugin is a separate program in whatever language its
+ * author chose, and a string is the one type every one of them reads the same
+ * way. Named rather than positional so the bridge can check each name against
+ * what the plugin's manifest declared.
+ */
+export const PluginArgs = z
+  .record(z.string().regex(PLUGIN_ARG_NAME, 'an argument name: a letter, then letters, digits or _'), z.string().max(PLUGIN_MAX_ARG_CHARS))
+  .refine((a) => Object.keys(a).length <= PLUGIN_MAX_ARGS, `at most ${String(PLUGIN_MAX_ARGS)} arguments`);
+
 /**
  * A file the agent has placed in `out/files/` for sending.
  *
@@ -165,6 +199,25 @@ export const InboundMessage = z
   .strict();
 
 /**
+ * A line the room said before the message that woke the agent.
+ *
+ * In `mention` and `trigger` groups the gate hands over only what addressed
+ * Juan, so "what do you think of this?" arrives with no "this". The bridge
+ * already records everything said in a room it is in, and these are the last
+ * few lines of it. `heard` is false for a line the gate held back: it was said
+ * in the room, not to Juan, and must never be quoted back as if it had been.
+ */
+export const ContextMessage = z
+  .object({
+    /** A display name, or `you` for the agent's own earlier replies. Attacker-controlled. */
+    from: z.string().max(128),
+    at: z.string().datetime(),
+    text: z.string().max(1000),
+    heard: z.boolean(),
+  })
+  .strict();
+
+/**
  * One batch of messages handed to the agent. Written to `in/batches/<turnId>.json`
  * by the bridge, which is the only writer — the agent's mount is read-only, so it
  * cannot forge, edit or replay one.
@@ -178,6 +231,12 @@ export const InboxBatch = z
     isGroup: z.boolean(),
     receivedAt: z.string().datetime(),
     messages: z.array(InboundMessage).min(1).max(50),
+    /**
+     * Oldest first. Only in `mention` and `trigger` groups — a direct chat and
+     * an `observe` room already deliver every message, so there is nothing
+     * missing to fill in.
+     */
+    context: z.array(ContextMessage).max(30).optional(),
   })
   .strict();
 
@@ -244,7 +303,7 @@ export const CurrentTurn = z
      * whatever this says, because it is written into a file the agent reads and
      * a compromised agent could ignore it entirely. It is here to stop the
      * *honest* failure, which is the common one — the agent plans a reply
-     * around a GIF, sends the action, and gets nothing back, because a refusal
+     * around a picture, sends the action, and gets nothing back, because a refusal
      * on the bridge side is invisible from inside the container.
      *
      * Each field defaults to `true` so a `current.json` written by an older
@@ -291,15 +350,15 @@ export const CurrentTurn = z
  *
  * Note what is absent and cannot be added by an attacker: a file path, a shell
  * command, a URL. The bridge opens files only from its own directory and
- * performs only the actions below. A GIF is a *search phrase*, not a URL, for
+ * performs only the actions below. A picture is a *description*, not a URL, for
  * the same reason.
  *
  * A recipient is the one exception, and it is worth stating precisely because
  * it used to be on that list. Actions default to `turnId`, which the bridge
- * resolves through a map the agent cannot write. `sendTo`, `file`, `gif`,
- * `image` and `voice` may name a chat instead — but only by a key the bridge
- * itself issued, only when an operator has switched `agent.crossChat` on, and
- * none of them can *read* the chat it names. Reach is the same for all five;
+ * resolves through a map the agent cannot write. `sendTo`, `file`, `image` and
+ * `voice` may name a chat instead — but only by a key the bridge itself
+ * issued, only when an operator has switched `agent.crossChat` on, and none of
+ * them can *read* the chat it names. Reach is the same for all four;
  * they differ only in medium. See THREAT-MODEL.md §T4.
  */
 export const OutboxAction = z.discriminatedUnion('kind', [
@@ -447,6 +506,40 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       id: z.string().uuid(),
       turnId: TurnId,
       /**
+       * Leave a WhatsApp group, because an operator asked.
+       *
+       * The second action, after `contact`, whose control is provenance rather
+       * than a switch: the bridge refuses it unless the turn is an operator's,
+       * which the dispatcher decided from the sender's jid before the agent saw
+       * anything. A member who wants Juan quiet has `!stopjuan`, which works at
+       * once and is undone by an operator. Leaving is harder to undo — only
+       * somebody still in the group can add him back — which is why it is not
+       * something a room can talk the agent into.
+       *
+       * Deliberately not `Destination`, though it has the same shape. Naming a
+       * group here sends it nothing of the agent's choosing beyond the goodbye,
+       * so `agent.crossChat` has no say in it: an operator in their direct
+       * message naming the group is the ordinary case, and it must not depend
+       * on a switch that governs something else.
+       */
+      kind: z.literal('leaveGroup'),
+      /** Which group. Null is the chat whose turn this is. A group either way, or refused. */
+      chatKey: ChatKey.nullable().default(null),
+      /**
+       * Said to the group before leaving, as an ordinary message. Carried on
+       * this action rather than sent separately because the order matters and
+       * cannot be recovered: once Juan has left, nothing he writes reaches the
+       * room. Capped well below `text`, because a goodbye is a line, not a
+       * speech.
+       */
+      goodbye: z.string().min(1).max(1000).nullable().default(null),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
        * Remember something, for every conversation rather than this one.
        *
        * Deliberate rather than automatic: a transcript is not memory, and an
@@ -580,6 +673,25 @@ export const OutboxAction = z.discriminatedUnion('kind', [
     .object({
       id: z.string().uuid(),
       turnId: TurnId,
+      /**
+       * Name an hfs2s app, or clear its name.
+       *
+       * The box names its own workspaces and most of them have no name at all;
+       * nothing the agent can reach changes that, so the label is kept on this
+       * side and shown wherever the app is named. An empty label clears it.
+       *
+       * Governed by `apps.grants` like every other workspace verb: naming
+       * somebody's app is a small act, and it is still their app.
+       */
+      kind: z.literal('appLabel'),
+      workspace: z.string().regex(/^[0-9a-f]{8}$/, 'an eight-character workspace id'),
+      label: z.string().max(60),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
       kind: z.literal('pageNew'),
       slug: z.string().min(3).max(48).regex(/^[a-z0-9][a-z0-9-]*$/, 'lowercase letters, digits and dashes'),
       title: z.string().min(1).max(120),
@@ -657,13 +769,25 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       /**
        * A page to read.
        *
-       * Constrained to http(s) here, and the bridge never dials it: it asks the
-       * search provider to fetch it and return the text. That distinction is
-       * the whole safety argument — a bridge that fetched agent-chosen URLs
-       * itself would be a server-side request forgery gadget sitting on both
-       * networks. See bridge/src/exa.ts.
+       * Constrained to http(s) here, and the bridge never dials it. It hands
+       * it to `tulip-browser` — a separate, untrusted container whose only
+       * route is a proxy that refuses private addresses — and failing that,
+       * asks the search provider for its copy. That distinction is the whole
+       * safety argument: a bridge that fetched agent-chosen URLs itself would
+       * be a server-side request forgery gadget sitting on both networks. See
+       * bridge/src/browse.ts and bridge/src/exa.ts.
        */
       url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'must be http or https'),
+      /**
+       * Also bring back a picture of the page (`--look`). Only the browser can
+       * take one; when the answer comes from the search provider there is none.
+       *
+       * Defaulted, so an agent built before this field existed still sends a
+       * valid action. The other direction does not hold — the schema is strict,
+       * so a bridge that predates it rejects an action carrying it — which is
+       * why the bridge is deployed first.
+       */
+      screenshot: z.boolean().default(false),
     })
     .strict(),
   z
@@ -681,6 +805,70 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       turnId: TurnId,
       kind: z.literal('typing'),
       on: z.boolean(),
+    })
+    .strict(),
+  /**
+   * Correct something already said.
+   *
+   * `nth` is a position in the agent's own recent messages in *this* chat —
+   * 1 is the last thing it said — never a WhatsApp message id. That asymmetry
+   * is deliberate and is the whole security argument for exposing this at all:
+   * an id is an opaque string the agent could be talked into repeating by
+   * anybody who types one at it, whereas a small ordinal can only ever resolve
+   * to a message Juan sent in the conversation Juan is answering. The bridge
+   * does the resolving, against a store the agent has no mount for.
+   * See bridge/src/sent.ts.
+   */
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      kind: z.literal('edit'),
+      nth: z.number().int().min(1).max(20),
+      text: z.string().min(1).max(4000),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      kind: z.literal('unsend'),
+      nth: z.number().int().min(1).max(20),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
+       * Which services on the host this turn may ask things of.
+       *
+       * Answered from config and each plugin's own manifest. A plugin the
+       * operator marked `operatorOnly` is left out unless the turn carries
+       * operator authority, so the listing is what this conversation can
+       * actually use rather than a list of things it will be refused.
+       */
+      kind: z.literal('pluginList'),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
+       * Ask one plugin to do one thing, and wait for its answer.
+       *
+       * Note what this cannot say: a path, a URL, a command, or anything about
+       * *how* the plugin does its work. It names a plugin the operator enabled,
+       * one action that plugin's manifest lists, and arguments that action
+       * declares — the bridge checks all three, and whether the turn is an
+       * operator's, before it writes anything. What the plugin then does is
+       * only what its own service implements. See bridge/src/pluginCalls.ts.
+       */
+      kind: z.literal('pluginCall'),
+      plugin: z.string().regex(PLUGIN_NAME, 'a plugin name from `tulip-wa plugins`'),
+      action: z.string().regex(PLUGIN_ACTION, 'an action name from `tulip-wa plugins`'),
+      args: PluginArgs.default({}),
     })
     .strict(),
 ]);
@@ -751,7 +939,14 @@ export const MemoryFile = z.object({ notes: z.array(MemoryNote).max(200) }).stri
 export const ToolResult = z
   .object({
     actionId: z.string().uuid(),
-    kind: z.enum(['search', 'fetch', 'chats', 'page', 'contact', 'sent', 'history', 'schedule']),
+    kind: z.enum([
+      'search', 'fetch', 'chats', 'page', 'contact', 'sent', 'history', 'schedule', 'edit', 'unsend', 'leaveGroup',
+      // Both plugin actions. A kind an older agent does not know only reaches
+      // an agent new enough to have asked for it, so adding one is safe.
+      'plugin',
+      // Naming an hfs2s app. Same reasoning as `plugin` above.
+      'app',
+    ]),
     at: z.string().datetime(),
     ok: z.boolean(),
     /** Present when ok is false. Short, and safe to show a person. */

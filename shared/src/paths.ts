@@ -37,6 +37,14 @@ export const inPaths = {
    * state that reaches every conversation.
    */
   memory: `${IN_DIR}/memory.json`,
+  /**
+   * The persona as an operator last saved it in the panel, with a version.
+   *
+   * Inbound for the same reason as memory, and more so: this is who the agent
+   * is told to be in every conversation, so it must not be able to rewrite it.
+   * See bridge/src/persona.ts.
+   */
+  persona: `${IN_DIR}/persona.json`,
   media: `${IN_DIR}/media`,
   mediaFor: (chatKey: string) => `${IN_DIR}/media/${chatKey}`,
 
@@ -51,6 +59,16 @@ export const inPaths = {
    */
   results: `${IN_DIR}/results`,
   result: (actionId: string) => `${IN_DIR}/results/${actionId}.json`,
+  /**
+   * A screenshot that came back with a `fetch --look`, beside its result.
+   *
+   * Written by the bridge *before* the result, so an agent that has read the
+   * answer can rely on the picture already being there. Named from the action
+   * id rather than carried in the result, which is what lets the result keep
+   * its shape: an agent built before screenshots existed still parses every
+   * answer, and simply never looks for the file. Swept with the results.
+   */
+  resultImage: (actionId: string) => `${IN_DIR}/results/${actionId}.png`,
 
   /**
    * The operator's terminal request: which window to show, and keys to type.

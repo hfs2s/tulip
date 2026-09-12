@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CurrentTurn, InboundMessage, InboxBatch } from '../src/handoff.js';
+import { CurrentTurn, InboundMessage, InboxBatch, OutboxAction, ToolResult } from '../src/handoff.js';
 import { writeFileAtomic, writeJsonAtomic } from '../src/atomic.js';
 
 const TURN = '11111111-2222-4333-8444-555555555555';
@@ -18,6 +18,54 @@ const batch = (over: Record<string, unknown> = {}): unknown => ({
     { from: 'someone', at: '2026-01-01T12:00:00.000Z', text: 'hello', quoted: null, media: [] },
   ],
   ...over,
+});
+
+/**
+ * What the agent can ask of a plugin: a name, an action and named strings. The
+ * bridge checks each against config and the manifest; this is the shape check
+ * in front of that, and the one place a path or a flag could be smuggled in.
+ */
+describe('the plugin actions', () => {
+  const call = (over: Record<string, unknown> = {}): unknown => ({
+    id: '6f1c2b9e-0c55-4a4e-9d7b-3f0a8e2d1c44',
+    turnId: TURN,
+    kind: 'pluginCall',
+    plugin: 'bookings',
+    action: 'lookup',
+    args: { ref: '4411' },
+    ...over,
+  });
+
+  it('accepts a call, and defaults its arguments to none', () => {
+    expect(OutboxAction.safeParse(call()).success).toBe(true);
+    const bare = OutboxAction.parse(call({ args: undefined }));
+    expect(bare.kind === 'pluginCall' && bare.args).toEqual({});
+  });
+
+  it.each([
+    ['a plugin name that is a path', { plugin: '../state' }],
+    ['a plugin name with capitals', { plugin: 'Bookings' }],
+    ['an action name with a space', { action: 'look up' }],
+    ['an argument name that could be a flag', { args: { '--to': 'x' } }],
+    ['an argument name that starts with a digit', { args: { '1ref': 'x' } }],
+    ['a value that is not a string', { args: { guests: 4 } }],
+    ['a value over the limit', { args: { ref: 'x'.repeat(2001) } }],
+    ['more than ten arguments', { args: Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`a${String(i)}`, 'x'])) }],
+    ['a field it does not describe', { url: 'https://example.com' }],
+  ])('refuses %s', (_label, over) => {
+    expect(OutboxAction.safeParse(call(over)).success).toBe(false);
+  });
+
+  it('lists with nothing to say but that', () => {
+    const list = { id: '6f1c2b9e-0c55-4a4e-9d7b-3f0a8e2d1c44', turnId: TURN, kind: 'pluginList' };
+    expect(OutboxAction.safeParse(list).success).toBe(true);
+    expect(OutboxAction.safeParse({ ...list, plugin: 'bookings' }).success).toBe(false);
+  });
+
+  it('has a result kind to be answered with', () => {
+    const result = { actionId: TURN, kind: 'plugin', at: '2026-01-01T12:00:00.000Z', ok: true, error: null, items: [] };
+    expect(ToolResult.safeParse(result).success).toBe(true);
+  });
 });
 
 describe('InboxBatch', () => {

@@ -185,33 +185,53 @@ export type SpokenLanguage = (typeof SPOKEN_LANGUAGES)[number]['name'];
  * reader will look for it.
  */
 export const LANGUAGE_SAMPLES: Readonly<Record<SpokenLanguage, string>> = {
-  English: "Hello, I'm Juan. I'm a helpful assistant, and this is how I sound when I speak your language.",
-  Spanish: 'Hola, soy Juan. Soy un asistente útil, y así sueno cuando hablo tu idioma.',
-  French: 'Bonjour, je suis Juan. Je suis un assistant utile, et voici comment je sonne quand je parle votre langue.',
-  Italian: 'Ciao, sono Juan. Sono un assistente utile, ed ecco come suono quando parlo la tua lingua.',
-  Portuguese: 'Olá, eu sou o Juan. Sou um assistente prestativo, e é assim que soo quando falo a sua língua.',
-  Catalan: 'Hola, sóc en Juan. Sóc un assistent útil, i així sono quan parlo la teva llengua.',
-  Filipino: 'Kumusta, ako si Juan. Isa akong matulunging assistant, at ganito ang tunog ko kapag nagsasalita ako ng wika mo.',
-  Cebuano: 'Kumusta, ako si Juan. Usa ko ka matabangong assistant, ug mao kini ang akong tingog kung mosulti ko sa imong pinulongan.',
-  Indonesian: 'Halo, saya Juan. Saya asisten yang membantu, dan beginilah suara saya saat berbicara bahasa Anda.',
-  Dutch: 'Hallo, ik ben Juan. Ik ben een behulpzame assistent, en zo klink ik als ik jouw taal spreek.',
-  German: 'Hallo, ich bin Juan. Ich bin ein hilfsbereiter Assistent, und so klinge ich, wenn ich deine Sprache spreche.',
-  Arabic: 'مرحبًا، أنا خوان. أنا مساعد مفيد، وهكذا أبدو عندما أتحدث لغتك.',
-  Mandarin: '你好，我是胡安。我是一个乐于助人的助手，这就是我说你的语言时的声音。',
-  Russian: 'Здравствуйте, меня зовут Хуан. Я полезный помощник, и вот как я звучу, когда говорю на вашем языке.',
-  Japanese: 'こんにちは、フアンです。お役に立てるアシスタントです。あなたの言語で話すと、このように聞こえます。',
-  Czech: 'Dobrý den, jmenuji se Juan. Jsem užitečný asistent a takhle zním, když mluvím vaším jazykem.',
-  Greek: 'Γεια σας, είμαι ο Χουάν. Είμαι ένας χρήσιμος βοηθός και έτσι ακούγομαι όταν μιλάω τη γλώσσα σας.',
-  Hindi: 'नमस्ते, मैं हुआन हूँ। मैं एक मददगार सहायक हूँ, और आपकी भाषा बोलते समय मेरी आवाज़ ऐसी सुनाई देती है।',
-  Korean: '안녕하세요, 저는 후안입니다. 저는 도움을 드리는 비서이고, 여러분의 언어로 말하면 이렇게 들립니다.',
-  Polish: 'Cześć, jestem Juan. Jestem pomocnym asystentem i tak brzmię, gdy mówię w twoim języku.',
-  Thai: 'สวัสดีครับ ผมชื่อฮวน ผมเป็นผู้ช่วยที่พร้อมช่วยเหลือ และนี่คือเสียงของผมเมื่อพูดภาษาของคุณ',
-  Ukrainian: 'Вітаю, я Хуан. Я корисний помічник, і ось як я звучу, коли розмовляю вашою мовою.',
-  Cantonese: '你好，我係胡安。我係一個樂於助人嘅助手，呢個就係我講你語言時嘅聲音。',
-  Finnish: 'Hei, olen Juan. Olen avulias assistentti, ja tältä kuulostan puhuessani sinun kieltäsi.',
-  Romanian: 'Salut, sunt Juan. Sunt un asistent gata să te ajute, iar așa sună vocea mea când vorbesc limba ta.',
-  Turkish: 'Merhaba, ben Juan. Yardımcı bir asistanım ve senin dilini konuşurken sesim böyle çıkıyor.',
+  English: "Hello, I'm {name}, and this is how I sound when I speak your language.",
+  Spanish: 'Hola, soy {name}, y así sueno cuando hablo tu idioma.',
+  French: "Bonjour, je m'appelle {name}, et voici comment je sonne quand je parle votre langue.",
+  Italian: 'Ciao, sono {name}, ed ecco come suono quando parlo la tua lingua.',
+  Portuguese: 'Olá, eu sou {name}, e é assim que soo quando falo a sua língua.',
+  Catalan: 'Hola, em dic {name}, i així sono quan parlo la teva llengua.',
+  Filipino: 'Kumusta, ako si {name}, at ganito ang tunog ko kapag nagsasalita ako ng wika mo.',
+  Cebuano: 'Kumusta, ako si {name}, ug mao kini ang akong tingog kung mosulti ko sa imong pinulongan.',
+  Indonesian: 'Halo, saya {name}, dan beginilah suara saya saat berbicara bahasa Anda.',
+  Dutch: 'Hallo, ik ben {name}, en zo klink ik als ik jouw taal spreek.',
+  German: 'Hallo, ich bin {name}, und so klinge ich, wenn ich deine Sprache spreche.',
+  Arabic: 'مرحبًا، أنا {name}، وهكذا أبدو عندما أتحدث لغتك.',
+  Mandarin: '你好，我是{name}。这就是我说你的语言时的声音。',
+  Russian: 'Здравствуйте, меня зовут {name}, и вот как я звучу, когда говорю на вашем языке.',
+  Japanese: 'こんにちは、{name}です。あなたの言語で話すと、このように聞こえます。',
+  Czech: 'Dobrý den, jmenuji se {name} a takhle zním, když mluvím vaším jazykem.',
+  Greek: 'Γεια σας, με λένε {name} και έτσι ακούγομαι όταν μιλάω τη γλώσσα σας.',
+  Hindi: 'नमस्ते, मैं {name} हूँ, और आपकी भाषा बोलते समय मेरी आवाज़ ऐसी सुनाई देती है।',
+  Korean: '안녕하세요, 저는 {name}입니다. 여러분의 언어로 말하면 이렇게 들립니다.',
+  Polish: 'Cześć, jestem {name} i tak brzmię, gdy mówię w twoim języku.',
+  Thai: 'สวัสดี ฉันชื่อ{name} และนี่คือเสียงของฉันเมื่อพูดภาษาของคุณ',
+  Ukrainian: 'Вітаю, я {name}, і ось як я звучу, коли розмовляю вашою мовою.',
+  Cantonese: '你好，我係{name}。呢個就係我講你語言時嘅聲音。',
+  Finnish: 'Hei, olen {name}, ja tältä kuulostan puhuessani sinun kieltäsi.',
+  Romanian: 'Salut, sunt {name}, iar așa sună vocea mea când vorbesc limba ta.',
+  Turkish: 'Merhaba, ben {name}. Senin dilini konuşurken sesim böyle çıkıyor.',
 };
+
+/**
+ * One language's sample with the deployment's own name in it.
+ *
+ * The samples are templates because one codebase now speaks for more than one
+ * agent, and a bench that has Maria introduce herself as somebody else is
+ * demonstrating the wrong thing. They also say nothing gendered — no "helpful
+ * assistant", which half these languages inflect — so the same line is right
+ * whoever is speaking it.
+ */
+export function sampleFor(language: SpokenLanguage, name: string): string {
+  return LANGUAGE_SAMPLES[language].replaceAll('{name}', name);
+}
+
+/** Every sample, named. What the panel's bench shows beside each row. */
+export function samplesFor(name: string): Record<SpokenLanguage, string> {
+  const out = {} as Record<SpokenLanguage, string>;
+  for (const language of Object.keys(LANGUAGE_SAMPLES) as SpokenLanguage[]) out[language] = sampleFor(language, name);
+  return out;
+}
 
 /**
  * Boosts this deployment will not speak aloud.

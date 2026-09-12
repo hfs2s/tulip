@@ -109,3 +109,18 @@ describe('the languages added after the original nine', () => {
     expect(spokenLanguageFor('Cantonese')?.boost).toBe('Chinese,Yue');
   });
 });
+
+describe('samples name whoever is speaking', () => {
+  it('puts the deployment’s name in every sample, once', async () => {
+    const { sampleFor } = await import('../src/languages.js');
+    for (const row of SPOKEN_LANGUAGES) {
+      expect(LANGUAGE_SAMPLES[row.name].split('{name}').length - 1, row.name).toBe(1);
+      const said = sampleFor(row.name, 'Maria');
+      expect(said, row.name).toContain('Maria');
+      expect(said, row.name).not.toContain('{name}');
+      // The samples used to hard-code one agent. A second deployment must not
+      // introduce itself as the first.
+      expect(said, row.name).not.toMatch(/Juan|خوان|胡安|Хуан|フアン|Χουάν|हुआन|후안|ฮวน/);
+    }
+  });
+});
