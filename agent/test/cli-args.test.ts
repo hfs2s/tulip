@@ -116,11 +116,11 @@ describe('takeLanguage', () => {
 describe('takeDestination and takeLanguage together', () => {
   it('lifts both, in either order, leaving only the words', () => {
     for (const argv of [
-      ['--to', '17f1f7d2c1a600d2', '--language', 'Catalan', "d'acord"],
-      ['--language', 'Catalan', '--to', '17f1f7d2c1a600d2', "d'acord"],
+      ['--to', '0123456789abcdef', '--language', 'Catalan', "d'acord"],
+      ['--language', 'Catalan', '--to', '0123456789abcdef', "d'acord"],
     ]) {
       const first = takeDestination(argv, 'voice');
-      expect(ok<string | null>(first) && first.value).toBe('17f1f7d2c1a600d2');
+      expect(ok<string | null>(first) && first.value).toBe('0123456789abcdef');
       const second = takeLanguage(ok<string | null>(first) ? first.rest : [], 'voice');
       expect(ok<string>(second) && second.value).toBe('Catalan');
       expect(ok<string>(second) && second.rest).toEqual(["d'acord"]);
@@ -130,7 +130,7 @@ describe('takeDestination and takeLanguage together', () => {
   it('leaves nothing for the backstop to find', () => {
     // The property that matters: after both lifts, `strayFlag` sees no flags,
     // so a legitimate command is never refused as if it carried a typo.
-    const first = takeDestination(['--to', '17f1f7d2c1a600d2', '--language', 'Spanish', 'hola'], 'voice');
+    const first = takeDestination(['--to', '0123456789abcdef', '--language', 'Spanish', 'hola'], 'voice');
     const second = takeLanguage(ok<string | null>(first) ? first.rest : [], 'voice');
     expect(strayFlag(ok<string>(second) ? second.rest : [], 'voice')).toBeNull();
   });

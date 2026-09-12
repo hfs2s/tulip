@@ -33,7 +33,7 @@ const { feed } = await import('../src/feed.js');
 const { recentMessages } = await import('../src/history.js');
 const { REFUSAL } = await import('../src/gate.js');
 
-const MINE = '17f1f7d2c1a600d2';
+const MINE = '0123456789abcdef';
 const THEIRS = '44242d5135c8fa5b';
 
 const inbound = (chatKey: string, from: string, text: string, accepted = true): void => {

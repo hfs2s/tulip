@@ -24,7 +24,7 @@ process.env['TULIP_OUT_DIR'] = join(root, 'out');
 const { deleteMedia, resolveMedia } = await import('../src/panel-api.js');
 const { inPaths, transcriptFor } = await import('@2lp/shared');
 
-const CHAT = '17f1f7d2c1a600d2';
+const CHAT = '0123456789abcdef';
 // The leading zeros are deliberate. Media filenames are `<ms timestamp>-<id>`,
 // and a real 13-digit timestamp is indistinguishable from a phone number to
 // `check:secrets` — which has no allow-list on purpose, and says so: make a

@@ -12,7 +12,7 @@ import { MAX_CHARS, cap, planFor, xmlToText } from '../src/doc-read.js';
 
 describe('planFor — what it reads', () => {
   it('sends a PDF to pdftotext, laid out', () => {
-    const plan = planFor('/handoff/in/media/17f1f7d2c1a600d2/deck.pdf');
+    const plan = planFor('/handoff/in/media/0123456789abcdef/deck.pdf');
     expect(plan.ok && plan.how).toBe('run');
     // Without -layout a two-column page interleaves into nonsense.
     expect(plan.ok && plan.how === 'run' && plan.argv).toContain('-layout');
