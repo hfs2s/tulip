@@ -1,5 +1,5 @@
 {
-  "name": "@tulip/bridge",
+  "name": "@2lp/bridge",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
     "@fontsource-variable/inter": "^5.2.5",
     "@fontsource-variable/onest": "^5.2.5",
     "@paper-design/shaders": "0.0.80",
-    "@tulip/shared": "*",
+    "@2lp/shared": "*",
     "@xterm/xterm": "^5.5.0",
     "baileys": "7.0.0-rc13",
     "qrcode-terminal": "^0.12.0",
@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@types/qrcode-terminal": "^0.12.2",
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.24.0",
+    "sql.js": "1.14.2"
   }
 }

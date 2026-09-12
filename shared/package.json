@@ -1,5 +1,5 @@
 {
-  "name": "@tulip/shared",
+  "name": "@2lp/shared",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,9 @@
     ".": "./dist/index.js",
     "./handoff": "./dist/handoff.js",
     "./ids": "./dist/ids.js",
-    "./paths": "./dist/paths.js"
+    "./paths": "./dist/paths.js",
+    "./browse": "./dist/browse.js",
+    "./atomic": "./dist/atomic.js"
   },
   "types": "./dist/index.d.ts",
   "scripts": {

@@ -1,5 +1,5 @@
 {
-  "name": "tulip",
+  "name": "2lp",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -16,7 +16,8 @@
     "shared",
     "bridge",
     "agent",
-    "egress"
+    "egress",
+    "browser"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

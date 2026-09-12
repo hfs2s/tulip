@@ -1,5 +1,5 @@
 {
-  "name": "@tulip/agent",
+  "name": "@2lp/agent",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
     "start": "node dist/supervisor.js"
   },
   "dependencies": {
-    "@tulip/shared": "*",
+    "@2lp/shared": "*",
     "zod": "^3.24.1"
   }
 }

@@ -1,0 +1,17 @@
+{
+  "name": "@2lp/browser",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The untrusted headless browser: opens one page at a time behind a proxy that refuses private addresses.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@2lp/shared": "*",
+    "zod": "^3.24.1"
+  }
+}
