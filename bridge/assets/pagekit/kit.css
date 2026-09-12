@@ -95,6 +95,20 @@ figure{margin:32px 0}
 figure img{width:100%;height:auto;display:block;border-radius:var(--r-card);border:1px solid var(--line-soft)}
 figcaption{margin-top:10px;font-size:12.5px;color:var(--faint)}
 
+/* Tables, including the ones Tulip.sqlite draws. `.rows` scrolls sideways inside
+   its own box, because a wide result on a phone should not drag the page with it. */
+.rows{overflow-x:auto;margin:20px 0;background:var(--panel);
+  border:1px solid var(--line-soft);border-radius:var(--r-card)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line-soft)}
+th{font-weight:500;font-size:12px;letter-spacing:.02em;color:var(--faint);white-space:nowrap}
+td{color:var(--dim)}
+tbody tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums}
+td.null,td.none{color:var(--faint)}
+td.none{text-align:center}
+.sqlite-problem{border-color:var(--bad);color:var(--ink)}
+
 /* Motion. Elements start displaced and settle when they come into view; the
    easing overshoots very slightly, which is what makes it read as spring rather
    than as a fade. `.reveal` is applied by kit.js so a page with JS disabled

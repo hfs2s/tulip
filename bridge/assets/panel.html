@@ -110,6 +110,92 @@
      900px. Kept out of the media query so the rules that make them *work* live
      next to each other rather than being split across the file. */
   .topbar,.nav-scrim{display:none}
+  /* ── Correcting what he said ──────────────────────────────────────────────
+     Three things an operator can do to Juan's own messages, and one rule
+     shaping all of them: WhatsApp's edit window is about a quarter of an hour,
+     so the *ability* expires. The server only sends a position for messages
+     still inside it, and these controls exist only where that position does —
+     so a button being here is itself the promise that it will work.
+
+     Quiet until wanted. A row of icons under every message would turn a
+     transcript into a control surface, and the thing being read here is a
+     conversation. They appear on hover, on focus, and whenever the row is
+     being edited; on a touch screen, where hover is not a thing, they are
+     simply always visible rather than unreachable. */
+  .said .acts,.msg .acts{display:flex;align-items:center;gap:2px;margin-top:3px;
+    opacity:0;transition:opacity .12s ease}
+  .said:hover .acts,.said:focus-within .acts,.said.editing .acts,
+  .msg:hover .acts,.msg:focus-within .acts{opacity:1}
+  /* No hover on a touch screen, so the controls would be unreachable rather
+     than merely hidden. */
+  @media (hover:none){ .said .acts,.msg .acts{opacity:1} }
+  @media (prefers-reduced-motion:reduce){ .said .acts,.msg .acts{transition:none} }
+
+  .said .acts button,.msg .acts button{appearance:none;background:none;border:0;
+    padding:3px 6px;font:inherit;font-size:11.5px;color:var(--faint);cursor:pointer;
+    border-radius:var(--r-pill);display:inline-flex;align-items:center;gap:5px}
+  .said .acts button:hover,.msg .acts button:hover{color:var(--ink);background:var(--raise)}
+  .said .acts button:focus-visible,.msg .acts button:focus-visible{
+    outline:2px solid var(--accent);outline-offset:1px;color:var(--ink)}
+  /* Destructive, and the only control here that turns red. */
+  .said .acts button.gone:hover{color:var(--bad)}
+  .said .acts svg,.msg .acts svg{width:14px;height:14px;flex:0 0 14px}
+
+  /* Retracted, and kept on screen. The words are gone from every phone in the
+     conversation, so this is the only surviving account of what was actually
+     said — which is the thing somebody opens this page to check. Struck through
+     rather than removed, and it arrives on the next repaint rather than on a
+     manual reload. */
+  .said.gone .txt > p,.said.gone .txt > ul{text-decoration:line-through;color:var(--faint)}
+  .said.gone .av{opacity:.4}
+
+  /* The picker floats. In the flow it made every bubble taller to hold a
+     control almost none of them would ever use — a permanent cost for an
+     occasional action. Out of flow it costs nothing until it is open, and the
+     thread keeps the height it had before any of this existed. */
+  .said .acts,.msg .acts{position:relative}
+  .reactpop{position:absolute;z-index:40;bottom:calc(100% + 6px);left:0;width:262px;
+    padding:7px;background:var(--panel);border:1px solid var(--line);
+    box-shadow:0 12px 34px rgba(0,0,0,.6)}
+  /* Flipped for the oldest message on screen, which has nothing above it. */
+  .reactpop.below{bottom:auto;top:calc(100% + 6px)}
+  /* A bubble on the right lane would otherwise push the panel off the edge. */
+  .msg.them .acts .reactpop,.msg.op .acts .reactpop{left:auto;right:0}
+
+  /* The five in reach get their own line and a larger target: picking one of
+     these should not mean reading a grid first. */
+  .reactpop .quick{display:flex;gap:2px;padding-bottom:6px;margin-bottom:6px;
+    border-bottom:1px solid var(--line-soft)}
+  .reactpop .quick button.react{font-size:20px;line-height:1;padding:4px 6px}
+
+  .reactpop .grid{display:flex;flex-wrap:wrap;gap:1px;max-height:124px;overflow-y:auto}
+  .reactpop .grid button.react{font-size:17px;line-height:1;padding:3px 5px}
+
+  .reactpop button.react{appearance:none;background:none;border:0;cursor:pointer;
+    border-radius:var(--r-pill)}
+  .reactpop button.react:hover{background:var(--raise)}
+  .reactpop button.react:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+  .reactpop .anyglyph{width:100%;margin-top:7px;background:var(--ground);color:var(--ink);
+    border:1px solid var(--line);border-radius:0;padding:5px 7px;font:inherit;font-size:13px}
+  .reactpop .anyglyph:focus-visible{outline:2px solid var(--accent);outline-offset:-1px;
+    border-color:transparent}
+
+  /* How long is left, in the same breath as the actions rather than as a
+     separate badge — it is the reason they are here at all. */
+  .said .left{font-size:11px;color:var(--faint);align-self:center;margin-left:4px;
+    font-variant-numeric:tabular-nums}
+  .said .left.soon{color:var(--warn)}
+
+  /* Editing in place, so the words being changed stay next to their context. */
+  .said .fix{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+  .said .fix textarea{width:100%;min-height:64px;resize:vertical;background:var(--raise);
+    color:var(--ink);border:1px solid var(--line);border-radius:0;padding:8px 9px;
+    font:inherit;font-size:13.5px;line-height:1.45}
+  .said .fix textarea:focus-visible{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+  .said .fix .row{display:flex;gap:6px;align-items:center}
+  .said .fix .hint{font-size:11px;color:var(--faint);margin-left:auto}
+
   /* Same lockup, same rule. The 17.03:22 ratio is kept here too — a square box
      would letterbox the mark and reopen the gap this was fixed to close. */
   .topbar-brand{display:flex;align-items:baseline;gap:9px;min-width:0}
@@ -359,6 +445,22 @@
        font-size:13px;opacity:.55;transition:opacity .15s,border-color .15s,color .15s}
   .bin:hover,.bin:focus-visible{opacity:1;color:var(--bad);border-color:var(--bad)}
   .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+
+  /* Correcting a message Juan has already sent. `.linky` is the quiet control
+     in the composer's footer; the rest dress the list in its modal. */
+  .composer .under .linky{font:inherit;font-size:11.5px;color:var(--faint);
+    background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;
+    text-decoration-color:var(--line);text-underline-offset:3px}
+  .composer .under .linky:hover{color:var(--ink)}
+  .composer .under .linky:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+  .modal-body .card + .card{margin-top:12px}
+  .modal-body .rowline{display:flex;align-items:center;gap:9px}
+  .modal-body .rowline .meta{font-size:11.5px;color:var(--faint)}
+  .modal-body .modal-actions{margin-top:12px}
+  /* Retraction is the one irreversible control here, and it should not look
+     like the reword sitting next to it. */
+  button.sm.danger{border-color:rgba(255,107,107,.45);color:var(--bad,#ff6b6b)}
+  button.sm.danger:hover{border-color:var(--bad,#ff6b6b);background:rgba(255,107,107,.08)}
   button.danger{border-color:var(--bad);color:var(--bad)}
   button.danger:hover:not(:disabled){background:var(--bad);color:var(--ground)}
   button.danger:disabled{opacity:.5;cursor:default}
@@ -485,6 +587,25 @@
            padding:11px 13px;margin:10px 0 14px;white-space:pre-wrap;overflow-x:auto}
   .doc pre code{background:none;color:inherit;padding:0}
   .doc hr{border:0;border-top:1px solid var(--line-soft);margin:32px 0}
+
+  /* ── Editing the persona ────────────────────────────────────────────────────
+     The box is the brief itself, so it is monospace and tall enough to hold a
+     whole section: what the agent reads is exactly what is in it. */
+  .personasize{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin:14px 0 0}
+  .personasize.over,.personacount.over{color:var(--warn,#d9a441)}
+  .personabar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-top:18px}
+  .personaedit{grid-column:1/-1;min-width:0}
+  .personabox{display:block;width:100%;min-height:62vh;box-sizing:border-box;resize:vertical;
+              font-family:var(--mono);font-size:12.5px;line-height:1.6;color:var(--ink);
+              background:var(--raise);border:1px solid var(--line-soft);border-radius:0;padding:14px 16px;tab-size:4}
+  .personabox:focus-visible{outline:2px solid var(--accent);outline-offset:-1px}
+  .personaacts{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px}
+  .personacount{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-left:auto}
+  .personabtn{font:500 13px/1 var(--body);padding:9px 14px;border:1px solid var(--line-soft);
+              background:var(--raise);color:var(--ink);border-radius:0;cursor:pointer}
+  .personabtn.primary{background:var(--accent);border-color:var(--accent);color:var(--bg,#0b0b0c)}
+  .personabtn:disabled{opacity:.5;cursor:default}
+  .personabtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   @media (max-width:900px){
     .personabody{grid-template-columns:1fr;gap:18px}
@@ -1078,6 +1199,9 @@
      sharing it. `min-height:0` is what lets the frame shrink inside the column
      instead of pushing the page into a scroll of its own. */
   .sessionpage.bare{display:flex;flex-direction:column;min-height:0;flex:1}
+  /* The terminal pane takes the slack; the composer under it keeps its own
+     height rather than being squeezed to nothing by a tall terminal. */
+  .sessionpage.bare > .composer{flex:none}
   .sessionpage.bare > .termmodal{width:auto;flex:1;min-height:0;height:auto;
         border-radius:12px;box-shadow:none}
   .termbar{display:flex;align-items:center;gap:12px;flex:none;
@@ -1323,6 +1447,11 @@
             overflow-wrap:anywhere}
   .pagename:hover{color:var(--accent);text-decoration:underline}
   .pageurl{margin:0;font-size:12px;color:var(--faint);overflow-wrap:anywhere}
+  /* Every address an app answers on, each one openable. A card that lists four
+     hostnames and links none of them makes you copy them out by hand. */
+  .pageurl a{color:var(--dim);text-decoration:none;border-bottom:1px solid var(--line)}
+  .pageurl a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+  .pageurl .sep{color:var(--line);padding:0 6px}
   .pageflags{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
   /* A state a visitor would notice, said in a word. Not all-caps: the panel
      speaks in sentences. */
@@ -1476,7 +1605,7 @@
   <header class="topbar">
     <div class="topbar-brand">
       <span class="topbar-mark" id="topbarMark"></span>
-      <b>2LP</b>
+      <b class="brand-name">2LP</b>
     </div>
     <span class="topbar-page" id="topbarPage">Overview</span>
     <button class="topbar-toggle" id="navToggle" type="button"
@@ -1499,7 +1628,7 @@
         <path d="M16 26.6C11.4 24.6 8.2 20.4 7.6 15.2 7.3 12.6 7.6 10.2 8.4 8.4c2 1.2 3.6 3.2 4.7 5.8C13 10.6 14 7.4 16 4.6c2 2.8 3 6 2.9 9.6 1.1-2.6 2.7-4.6 4.7-5.8.8 1.8 1.1 4.2.8 6.8-.6 5.2-3.8 9.4-8.4 11.4z" fill="#21d2ed" opacity=".58"/>
         <path d="M16 4.6c2 2.8 3 6 2.9 9.6 0 5-1.1 9.2-2.9 12.4-1.8-3.2-2.9-7.4-2.9-12.4C13 10.6 14 7.4 16 4.6z" fill="#21d2ed"/>
       </svg>
-      <b>2LP</b>
+      <b class="brand-name">2LP</b>
     </div>
     <nav id="nav"></nav>
     <div class="rail-foot">
@@ -1522,6 +1651,7 @@
       <section class="page" id="p-overview"></section>
       <section class="page" id="p-messages"></section>
       <section class="page" id="p-chats"></section>
+      <section class="page" id="p-groups"></section>
       <section class="page" id="p-chat"></section>
       <section class="page" id="p-media"></section>
       <section class="page" id="p-terminal"></section>
@@ -1530,6 +1660,7 @@
       <section class="page" id="p-schedule"></section>
       <section class="page" id="p-verbs"></section>
       <section class="page" id="p-pages"></section>
+      <section class="page" id="p-apps"></section>
       <section class="page" id="p-settings"></section>
       <section class="page" id="p-log"></section>
     </div>

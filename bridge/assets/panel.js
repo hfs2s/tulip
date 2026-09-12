@@ -5,6 +5,9 @@
 // for nav icons, which is a fixed literal defined in this file and never data.
 
 var state = null;
+// Which agent this panel belongs to. Filled from /api/state; every string that
+// says the agent's name reads it here, so one panel serves every deployment.
+var AGENT = 'the agent';
 var route = 'overview';
 var feedFilter = 'all';
 var chatQuery = '';
@@ -176,6 +179,9 @@ var ICONS = {
   schedule: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.4 1.6"/><path d="M9 2.6h6"/>',
   overview: '<path d="M3.5 18a8.5 8.5 0 1 1 17 0"/><path d="M12 18l4.4-5.6"/>',
   messages: '<path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1z"/>',
+  trash: '<path d="M4.8 7.2h14.4"/><path d="M9.6 7.2V5.4a1.2 1.2 0 0 1 1.2-1.2h2.4a1.2 1.2 0 0 1 1.2 1.2v1.8"/><path d="M17.4 7.2v11.4a1.2 1.2 0 0 1-1.2 1.2H7.8a1.2 1.2 0 0 1-1.2-1.2V7.2"/><path d="M10.5 11v5"/><path d="M13.5 11v5"/>',
+  smile: '<circle cx="12" cy="12" r="8.2"/><path d="M8.9 14.2a3.9 3.9 0 0 0 6.2 0"/><path d="M9.4 9.8h.01"/><path d="M14.6 9.8h.01"/>',
+  groups: '<path d="M9.4 11.6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M16.4 12a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8z"/><path d="M3.6 19.4c0-2.9 2.6-4.6 5.8-4.6s5.8 1.7 5.8 4.6"/><path d="M17 14.9c2.1.3 3.4 1.6 3.4 3.4"/>',
   chats: '<path d="M16.2 12.5H18a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H7.6a1 1 0 0 0-1 1v1.4"/><path d="M13 7.8H4.6a1 1 0 0 0-1 1v6.6a1 1 0 0 0 1 1H6v3.1l3.9-3.1H13a1 1 0 0 0 1-1V8.8a1 1 0 0 0-1-1z"/>',
   // A sheet with a corner turned: a page, which is what these are.
   // A page with a person on it: the brief, not the person.
@@ -184,6 +190,7 @@ var ICONS = {
   verbs: '<path d="M4 5h16v14H4z"/><path d="m8 10 2 2-2 2"/><path d="M13 14h3"/>',
   memory: '<path d="M15.6 4.2a4.3 4.3 0 0 0-8.2 1.6c0 .7.2 1.4.5 2l-2 3.3h2v3.6a2 2 0 0 0 2 2h1.4v3.1"/><path d="M11.6 8.4a1.9 1.9 0 1 0 3.4 1.2"/>',
   pages: '<path d="M14 3.5H6.5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V8z"/><path d="M14 3.5V8h4.5"/><path d="M8.8 12.5h6.4"/><path d="M8.8 16h4.2"/>',
+  apps: '<rect x="3.5" y="5" width="17" height="14" rx="1.6"/><path d="M3.5 9.2h17"/><path d="M6.4 7.1h.01"/><path d="M8.8 7.1h.01"/>',
   chat: '<path d="M20.5 12c0 3.9-3.8 7-8.5 7-1 0-2-.15-2.9-.42L4 20l1.3-3.4C4.2 15.3 3.5 13.7 3.5 12c0-3.9 3.8-7 8.5-7s8.5 3.1 8.5 7z"/><path d="M8.6 10.4h6.8"/><path d="M8.6 13.4h4.4"/>',
   media: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="8.6" cy="9.9" r="1.4"/><path d="M3.5 16.2l4.4-3.9 3.6 3.1 3-2.6 6 4.9"/>',
   tools: '<path d="M14.7 6.3a4 4 0 0 0 5 5L15 16l-3 3-4-4 3-3z"/><path d="M6 18l1.5-1.5"/>',
@@ -215,9 +222,10 @@ function icon(name) {
 
 var PAGES = [
   ['overview', 'Overview'], ['chat', 'Chat'], ['messages', 'Messages'], ['chats', 'Chats'],
+  ['groups', 'Groups'],
   ['media', 'Media'], ['terminal', 'Terminal'], ['persona', 'Persona'], ['memory', 'Memory'],
   ['schedule', 'Schedule'], ['verbs', 'Verbs'],
-  ['pages', 'Pages'], ['settings', 'Settings'], ['log', 'Log']
+  ['pages', 'Pages'], ['apps', 'Apps'], ['settings', 'Settings'], ['log', 'Log']
 ];
 
 /** Is the person looking the operator who owns this deployment? */
@@ -360,6 +368,13 @@ function go(next) {
  * hold and resume — which is a page away rather than in front of every page.
  */
 function verdict(s) {
+  // Which agent this is. Several deployments share this page, and the name is
+  // what tells an operator which one they are about to act on.
+  if (s.instance && s.instance.agentName && s.instance.agentName !== AGENT) {
+    AGENT = s.instance.agentName;
+    document.title = '2LP · ' + AGENT;
+    document.querySelectorAll('.brand-name').forEach(function (b) { b.textContent = '2LP · ' + AGENT; });
+  }
   el('whoami').textContent = s.whatsapp.name || 'not paired';
   agentStatus(s);
   var badge = el('navChats');
@@ -623,7 +638,11 @@ function renderChats(s) {
     p.appendChild(bar);
   }
 
+  // Rooms live on Groups now. They are a different object with different
+  // questions attached, and mixing them meant every column here had to mean two
+  // things at once.
   var list = s.chats.filter(function (c) {
+    if (c.isGroup) return false;
     return !q || (c.name || '').toLowerCase().indexOf(q) >= 0 || c.chatKey.indexOf(q) >= 0;
   });
   if (!list.length) { card.appendChild(node('p', 'empty', 'Nobody has messaged yet.')); p.appendChild(card); return; }
@@ -636,7 +655,7 @@ function renderChats(s) {
   table.appendChild(thead);
   list.forEach(function (c) {
     var tr = document.createElement('tr');
-    tr.appendChild(node('td', null, (c.name || 'Someone') + (c.isGroup ? ' (group)' : '') + (c.contact ? ' — contact' : '') + (c.blocked ? ' — blocked' : '')));
+    tr.appendChild(node('td', null, (c.name || 'Someone') + (c.contact ? ' — contact' : '') + (c.blocked ? ' — blocked' : '')));
     tr.appendChild(node('td', 'key', c.chatKey));
     tr.appendChild(node('td', null, c.messages));
     tr.appendChild(node('td', null, c.turnsToday));
@@ -679,6 +698,202 @@ function renderChats(s) {
   // button 56px past the right edge of a 390px screen, reachable only by
   // discovering the page scrolls at all, and dragging the sticky bar off with
   // it on the way.
+  var scroller = node('div');
+  scroller.style.overflowX = 'auto';
+  scroller.appendChild(table);
+  card.appendChild(scroller);
+  p.appendChild(card);
+}
+
+
+// ── Groups ──────────────────────────────────────────────────────────────────
+// Rooms, separated from Chats because they are not the same object.
+//
+// A direct chat is one person and the only question about it is whether to
+// answer them. A room is many people who did not individually choose to talk to
+// an agent, and the questions are different: is he allowed in here at all, what
+// counts as being addressed, and — the one this page exists for — has somebody
+// in the room told him to stop.
+//
+// They shared a table for a long time and the cost was legible only once
+// something went wrong: a group reading as silent when it had been busy all
+// afternoon, because nothing in a row full of message counts says "he can hear
+// this room but is not being spoken to". That distinction is what this page is
+// built to show.
+function renderGroups(s) {
+  var p = head('groups', 'Groups',
+    'Rooms he has been added to. He reads everything said in them and answers almost none of it, so a quiet '
+    + 'group usually means nobody addressed him rather than something being broken. Anyone in a room can stop '
+    + 'him there by sending !stopjuan — only you can start him again.');
+
+  // The setting that governs every row, above the rows it governs. It is read
+  // here and changed in Settings: two places to edit one value is how they end
+  // up disagreeing.
+  var mode = (s.audience && s.audience.groupMode) || 'mention';
+  var on = !(s.audience && s.audience.groups === false);
+  var rule = node('div', 'card');
+  var ruleText = !on
+    ? 'He is not answering in any room. Groups are switched off in Settings, so everything said in them is recorded and none of it reaches him.'
+    : mode === 'observe'
+      ? 'Everything said in a room reaches him, and he decides whether to speak. The most expensive setting: every message is a turn.'
+      : mode === 'trigger'
+        ? 'He answers a mention, a reply to him, or the words juan, berbania or tulip. Everything else is recorded and goes no further.'
+        : 'He answers a mention or a reply to him, and nothing else.';
+  rule.appendChild(node('p', 'sub', ruleText + (on ? ' Any room can be set differently below.' : '')));
+  p.appendChild(rule);
+
+  var card = node('div', 'card');
+  var groups = (s.chats || []).filter(function (c) { return c.isGroup; });
+  if (!groups.length) {
+    card.appendChild(node('p', 'empty', 'He is not in any rooms. Add him to one and it appears here.'));
+    p.appendChild(card);
+    return;
+  }
+
+  var stopped = s.stopped || {};
+  var table = document.createElement('table');
+  var thead = document.createElement('tr');
+  ['Room', 'Answering', 'Answers on', 'Messages', 'Turns today', 'Last seen', ''].forEach(function (h) {
+    thead.appendChild(node('th', null, h));
+  });
+  table.appendChild(thead);
+
+  groups.forEach(function (c) {
+    var stop = stopped[c.chatKey];
+    var tr = document.createElement('tr');
+    // Name over key rather than beside it: the key is what you type into
+    // `!block`, so it has to be here, but nobody scans a table by it.
+    var who = node('td');
+    who.appendChild(node('div', null, c.name || 'Unnamed room'));
+    who.appendChild(node('div', 'key muted', c.chatKey));
+    tr.appendChild(who);
+
+    // One cell answering one question: will he speak in here if somebody
+    // addresses him? Three different reasons for "no", named rather than
+    // collapsed into a single "off", because the fix is different for each.
+    var stateCell = node('td');
+    if (c.leftAt) {
+      stateCell.appendChild(node('span', 'muted', 'Left'));
+      stateCell.appendChild(node('div', 'muted', ago(s.now - c.leftAt) + ' ago'));
+    } else if (c.blocked) stateCell.appendChild(node('span', 'bad', 'Blocked'));
+    else if (stop) {
+      stateCell.appendChild(node('span', 'bad', 'Stopped'));
+      stateCell.appendChild(node('div', 'muted',
+        'by ' + (stop.by || 'someone') + ', ' + ago(s.now - stop.since) + ' ago'));
+    } else if (!on) stateCell.appendChild(node('span', 'warn', 'Groups off'));
+    else stateCell.appendChild(node('span', null, 'Yes'));
+    tr.appendChild(stateCell);
+
+    // What counts as being addressed, in this room alone. The global setting is
+    // the first option rather than a separate checkbox, because "follow the
+    // global" is a real answer and not the absence of one — a room left on it
+    // tracks the global when that changes, where a room pinned to `trigger`
+    // stays on trigger however the global moves.
+    var modeCell = node('td');
+    var pick = document.createElement('select');
+    pick.className = 'sm';
+    pick.setAttribute('aria-label', 'What ' + AGENT + ' answers in ' + (c.name || c.chatKey));
+    var own = (s.audience && s.audience.groupModes && s.audience.groupModes[c.chatKey]) || null;
+    [
+      ['', 'Global — ' + mode, 'Follow the setting above. If that changes, this room changes with it.'],
+      ['mention', 'Mention or reply', 'Only a real @mention, or a reply to something he said.'],
+      ['trigger', 'Trigger word', 'A mention or reply, or the words juan, berbania or tulip.'],
+      ['observe', 'Judgement', 'Everything in the room reaches him and he decides whether to speak. Every message costs a turn.']
+    ].forEach(function (o) {
+      var opt = document.createElement('option');
+      opt.value = o[0];
+      opt.textContent = o[1];
+      opt.title = o[2];
+      if ((own ? own.replyTo : '') === o[0]) opt.selected = true;
+      pick.appendChild(opt);
+    });
+    pick.disabled = !on;
+    pick.title = on
+      ? 'What counts as being addressed in this room.'
+      : 'Groups are switched off, so this has no effect yet.';
+    pick.addEventListener('change', function () {
+      act('groups/mode', null, '?chat=' + encodeURIComponent(c.chatKey), { replyTo: pick.value || null });
+    });
+    modeCell.appendChild(pick);
+    tr.appendChild(modeCell);
+
+    tr.appendChild(node('td', null, c.messages));
+    tr.appendChild(node('td', null, c.turnsToday));
+    tr.appendChild(node('td', 'muted', ago(s.now - c.lastSeenAt)));
+
+    var td = document.createElement('td');
+    var open = node('button', 'sm', 'Open');
+    open.type = 'button';
+    open.setAttribute('aria-label', 'Open ' + (c.name || c.chatKey));
+    open.addEventListener('click', function () { go('chat/' + c.chatKey); });
+    td.appendChild(open);
+
+    // Asks WhatsApp itself, so the answer does not depend on anything this panel
+    // recorded. Changes nothing; the reply arrives as a toast.
+    if (isOwner()) {
+      var check = node('button', 'sm', 'Still in?');
+      check.type = 'button';
+      check.title = 'Ask WhatsApp whether ' + AGENT + ' is a member of this group. Changes nothing.';
+      check.addEventListener('click', function () { act('groups/check', null, '?chat=' + encodeURIComponent(c.chatKey)); });
+      td.appendChild(check);
+    }
+
+    // Leaving is the operator's too, and harder to undo than a stop: somebody in
+    // the room has to add him back. Two clicks, like the panel's other
+    // irreversible buttons, and no confirm dialog.
+    if (isOwner() && !c.leftAt) {
+      var leave = node('button', 'sm', 'Leave group');
+      leave.type = 'button';
+      leave.setAttribute('aria-label', 'Make ' + AGENT + ' leave ' + (c.name || c.chatKey));
+      var armedLeave = false;
+      leave.addEventListener('click', function () {
+        if (!armedLeave) {
+          armedLeave = true;
+          leave.textContent = 'Click again to leave';
+          setTimeout(function () { armedLeave = false; leave.textContent = 'Leave group'; }, 4000);
+          return;
+        }
+        leave.disabled = true;
+        act('groups/leave', null, '?chat=' + encodeURIComponent(c.chatKey));
+      });
+      td.appendChild(leave);
+    }
+
+    // Starting is the operator's alone, which is the whole safeguard behind
+    // letting anybody stop him. Stopping stays available to whoever is holding
+    // this panel, since it only ever produces silence.
+    if (stop) {
+      if (isOwner()) {
+        var start = node('button', 'sm', 'Start here');
+        start.type = 'button';
+        start.style.marginLeft = '8px';
+        start.title = 'Answer this room again. ' + (stop.by || 'Someone') + ' stopped him in it.';
+        start.addEventListener('click', function () { act('startchat', c.chatKey); });
+        td.appendChild(start);
+      }
+    } else {
+      var halt = node('button', 'sm danger', 'Stop here');
+      halt.type = 'button';
+      halt.style.marginLeft = '8px';
+      halt.title = 'Stop answering in this room. Messages keep arriving and are still recorded.';
+      halt.addEventListener('click', function () { act('stopchat', c.chatKey); });
+      td.appendChild(halt);
+    }
+
+    var b = node('button', 'sm' + (c.blocked ? '' : ' danger'), c.blocked ? 'Unblock' : 'Block');
+    b.type = 'button';
+    b.style.marginLeft = '8px';
+    b.title = c.blocked
+      ? 'Take this room off the blocklist.'
+      : 'Stop recording this room at all — stronger than stopping him in it.';
+    b.addEventListener('click', function () { act(c.blocked ? 'unblock' : 'block', c.chatKey); });
+    td.appendChild(b);
+    tr.appendChild(td);
+    table.appendChild(tr);
+  });
+
+  // The same wrapper every wide table here gets; without it the document
+  // scrolls sideways instead of the table.
   var scroller = node('div');
   scroller.style.overflowX = 'auto';
   scroller.appendChild(table);
@@ -834,7 +1049,7 @@ function paintConvoList(target) {
   var rows = (state && state.chats) ? state.chats : [];
   if (!rows.length) {
     list.appendChild(node('p', 'convo-none',
-      'Nobody has messaged Juan yet. The first message opens a conversation here.'));
+      'Nobody has messaged ' + AGENT + ' yet. The first message opens a conversation here.'));
     return;
   }
   var q = convoQuery.trim().toLowerCase();
@@ -890,7 +1105,7 @@ function previewFor(c) {
   for (var i = chatFeed.length - 1; i >= 0; i--) {
     var e = chatFeed[i];
     if (e.chatKey !== c.chatKey) continue;
-    if (e.kind === 'out') return 'Juan: ' + (e.text || '');
+    if (e.kind === 'out') return AGENT + ': ' + (e.text || '');
     if (e.kind === 'in') return e.text || (e.detail ? '(' + e.detail + ')' : '');
   }
   return plural(c.messages, 'message');
@@ -1167,7 +1382,6 @@ var WA = {
   file: ['Sent a file', firstWord],
   image: ['Made a picture', words],
   voice: ['Sent a voice note', null],
-  gif: ['Sent a GIF', words],
   react: ['Reacted', words],
   quiet: ['Chose not to reply', null],
   remember: ['Remembered this', words],
@@ -1370,19 +1584,267 @@ function msgNode(item, side, run) {
     var msg = node('div', 'msg ' + side + (run ? ' run' : ''));
     msg.appendChild(node('div', 'body', item.text));
     msg.appendChild(node('span', 'at', hhmm(item.ts)));
+    // Only what somebody actually sent, and only where an id was recorded. An
+    // operator's own typed line has no WhatsApp message behind it.
+    if (item.waId && item.direction === 'in' && chatOpen) reactActions(item, msg, chatOpen);
     return msg;
   }
 
-  var said = node('div', 'said' + (run ? ' run' : ''));
+  var said = node('div', 'said' + (run ? ' run' : '') + (item.unsent ? ' gone' : ''));
   var av = node('span', 'av', 'J');
   av.setAttribute('aria-hidden', 'true');
   said.appendChild(av);
   var txt = node('div', 'txt');
   prose(String(item.text || ''), txt);
-  txt.appendChild(node('span', 'at', hhmm(item.ts)));
+  txt.appendChild(node('span', 'at', hhmm(item.ts) + (item.unsent ? ' · deleted' : '')));
   said.appendChild(txt);
+  // A retracted message keeps its words and loses its controls: there is
+  // nothing further to do to it, and the strikethrough is the record.
+  if (item.nth && !item.unsent && chatOpen) msgActions(item, said, chatOpen);
   return said;
 }
+
+/**
+ * WhatsApp's own edit window, as the panel understands it.
+ *
+ * Not authoritative — WhatsApp decides, server-side, and refuses what it
+ * refuses. This is here so the countdown means something before the refusal
+ * arrives, and it is deliberately a minute short of the real fifteen: a control
+ * that vanishes slightly early is honest, where one that lingers a few seconds
+ * past the end offers something that will fail after the operator has already
+ * typed the correction.
+ */
+var EDIT_WINDOW_MS = 14 * 60 * 1000;
+
+function editLeft(ts) { return EDIT_WINDOW_MS - (Date.now() - ts); }
+
+/**
+ * The controls under one of Juan's messages.
+ *
+ * Built only where the server sent a position, which it does only for messages
+ * the `sent` store can still reach — so their presence is the promise, and
+ * their absence is the answer. Nothing here holds a WhatsApp message id; the
+ * panel counts backwards exactly as the agent does, for the reason in the
+ * header of `sent.ts`.
+ */
+/**
+ * React to one message, from a layer that floats above the thread.
+ *
+ * The first version put the glyphs in the flow of the message's own controls.
+ * It was unambiguous — the picker was literally inside the bubble it targeted —
+ * and it was wrong: every message grew to make room for a control almost none
+ * of them would ever use, so the thread got taller and harder to read in
+ * exchange for an affordance that is idle 99% of the time.
+ *
+ * So the bubble now carries one small button and nothing else, and the choosing
+ * happens in a layer that takes no space. Anchoring keeps what mattered about
+ * the first version: the panel is positioned against the button that opened it
+ * and closes the moment anything else is touched, so there is still no question
+ * which message it will land on.
+ *
+ * It opens upward, because the button sits at the bottom of a bubble and a
+ * thread is read from the bottom — and flips down when there is no room above,
+ * which is the case for the oldest message on screen.
+ */
+function reactActions(item, host, chatKey) {
+  var acts = node('div', 'acts');
+  var open = node('button', null);
+  open.type = 'button';
+  open.title = 'React to this message';
+  open.setAttribute('aria-label', 'React to this message');
+  open.setAttribute('aria-expanded', 'false');
+  open.appendChild(icon('smile'));
+  acts.appendChild(open);
+
+  var pop = null;
+
+  function close() {
+    if (!pop) return;
+    pop.remove();
+    pop = null;
+    open.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('mousedown', onOutside, true);
+    document.removeEventListener('keydown', onKey, true);
+  }
+
+  function onOutside(e) { if (pop && !pop.contains(e.target) && e.target !== open) close(); }
+  function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); open.focus(); } }
+
+  function send(glyph) {
+    close();
+    void act('chat/react', null, '?key=' + encodeURIComponent(chatKey), { emoji: glyph, id: item.waId });
+  }
+
+  function glyphButton(glyph) {
+    var b = node('button', 'react', glyph);
+    b.type = 'button';
+    b.setAttribute('aria-label', 'React ' + glyph);
+    b.addEventListener('click', function () { send(glyph); });
+    return b;
+  }
+
+  open.addEventListener('click', function () {
+    if (pop) { close(); return; }
+
+    pop = node('div', 'reactpop');
+    // The five people actually send, on their own line and larger: reaching one
+    // of these should not mean reading a grid.
+    var quick = node('div', 'quick');
+    QUICK_REACTIONS.forEach(function (g) { quick.appendChild(glyphButton(g)); });
+    pop.appendChild(quick);
+
+    var grid = node('div', 'grid');
+    MORE_REACTIONS.forEach(function (g) { grid.appendChild(glyphButton(g)); });
+    pop.appendChild(grid);
+
+    // For everything no list will have — flags, skin tones, whatever shipped
+    // last month. The bridge decides what WhatsApp will actually take.
+    var any = document.createElement('input');
+    any.type = 'text';
+    any.className = 'anyglyph';
+    any.placeholder = 'or paste any emoji';
+    any.maxLength = 16;
+    any.setAttribute('aria-label', 'React with any emoji');
+    any.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      var typed = any.value.trim();
+      if (typed) send(typed);
+    });
+    pop.appendChild(any);
+
+    acts.appendChild(pop);
+    open.setAttribute('aria-expanded', 'true');
+
+    // Upward by default; downward when the button is too near the top of the
+    // scrolling thread for the panel to fit above it.
+    var box = open.getBoundingClientRect();
+    var room = box.top - (host.closest('.thread') || document.body).getBoundingClientRect().top;
+    if (room < pop.offsetHeight + 12) pop.classList.add('below');
+
+    document.addEventListener('mousedown', onOutside, true);
+    document.addEventListener('keydown', onKey, true);
+    var first = pop.querySelector('button');
+    if (first) first.focus();
+  });
+
+  host.appendChild(acts);
+}
+
+/** In reach without asking. The ones people actually send. */
+var QUICK_REACTIONS = ['👍', '❤️', '😂', '✅', '🙏'];
+
+/**
+ * Everything else.
+ *
+ * A curated list rather than an emoji database: this is a reaction, so the
+ * useful set is faces, hands and a few objects that mean something in a
+ * conversation. Anything outside it goes in the box at the end.
+ */
+var MORE_REACTIONS = [
+  '😀', '😅', '😍', '🥰', '😘', '🤔', '😐', '😴',
+  '😢', '😭', '😮', '😱', '😡', '🤯', '🥳', '😇',
+  '👏', '🙌', '🤝', '💪', '👌', '✌️', '🤞', '👋',
+  '🔥', '💯', '⭐', '🎉', '💡', '👀', '🚀', '☕',
+  '❌', '⚠️', '🤖', '🍀'
+];
+
+function msgActions(item, said, chatKey) {
+  var acts = node('div', 'acts');
+  var left = editLeft(item.ts);
+
+  if (left > 0) {
+    var fix = node('button', null, 'Edit');
+    fix.type = 'button';
+    fix.setAttribute('aria-label', 'Edit this message');
+    fix.addEventListener('click', function () { openFix(item, said, chatKey); });
+    acts.appendChild(fix);
+  }
+
+  var gone = node('button', 'gone');
+  gone.type = 'button';
+  gone.title = 'Delete for everyone';
+  // The label carries the meaning; the glyph only has to be recognisable. An
+  // icon with no accessible name is a button that says nothing to a screen
+  // reader, and this one is the destructive control on the page.
+  gone.setAttribute('aria-label', 'Delete this message for everyone');
+  gone.appendChild(icon('trash'));
+  gone.addEventListener('click', function () {
+    // Confirmed because it cannot be undone and it reaches every phone in the
+    // conversation. The wording is what actually happens, not "are you sure".
+    if (!window.confirm('Delete this message for everyone?\n\nIt disappears from the conversation on every phone. This cannot be undone.')) return;
+    void act('chat/unsend', null, '?key=' + encodeURIComponent(chatKey), { nth: item.nth });
+  });
+  acts.appendChild(gone);
+
+  // Why the Edit button is or is not there. Silence was the first version of
+  // this and it was wrong: a row showing only a delete icon reads as a missing
+  // feature, not as a closed window. Both states live in `.acts`, which is
+  // revealed on hover, so neither costs anything until somebody looks.
+  if (left > 0) {
+    var mins = Math.max(1, Math.round(left / 60000));
+    var clock = node('span', 'left' + (mins <= 3 ? ' soon' : ''), mins + 'm to edit');
+    clock.title = 'WhatsApp stops allowing edits about fifteen minutes after a message is sent. Deleting stays possible for longer.';
+    acts.appendChild(clock);
+  } else {
+    var shut = node('span', 'left', 'too old to edit');
+    shut.title = 'WhatsApp only allows edits for about fifteen minutes. It can still be deleted for everyone.';
+    acts.appendChild(shut);
+  }
+
+  said.appendChild(acts);
+}
+
+/**
+ * Change the words, in place.
+ *
+ * In place rather than in a modal, because a correction is written against the
+ * sentence before it and the sentence after it — lifting it out of the thread
+ * takes away the only thing that tells you what to write.
+ */
+function openFix(item, said, chatKey) {
+  if (said.querySelector('.fix')) return;
+  said.classList.add('editing');
+
+  var wrap = node('div', 'fix');
+  var box = document.createElement('textarea');
+  box.value = item.text || '';
+  box.setAttribute('aria-label', 'The corrected message');
+  wrap.appendChild(box);
+
+  var row = node('div', 'row');
+  var save = node('button', 'sm', 'Save edit');
+  save.type = 'button';
+  var cancel = node('button', 'sm', 'Cancel');
+  cancel.type = 'button';
+
+  function close() { said.classList.remove('editing'); wrap.remove(); }
+
+  cancel.addEventListener('click', close);
+  save.addEventListener('click', function () {
+    var text = box.value.trim();
+    if (!text) { toast('An edit needs words. Delete it instead.', true); return; }
+    if (text === (item.text || '').trim()) { close(); return; }
+    save.disabled = true;
+    void act('chat/edit', null, '?key=' + encodeURIComponent(chatKey), { nth: item.nth, text: text });
+  });
+
+  // Enter saves, Shift+Enter is a new line, Escape leaves — the same keys the
+  // composer below already uses, so the thread behaves one way throughout.
+  box.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save.click(); }
+  });
+
+  row.appendChild(save);
+  row.appendChild(cancel);
+  row.appendChild(node('span', 'hint', 'Everyone sees it change, marked edited.'));
+  wrap.appendChild(row);
+  said.appendChild(wrap);
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+}
+
 
 /**
  * The agent's own words, as paragraphs rather than as one run-on line.
@@ -1449,8 +1911,8 @@ function paintThread(view) {
     }
 
     var lane = item.kind === 'prompt' ? 'op' : item.direction === 'out' ? 'juan' : 'them';
-    var name = item.kind === 'prompt' ? 'You, at Juan’s prompt'
-      : lane === 'juan' ? 'Juan' : (item.who || 'Someone');
+    var name = item.kind === 'prompt' ? 'You, at ' + AGENT + '’s prompt'
+      : lane === 'juan' ? AGENT : (item.who || 'Someone');
     // A run is the same voice again within a few minutes. Repeating the name on
     // every bubble is what makes a thread read as a table of rows.
     var run = lane === side && name === who && (item.ts - at) < 240000;
@@ -1460,7 +1922,7 @@ function paintThread(view) {
   });
 
   chatPending.forEach(function (p) {
-    frag.appendChild(nameNode('You, at Juan’s prompt', 'op'));
+    frag.appendChild(nameNode('You, at ' + AGENT + '’s prompt', 'op'));
     var msg = msgNode({ ts: p.at, text: p.text }, 'op', false);
     msg.classList.add('pending');
     frag.appendChild(msg);
@@ -1471,8 +1933,8 @@ function paintThread(view) {
   if (busy && !(rows.length && rows[rows.length - 1].row === 'work')) {
     var dots = node('div', 'typing');
     dots.setAttribute('role', 'status');
-    dots.setAttribute('aria-label', 'Juan is replying');
-    dots.title = 'Juan is replying';
+    dots.setAttribute('aria-label', AGENT + ' is replying');
+    dots.title = AGENT + ' is replying';
     dots.appendChild(node('i'));
     dots.appendChild(node('i'));
     dots.appendChild(node('i'));
@@ -1500,7 +1962,7 @@ function quietNote(view) {
   if (view.chat && view.chat.blocked) {
     box.appendChild(node('b', null, 'This chat is blocked'));
     box.appendChild(document.createTextNode(
-      'Nothing reaches Juan from here and nothing goes back. Unblock it on the Chats page to let it run again.'));
+      'Nothing reaches ' + AGENT + ' from here and nothing goes back. Unblock it on the Chats page to let it run again.'));
     return box;
   }
   if (!view.reporting) {
@@ -1511,7 +1973,7 @@ function quietNote(view) {
   }
   box.appendChild(node('b', null, 'Nothing said yet'));
   box.appendChild(document.createTextNode(
-    'A session opens on their next message, and everything Juan does in it appears here.'));
+    'A session opens on their next message, and everything ' + AGENT + ' does in it appears here.'));
   return box;
 }
 
@@ -1621,9 +2083,14 @@ function renderSessions() {
   var pane = node('section', 'sessionpage bare');
   pane.appendChild(terminalPanel(null).modal);
   // The same box the Chat page uses, writing into the same place by the same
-  // path. This page is where an operator steers Claude Code — the raw pane is
-  // read-only precisely so that steering happens here, one reviewed line at a
-  // time, instead of as loose keystrokes into a live conversation.
+  // path — but in the other mode. Chat's composer says something *as Juan*;
+  // this one types at Claude Code's prompt, and `composerMode` picks between
+  // them by route. Without this line that second mode is unreachable: the
+  // panel has no way to put a line in front of the agent at all, and the
+  // branches on `route === 'terminal'` in composerKey, composerOf and
+  // confirmSend are all dead. It was missing, and the comment describing it
+  // was left behind on its own.
+  pane.appendChild(composer());
   p.appendChild(pane);
 }
 
@@ -1675,7 +2142,7 @@ function sessionHead() {
   var who = node('div', 'who');
   // The name of the thing, not of whoever it happens to be answering. Who that
   // is belongs on the line below, where it reads as what it is: context.
-  who.appendChild(node('h3', null, 'Juan’s Claude Code'));
+  who.appendChild(node('h3', null, AGENT + '’s Claude Code'));
   var sub = node('p', 'sub');
   var dot = node('span', 'dot');
   dot.id = 'termDot';
@@ -1739,7 +2206,7 @@ function neverRanNote() {
     ? 'Nothing has run here yet'
     : 'The agent is not reporting'));
   box.appendChild(node('p', null, reporting
-    ? 'Claude Code starts the first time somebody messages Juan. What it does will appear here, '
+    ? 'Claude Code starts the first time somebody messages ' + AGENT + '. What it does will appear here, '
       + 'and stays readable afterwards.'
     : 'There is no status file, so this cannot say what is running. The container is the thing to '
       + 'look at; messages queue safely meanwhile.'));
@@ -2003,13 +2470,18 @@ function composer() {
   strip.hidden = true;
   cap.appendChild(strip);
 
+  // No reaction control here any more. It existed only because the bridge could
+  // reach one message — the last one received — and a control in the composer
+  // was the honest place for something with no particular target. Now that ids
+  // are recorded, reacting belongs on the message being reacted to.
+
   var row = node('div', 'row');
   var box = document.createElement('textarea');
   box.className = 'c-box';
   box.rows = 1;
   box.maxLength = 2000;
   box.placeholder = composerMode() === 'say'
-    ? 'Write as Juan…'
+    ? 'Write as ' + AGENT + '…'
     : 'Type at Claude Code’s prompt…';
   box.setAttribute('aria-describedby', line.id);
   box.addEventListener('input', function () { growBox(box); paintCount(box); });
@@ -2126,6 +2598,15 @@ function composer() {
   keys.appendChild(document.createTextNode(' for a new line'));
   under.appendChild(keys);
   under.appendChild(node('span', 'sp'));
+  // Deliberately understated and always present, rather than appearing only
+  // when something is correctable: a control that comes and goes is one an
+  // operator has to hunt for at exactly the moment they are in a hurry.
+  var fix = node('button', 'linky', 'Correct');
+  fix.type = 'button';
+  fix.className = 'linky c-fix';
+  fix.title = 'Reword or retract something ' + AGENT + ' has sent';
+  fix.addEventListener('click', openCorrect);
+  under.appendChild(fix);
   var count = node('span', 'count', '');
   count.className = 'count c-count';
   count.setAttribute('aria-live', 'polite');
@@ -2325,12 +2806,12 @@ function paintComposer(view) {
   if (blocked) {
     tone = 'bad';
     can = false;
-    says = 'This chat is blocked — nothing reaches Juan from ' + name + ', and nothing goes back.';
+    says = 'This chat is blocked — nothing reaches ' + AGENT + ' from ' + name + ', and nothing goes back.';
   } else if (saying) {
     // Nothing to wait for: the bridge holds the WhatsApp connection, so this
     // works whether or not Claude Code is running.
     can = true;
-    says = 'Writing as Juan to ' + name + '. They cannot tell this from him.';
+    says = 'Writing as ' + AGENT + ' to ' + name + '. They cannot tell the difference.';
   } else if (view && !view.reporting) {
     tone = 'warn';
     can = false;
@@ -2339,9 +2820,9 @@ function paintComposer(view) {
     tone = '';
     can = false;
     says = 'No session open. Claude Code starts on ' + name + '’s next message — you can draft here '
-      + 'meanwhile, or write to them as Juan from the Chat page.';
+      + 'meanwhile, or write to them as ' + AGENT + ' from the Chat page.';
   } else {
-    says = 'Typing at Claude Code’s prompt. Juan reads it and decides what to say.';
+    says = 'Typing at Claude Code’s prompt. ' + AGENT + ' reads it and decides what to say.';
     can = true;
   }
 
@@ -2351,7 +2832,7 @@ function paintComposer(view) {
   // The arrow does not change; what it does is said above the box, where there
   // is room for a name and for the reason it is refused.
   send.title = !can ? 'Cannot send'
-    : saying ? 'Send to ' + firstName(name) + ' as Juan'
+    : saying ? 'Send to ' + firstName(name) + ' as ' + AGENT
     : 'Type it at Claude Code’s prompt';
   send.setAttribute('aria-label', send.title);
 }
@@ -2370,6 +2851,97 @@ function firstName(name) {
  * because the two differ whenever the box held a line break — and the confirm
  * takes the focus, so a send is Enter and Enter rather than a trip to the mouse.
  */
+/**
+ * Reword or retract one of Juan's messages, as the operator.
+ *
+ * Lists what the bridge still holds a key for rather than putting a control on
+ * every bubble in the thread. Two reasons: the transcript and the correctable
+ * set are different lists — most of the thread is long past WhatsApp's window —
+ * and a per-bubble control would have to be matched to a stored key by text and
+ * timestamp, which is a guess. A guess here edits the wrong message.
+ */
+async function openCorrect() {
+  var key = composerKey();
+  if (!key) { toast('There is no conversation open.'); return; }
+
+  var listing;
+  try {
+    listing = await api('/api/chat/correctable?key=' + encodeURIComponent(key));
+  } catch (err) {
+    toast(err.message || 'Could not read what is correctable.', true);
+    return;
+  }
+  var items = (listing && listing.items) || [];
+
+  openModal(
+    'Correct a message',
+    items.length
+      ? 'What ' + AGENT + ' has sent here recently. WhatsApp allows a reword for about fifteen minutes and a '
+        + 'retraction for a couple of days; it refuses anything older, whatever is listed here.'
+      : '',
+    function (body, modal, dismiss) {
+      if (!items.length) {
+        body.appendChild(node('p', 'hint',
+          'Nothing here can still be changed. Either nothing has been sent recently, or WhatsApp\u2019s '
+          + 'window has closed on all of it.'));
+        return;
+      }
+
+      items.forEach(function (item) {
+        var rowEl = node('div', 'card');
+        var head = node('div', 'rowline');
+        head.appendChild(node('span', 'tag', '#' + item.nth));
+        head.appendChild(node('span', 'meta', item.kind + ' \u00b7 ' + hhmm(item.at)));
+        rowEl.appendChild(head);
+        rowEl.appendChild(node('blockquote', 'said', item.text || '[' + item.kind + ']'));
+
+        var acts = node('div', 'modal-actions');
+
+        // Text only: WhatsApp will not swap one picture for another, and
+        // offering the control anyway would produce a refusal at the far end.
+        if (item.kind === 'text') {
+          var reword = node('button', 'sm', 'Reword');
+          reword.type = 'button';
+          reword.addEventListener('click', function () {
+            var next = window.prompt('New wording for message #' + item.nth + ':', item.text || '');
+            if (next === null) return;
+            if (!next.trim()) { toast('Nothing to say. Use Retract to take it back.', true); return; }
+            correct(key, item.nth, next, dismiss);
+          });
+          acts.appendChild(reword);
+        }
+
+        var pull = node('button', 'sm danger', 'Retract');
+        pull.type = 'button';
+        pull.addEventListener('click', function () {
+          // A retraction leaves "This message was deleted" behind. Saying so
+          // is the difference between an informed choice and a surprise.
+          if (!window.confirm('Retract message #' + item.nth + ' for everyone?\n\n'
+            + 'They will see "This message was deleted" in its place, and may already have read it.')) return;
+          correct(key, item.nth, null, dismiss);
+        });
+        acts.appendChild(pull);
+        rowEl.appendChild(acts);
+        body.appendChild(rowEl);
+      });
+    },
+  );
+}
+
+async function correct(key, nth, text, dismiss) {
+  try {
+    var result = await api('/api/chat/correct?key=' + encodeURIComponent(key), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ nth: nth, text: text }),
+    });
+    toast(result.message || 'Done.');
+    if (dismiss) dismiss();
+  } catch (err) {
+    toast(err.message || 'WhatsApp would not take it.', true);
+  }
+}
+
 function confirmSend(box) {
   var raw = box.value;
   var line = raw
@@ -2388,15 +2960,17 @@ function confirmSend(box) {
 
   var saying = composerMode() === 'say';
   openModal(
-    saying ? 'Send this to ' + who + ', as Juan?' : 'Type this into Juan’s session?',
+    saying ? 'Send this to ' + who + ', as ' + AGENT + '?' : 'Type this into ' + AGENT + '’s session?',
     saying
       ? 'It goes to their phone from his number. He does not see it and cannot soften it.'
       : 'He is mid-conversation with ' + who + ' on WhatsApp.',
     function (body, modal, dismiss) {
       body.appendChild(node('p', 'hint', saying
-        ? 'This is delivered as an ordinary WhatsApp message from Juan. ' + who
-          + ' has no way to tell it apart from one he wrote, and there is no way to unsend it.'
-        : 'This is typed at Juan’s prompt exactly as written, as though it had arrived in the '
+        ? 'This is delivered as an ordinary WhatsApp message from ' + AGENT + '. ' + who
+          + ' has no way to tell it apart from one he wrote. It can be reworded for about fifteen '
+          + 'minutes afterwards, or retracted for a couple of days, from Correct below — but ' + who
+          + ' may well have read it by then.'
+        : 'This is typed at ' + AGENT + '’s prompt exactly as written, as though it had arrived in the '
           + 'conversation. What he does with it is his — including anything he sends to ' + who
           + '. It cannot be recalled.'));
       if (line) body.appendChild(node('blockquote', 'said', line));
@@ -2416,12 +2990,18 @@ function confirmSend(box) {
       cancel.type = 'button';
       cancel.addEventListener('click', dismiss);
       var go_ = node('button', 'sm primary',
-        saying ? 'Send as Juan' : 'Type it to ' + firstName(who));
+        saying ? 'Send as ' + AGENT : 'Type it to ' + firstName(who));
       go_.type = 'button';
       go_.addEventListener('click', async function () {
         go_.disabled = true;
         try {
-          var result = await api(saying ? '/api/chat/say' : '/api/chat/send', {
+          // The key goes in the query string as well as the body. The panel's
+          // privacy gate checks `?key=`, and these two routes were passing it
+          // only in the body — so a moderator who may not see a conversation
+          // could still write into it. The body copy stays for the handlers.
+          var route = (saying ? '/api/chat/say' : '/api/chat/send')
+            + '?key=' + encodeURIComponent(key);
+          var result = await api(route, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ key: key, text: line, files: ready })
@@ -2509,7 +3089,7 @@ function sentByJuan(m) { return m.direction === 'out'; }
 
 async function renderMedia() {
   var p = head('media', 'Media',
-    'Every file that has crossed between Juan and the people he talks to. They are served from the bridge and never leave it.'), mine = renderToken;
+    'Every file that has crossed between ' + AGENT + ' and the people writing in. They are served from the bridge and never leave it.'), mine = renderToken;
 
   var data;
   try { data = await api('/api/media/list?n=200'); }
@@ -2529,7 +3109,7 @@ async function renderMedia() {
   // "how many of each" is the same question the control exists to answer, and
   // a stat row would say the numbers a second time.
   var picks = [['all', 'Everything', data.items.length],
-               ['out', 'Juan sent', sent.length],
+               ['out', AGENT + ' sent', sent.length],
                ['in', 'People sent', got.length]];
   var controls = node('div', 'controls');
   var seg = node('div', 'seg');
@@ -2571,7 +3151,7 @@ function mediaBand(into, dir, items) {
   var out = dir === 'out';
   var band = node('div', 'mediaband ' + dir);
   var top = node('div', 'mediaband-top');
-  top.appendChild(node('h3', 'mediaband-name', out ? 'Juan sent' : 'People sent Juan'));
+  top.appendChild(node('h3', 'mediaband-name', out ? AGENT + ' sent' : 'People sent ' + AGENT));
   top.appendChild(node('span', 'mediaband-count', plural(items.length, 'file')));
   band.appendChild(top);
   band.appendChild(node('p', 'mediaband-why', out
@@ -2581,8 +3161,8 @@ function mediaBand(into, dir, items) {
 
   if (!items.length) {
     into.appendChild(node('p', 'empty', out
-      ? 'Juan has not sent anybody a file yet.'
-      : 'Nobody has sent Juan a file yet.'));
+      ? AGENT + ' has not sent anybody a file yet.'
+      : 'Nobody has sent ' + AGENT + ' a file yet.'));
     return;
   }
 
@@ -2691,7 +3271,7 @@ function mediaSrc(m) {
  * having no picture, had nowhere to put them at all.
  */
 function mediaWho(m) {
-  return node('span', 'mediawho', sentByJuan(m) ? 'Juan sent' : 'Received');
+  return node('span', 'mediawho', sentByJuan(m) ? AGENT + ' sent' : 'Received');
 }
 
 /**
@@ -2930,21 +3510,38 @@ function fitTerminal() {
  * questions an operator actually arrives with are "which document says that"
  * and "what does it say about X", and this answers both without reading.
  *
- * Read-only, deliberately: these files reach a conversation when its session
- * next spawns, so an editor here would promise a change it cannot deliver.
+ * Editable in place, now that a save can keep its promise: the agent resumes
+ * its session under the new brief before its next turn, and the bridge keeps
+ * the text every save replaced. Editing is the raw text, because the brief is
+ * the raw text — what the agent reads is exactly what is in the box. Drafts are
+ * kept per part while the page is open, so switching parts loses nothing.
  */
 var personaPart = 0;
+var personaEditing = false;
+var personaDrafts = {};
+
+var PERSONA_SOURCE = { saved: 'Edited in the panel', starter: 'Starter', missing: 'Empty' };
 
 async function renderPersona() {
-  var p = head('persona', 'Persona', 'What 2LP has been told to be. These four are assembled in order into the brief, which is written when the session starts — so a session already running keeps the version it began with, and editing these changes nothing until it restarts.'), mine = renderToken;
+  var p = head('persona', 'Persona', 'What 2LP has been told to be. Four parts, assembled in order into the brief. A save reaches the next message — the session resumes under the new brief and keeps the conversation. Revert goes back to the starter that ships with Tulip.'), mine = renderToken;
 
   var data;
   try { data = await api('/api/persona'); } catch (err) { p.appendChild(node('p', 'empty', err.message)); return; }
   if (stale(mine)) return;
 
+  var over = data.briefChars > data.limit;
+  p.appendChild(node('p', 'personasize' + (over ? ' over' : ''),
+    'Brief: ' + data.briefChars.toLocaleString('en-GB') + ' of ' + data.limit.toLocaleString('en-GB') + ' characters' +
+    (over ? ' — past what Claude Code follows best. It still loads whole; remembered notes are added on top.'
+          : ', before remembered notes are added.')));
+
+  var bar = node('div', 'personabar');
   var seg = node('div', 'seg');
   seg.setAttribute('role', 'group');
   seg.setAttribute('aria-label', 'Which part of the brief');
+  var mode = node('div', 'seg');
+  mode.setAttribute('role', 'group');
+  mode.setAttribute('aria-label', 'Read or edit');
   var body = node('div', 'personabody');
 
   function show(i) {
@@ -2952,10 +3549,15 @@ async function renderPersona() {
     Array.prototype.forEach.call(seg.children, function (b, n) {
       b.setAttribute('aria-pressed', n === i ? 'true' : 'false');
     });
+    Array.prototype.forEach.call(mode.children, function (b, n) {
+      b.setAttribute('aria-pressed', (n === 1) === personaEditing ? 'true' : 'false');
+    });
     clear(body);
     var part = data.parts[i];
-    if (!part || part.text === null) {
-      body.appendChild(node('p', 'empty', 'Missing from this build.'));
+    if (!part) return;
+    if (personaEditing) { edit(part); return; }
+    if (part.text.length === 0) {
+      body.appendChild(node('p', 'empty', 'This part is empty, so it is left out of the brief.'));
       return;
     }
     var doc = markdown(part.text);
@@ -2979,19 +3581,100 @@ async function renderPersona() {
       body.appendChild(toc);
     }
     var col = node('div', 'doccol');
-    col.appendChild(node('p', 'docmeta', part.name + ' · ' + bytes(part.bytes)));
+    col.appendChild(node('p', 'docmeta', meta(part)));
     col.appendChild(doc);
     body.appendChild(col);
   }
 
+  function meta(part) {
+    return part.name + ' · ' + part.chars.toLocaleString('en-GB') + ' characters · ' + PERSONA_SOURCE[part.source];
+  }
+
+  function edit(part) {
+    var col = node('div', 'personaedit');
+    col.appendChild(node('p', 'docmeta', meta(part)));
+
+    var box = node('textarea', 'personabox');
+    box.value = personaDrafts[part.name] !== undefined ? personaDrafts[part.name] : part.text;
+    box.spellcheck = false;
+    box.setAttribute('aria-label', part.name);
+
+    var count = node('span', 'personacount');
+    function recount() {
+      var n = box.value.length;
+      count.textContent = n.toLocaleString('en-GB') + ' characters' + (box.value !== part.text ? ' · unsaved' : '');
+      count.className = 'personacount' + (n > data.partMax ? ' over' : '');
+    }
+    box.addEventListener('input', function () { personaDrafts[part.name] = box.value; recount(); });
+
+    var acts = node('div', 'personaacts');
+    var save = node('button', 'personabtn primary', 'Save');
+    save.type = 'button';
+    save.addEventListener('click', async function () {
+      save.disabled = true;
+      try {
+        var r = await api('/api/persona', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: part.name, text: box.value }),
+        });
+        delete personaDrafts[part.name];
+        toast(r.message || 'Saved.');
+        void renderPersona();
+      } catch (err) {
+        toast(err.message, true);
+        save.disabled = false;
+      }
+    });
+    acts.appendChild(save);
+
+    // Two clicks rather than a confirm dialog: the panel never opens one, and
+    // the text being replaced is kept on the bridge either way.
+    if (part.source === 'saved') {
+      var revert = node('button', 'personabtn', 'Revert to starter');
+      revert.type = 'button';
+      var armed = false;
+      revert.addEventListener('click', async function () {
+        if (!armed) {
+          armed = true;
+          revert.textContent = 'Click again to revert';
+          setTimeout(function () { armed = false; revert.textContent = 'Revert to starter'; }, 4000);
+          return;
+        }
+        try {
+          var r = await api('/api/persona/revert?name=' + encodeURIComponent(part.name), { method: 'POST' });
+          delete personaDrafts[part.name];
+          toast(r.message || 'Reverted.');
+          void renderPersona();
+        } catch (err) { toast(err.message, true); }
+      });
+      acts.appendChild(revert);
+    }
+    acts.appendChild(count);
+
+    col.appendChild(box);
+    col.appendChild(acts);
+    body.appendChild(col);
+    recount();
+  }
+
   data.parts.forEach(function (part, i) {
-    var b = node('button', null, part.name.replace('.md', ''));
+    var b = node('button', null, part.name.replace('.md', '') + (part.source === 'saved' ? ' •' : ''));
     b.type = 'button';
+    if (part.source === 'saved') b.title = 'Edited in the panel';
     b.addEventListener('click', function () { show(i); });
     seg.appendChild(b);
   });
+  ['Read', 'Edit'].forEach(function (label, n) {
+    var b = node('button', null, label);
+    b.type = 'button';
+    b.addEventListener('click', function () { personaEditing = n === 1; show(personaPart); });
+    mode.appendChild(b);
+  });
 
-  p.appendChild(seg);
+  bar.appendChild(seg);
+  bar.appendChild(mode);
+  p.appendChild(bar);
   p.appendChild(body);
   show(Math.min(personaPart, data.parts.length - 1));
 }
@@ -3321,7 +4004,7 @@ async function renderMemory() {
  * second.
  */
 async function renderPages() {
-  var p = head('pages', 'Pages', 'Small web pages the agent has built. Anyone with the link can open one, and it stays until you remove it — the agent has no network, so a page can keep state in the browser and cannot send anything anywhere.'), mine = renderToken;
+  var p = head('pages', 'Pages', 'Small web pages ' + AGENT + ' has built. Anyone with the link can open one, and it stays until you remove it — ' + AGENT + ' has no network, so a page can keep state in the browser and cannot send anything anywhere.'), mine = renderToken;
   var card = node('div', 'card');
   p.appendChild(card);
 
@@ -3439,7 +4122,12 @@ function appendPageCard(grid, page, data) {
  * Deleting is last and alone, because it is the only one that cannot be undone.
  */
 function openPageSettings(page, data) {
-  openModal(page.slug, (page.url || '').replace(/^https?:\/\//, ''), function (body, modal, dismiss) {
+  // Whose page this is, said in the modal rather than only in the rail behind
+  // it. Juan and Maria each have one of these panels, the two look identical,
+  // and the slug is no help — both agents publish a `menu`. The name belongs
+  // where the operator is looking at the moment they act, because the last
+  // control in here deletes a page and nothing keeps a copy.
+  openModal(page.slug, (page.url || '').replace(/^https?:\/\//, '') + ' · ' + AGENT, function (body, modal, dismiss) {
     function section(title, note) {
       body.appendChild(node('h4', 'modal-section', title));
       if (note) body.appendChild(node('p', 'modal-note', note));
@@ -3573,7 +4261,7 @@ function openPageSettings(page, data) {
     var bin = node('button', 'sm danger', 'Delete this page');
     bin.type = 'button';
     bin.addEventListener('click', function () {
-      if (!window.confirm('Delete the page “' + page.slug + '”?\n\nThe link stops working immediately, and nothing keeps a copy.')) return;
+      if (!window.confirm('Delete ' + AGENT + '’s page “' + page.slug + '”?\n\nThe link stops working immediately, and nothing keeps a copy.')) return;
       dismiss();
       act('pages/delete', null, '?slug=' + encodeURIComponent(page.slug));
     });
@@ -3606,6 +4294,277 @@ async function savePageGrant(slug, chats, revert, page) {
   // list here is what makes the switches truthful without closing it. The
   // repaint below rebuilds the cards behind it.
   if (page) page.grantedTo = chats;
+  refresh();
+  repaintAfterChange();
+}
+
+/**
+ * The apps on the hfs2s box.
+ *
+ * The sibling of Pages, for the other kind of thing the agent works on, and
+ * deliberately not the same page: a page is ours — the bridge holds the files
+ * and serves them — while an app is a workspace on another machine, most of
+ * them clients'. So this page carries one control rather than four. It says
+ * who may ask, which is the part that happens here; taking an app down or
+ * deleting it happens on the box, and a switch here that pretended otherwise
+ * would be a switch somebody relied on.
+ *
+ * The listing is an ssh round trip behind a plugin call, cached for a minute on
+ * the bridge — so this page can be slow the first time and is not a poll.
+ */
+async function renderApps() {
+  var p = head('apps', 'Apps',
+    'Workspaces on the hfs2s box, and who may get ' + AGENT + ' to work on each one. '
+    + 'An app reaches a conversation one way only: you grant it, here, by name — everything else is yours alone. '
+    + 'Nothing else about an app is changed from this page; that happens on the box.'), mine = renderToken;
+  var card = node('div', 'card');
+  p.appendChild(card);
+
+  var data;
+  try { data = await api('/api/apps'); } catch (err) { card.appendChild(node('p', 'empty', err.message)); return; }
+  if (stale(mine)) return;
+
+  if (!data.callable) {
+    card.appendChild(node('p', 'empty',
+      'The hfs2s plugin is switched off, so there is no box to ask. Switch it on under Settings and this page fills in.'));
+    return;
+  }
+
+  // Said rather than swallowed. An empty page because the box did not answer
+  // and an empty page because there are no apps call for opposite actions, and
+  // the last good listing is still shown underneath.
+  if (data.error) card.appendChild(node('p', 'empty', 'The box did not answer: ' + data.error));
+
+  if (!data.items.length) {
+    card.appendChild(node('p', 'empty', data.error
+      ? 'Nothing to show while the box cannot be reached.'
+      : 'The box reports no apps.'));
+    return;
+  }
+
+  var grid = node('div', 'pagegrid');
+  card.appendChild(grid);
+  data.items.forEach(function (app) { appendAppCard(grid, app, data); });
+}
+
+/** What the card says about who may work on an app, in one line. */
+function appGrantSummary(app) {
+  if (app.grantedTo === null || !app.grantedTo.length) return 'Only an operator can ask for this';
+  var names = (app.grantedLabels || []).map(function (g) {
+    return g.pending ? g.label + ' (not seen yet)' : g.label;
+  });
+  return 'Only ' + names.join(', ') + ', and an operator';
+}
+
+/**
+ * An address the box printed, as something a browser will open.
+ *
+ * The box prints hostnames and paths without a scheme — `okaygets.hfs2s.app`,
+ * `hfs2s.app/app/28c21d3c/` — and an href without one is read as a relative
+ * path, which would point back at the panel.
+ */
+function appHref(address) {
+  return /^https?:\/\//.test(address) ? address : 'https://' + String(address).replace(/^\/+/, '');
+}
+
+/**
+ * An app's addresses, split into the ones worth showing first.
+ *
+ * Every workspace has a canonical `hfs2s.app/app/<id>/`, and most of the ones
+ * that matter also answer on their own name. The name is what somebody hands
+ * out, so it leads; the canonical address is the fallback for an app that has
+ * no name yet.
+ */
+function appAddresses(app) {
+  var all = (app.addresses || []).map(String);
+  return {
+    vanity: all.filter(function (a) { return a.indexOf('/app/') === -1; }),
+    canonical: all.filter(function (a) { return a.indexOf('/app/') !== -1; })
+  };
+}
+
+/** Where the card's title points: its own name if it has one, else the box's address. */
+function appAddress(app) {
+  var split = appAddresses(app);
+  var first = split.vanity[0] || split.canonical[0];
+  return first ? appHref(first) : null;
+}
+
+/** A line of addresses, each one a link. */
+function appLinks(addresses) {
+  var line = node('p', 'pageurl');
+  addresses.forEach(function (address, i) {
+    if (i > 0) line.appendChild(node('span', 'sep', '·'));
+    var a = node('a', null, address.replace(/^https?:\/\//, ''));
+    a.href = appHref(address);
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    line.appendChild(a);
+  });
+  return line;
+}
+
+/** What to call an app: our label, then the box's name, then its id. */
+function appName(app) {
+  return app.label || app.name || app.id;
+}
+
+/**
+ * One workspace, as a card.
+ *
+ * Named the way the box names it, and identified by the id underneath: the
+ * eight characters are what `health`, `errors` and `exec` take, and half of
+ * these apps have no name at all.
+ */
+function appendAppCard(grid, app, data) {
+  var card = node('div', 'pagecard');
+  var url = appAddress(app);
+  var split = appAddresses(app);
+
+  if (url) {
+    var link = node('a', 'pagename', appName(app));
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    card.appendChild(link);
+  } else {
+    card.appendChild(node('p', 'pagename', appName(app)));
+  }
+
+  // The names it answers on, each openable. An app with none of its own shows
+  // the box's address instead, which is the only way in to it.
+  if (split.vanity.length) card.appendChild(appLinks(split.vanity));
+  else if (split.canonical.length) card.appendChild(appLinks(split.canonical));
+  else card.appendChild(node('p', 'pageurl', 'no address'));
+
+  var flags = node('div', 'pageflags');
+  // Whether it is running comes first: it is the one that changes what a
+  // visitor sees. `sleeping` is not a fault, so it is not the red flag.
+  if (app.state) flags.appendChild(node('span', app.state === 'ready' ? 'flag' : 'flag down', app.state));
+  flags.appendChild(node('span', 'flag', app.mine ? 'Yours' : 'Client'));
+  if (app.handedOver) flags.appendChild(node('span', 'flag', 'Handed over'));
+  card.appendChild(flags);
+
+  card.appendChild(node('p', 'pagemeta',
+    'workspace ' + app.id
+    + (app.label && app.name ? ' · the box calls it ' + app.name : '')
+    + (app.label ? ' · named here' : '')));
+  card.appendChild(node('p', 'pagewho', appGrantSummary(app)));
+
+  var foot = node('div', 'pagefoot');
+  var settings = node('button', 'sm', 'Settings');
+  settings.type = 'button';
+  settings.setAttribute('aria-label', 'Settings for ' + appName(app));
+  settings.addEventListener('click', function () { openAppSettings(app, data); });
+  foot.appendChild(settings);
+  card.appendChild(foot);
+
+  grid.appendChild(card);
+}
+
+/**
+ * Who may have the agent work on one app.
+ *
+ * One section, where the page settings modal has four, and the note at the
+ * bottom says why rather than leaving an operator hunting for the other three.
+ */
+function openAppSettings(app, data) {
+  openModal(appName(app), 'workspace ' + app.id + ' · ' + AGENT, function (body, modal, dismiss) {
+    function section(title, note) {
+      body.appendChild(node('h4', 'modal-section', title));
+      if (note) body.appendChild(node('p', 'modal-note', note));
+    }
+
+    section('Who can work on it',
+      'A conversation on this list may ask ' + AGENT + ' to check this app, read its errors, list its undo points '
+      + 'and run commands in it. Everyone else is refused, and an app with nobody on this list reaches nobody but '
+      + 'you — there is no setting that opens it to anybody else.');
+
+    data.chats.forEach(function (c) {
+      var line = node('div', 'entry');
+      line.appendChild(node('span', 'value', chatLabel(c)));
+      line.appendChild(node('span', 'meta', (c.isGroup ? 'group' : 'direct') + ' · ' + ago(Date.now() - c.lastSeenAt)));
+      var granted = app.grantedTo !== null && app.grantedTo.indexOf(c.chatKey) !== -1;
+      line.appendChild(liveSwitch(granted, function (on, input) {
+        input.disabled = true;
+        var next = (app.grantedTo || []).filter(function (k) { return k !== c.chatKey; });
+        if (on) next.push(c.chatKey);
+        // Empty goes back as null rather than [], because the two mean the same
+        // thing for an app and `null` leaves nothing behind in config.json.
+        void saveAppGrant(app.id, next.length ? next : null, function () { input.checked = !on; input.disabled = false; }, app);
+      }));
+      body.appendChild(line);
+    });
+
+    // Somebody the bridge has not seen. An app is most often handed to its
+    // owner, who has every reason not to have messaged yet.
+    (app.grantedLabels || []).filter(function (g) { return g.pending; }).forEach(function (g) {
+      var line = node('div', 'entry');
+      line.appendChild(node('span', 'value', g.label));
+      line.appendChild(node('span', 'meta', 'not seen yet — applies as soon as they message'));
+      var off = node('button', 'sm', 'Remove');
+      off.type = 'button';
+      off.addEventListener('click', function () {
+        off.disabled = true;
+        var next = app.grantedTo.filter(function (k) { return k !== g.entry; });
+        void saveAppGrant(app.id, next.length ? next : null, function () { off.disabled = false; }, app);
+      });
+      line.appendChild(off);
+      body.appendChild(line);
+    });
+
+    var add = node('div', 'entry');
+    var box = document.createElement('input');
+    box.type = 'text';
+    box.placeholder = 'Phone number or linked id';
+    box.setAttribute('aria-label', 'Grant this app to a phone number or linked id');
+    box.className = 'value';
+    add.appendChild(box);
+    var go = node('button', 'sm', 'Add');
+    go.type = 'button';
+    go.addEventListener('click', function () {
+      var raw = box.value.replace(/[^0-9a-z@]/gi, '');
+      if (!raw) { toast('Enter a phone number in full, without + or spaces.', true); return; }
+      go.disabled = true;
+      var next = (app.grantedTo || []).slice();
+      if (next.indexOf(raw) === -1) next.push(raw);
+      void saveAppGrant(app.id, next, function () { go.disabled = false; }, app);
+    });
+    add.appendChild(go);
+    body.appendChild(add);
+
+    // ── What this panel cannot do ───────────────────────────────────────────
+    section('Everything else', 'This app runs on the hfs2s box, not here. Its address, whether it is awake, '
+      + 'and whether it exists at all are settled there — this panel can only decide who may ask ' + AGENT + ' about it.');
+
+    var where = node('div', 'entry');
+    where.appendChild(node('span', 'value', app.mine ? 'Your workspace' : 'A client’s workspace'));
+    where.appendChild(node('span', 'meta', app.state + (app.handedOver ? ' · handed over' : '')));
+    body.appendChild(where);
+
+    (app.addresses || []).forEach(function (address) {
+      var line = node('div', 'entry');
+      line.appendChild(appLinks([address]));
+      body.appendChild(line);
+    });
+  });
+}
+
+/** Save one app's grant. `savePageGrant`'s sibling; see the note there. */
+async function saveAppGrant(id, chats, revert, app) {
+  try {
+    var body = await api('/api/apps/grant?app=' + encodeURIComponent(id), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chats: chats })
+    });
+    toast(body.message || 'Saved.');
+  } catch (err) {
+    toast(err.message, true);
+    if (revert) revert();
+    return;
+  }
+  if (app) app.grantedTo = chats;
   refresh();
   repaintAfterChange();
 }
@@ -4242,7 +5201,7 @@ function openVoiceMatrix(s) {
       body.appendChild(node('p', 'hint',
         'Blank uses the default voice, and Play auditions it — that is genuinely what a note in '
         + 'that language sounds like today. A voice id the provider does not know fails the whole '
-        + 'request, so Juan sends the words as text instead; press Play and the refusal is shown on '
+        + 'request, so ' + AGENT + ' sends the words as text instead; press Play and the refusal is shown on '
         + 'the row rather than left in the Log. Each press is a real synthesis call and is billed, '
         + 'so they are limited to six a minute.'));
     });
@@ -4260,7 +5219,18 @@ function openModal(title, description, build) {
   heading.id = 'modalTitle';
   scrim.setAttribute('aria-labelledby', 'modalTitle');
   titles.appendChild(heading);
-  if (description) titles.appendChild(node('p', null, description));
+  // Described by, not just labelled by. The heading is a slug — `menu` — and on
+  // a deployment with two agents the line under it is what says which `menu`
+  // this is; without the association a screen reader opens the dialog and
+  // announces the slug alone.
+  if (description) {
+    var note = node('p', null, description);
+    note.id = 'modalNote';
+    titles.appendChild(note);
+    scrim.setAttribute('aria-describedby', 'modalNote');
+  } else {
+    scrim.removeAttribute('aria-describedby');
+  }
   head.appendChild(titles);
   var close = node('button', 'sm', 'Close');
   close.type = 'button';
@@ -4856,7 +5826,7 @@ async function renderSettings() {
   toneWrap.appendChild(slider);
   toneWrap.appendChild(toneSaid);
 
-  field(groups, 'Group mode', 'When 2LP should speak up in a group.  ·  Mentions: only when somebody @-mentions it — a real WhatsApp mention, the kind you make by tapping the name, not the letters typed out — or replies to one of its messages. The quietest setting, and the one most likely to look broken, because typing “Juan” is not a mention.  ·  Triggers: the above, plus any message containing one of the trigger words below.  ·  Judgement: 2LP follows the whole conversation and decides for itself. It answers a question nobody else has answered when it actually knows, settles a factual disagreement, reacts to something funny — and stays silent for everything else, which is most things. This is the setting that behaves like a person in the room. It is also the expensive one: every message becomes a paid turn whether or not it replies, though messages arriving together are batched into one.', modeSeg);
+  field(groups, 'Group mode', 'When 2LP should speak up in a group.  ·  Mentions: only when somebody @-mentions it — a real WhatsApp mention, the kind you make by tapping the name, not the letters typed out — or replies to one of its messages. The quietest setting, and the one most likely to look broken, because typing “' + AGENT + '” is not a mention.  ·  Triggers: the above, plus any message containing one of the trigger words below.  ·  Judgement: 2LP follows the whole conversation and decides for itself. It answers a question nobody else has answered when it actually knows, settles a factual disagreement, reacts to something funny — and stays silent for everything else, which is most things. This is the setting that behaves like a person in the room. It is also the expensive one: every message becomes a paid turn whether or not it replies, though messages arriving together are batched into one.', modeSeg);
   toneRow = field(groups, 'How readily it speaks up', 'Judgement hands 2LP every message in the group and lets it decide whether to answer. This is how forward that decision should be. It takes effect on the next message — no restart — and the words below are the words 2LP is given, not a paraphrase of them.', toneWrap);
   toneRow.hidden = s.groups.replyTo !== 'observe';
   listField(groups, 'Trigger words', 'Only used when Group mode is set to Trigger. Ignored otherwise.',
@@ -4959,6 +5929,52 @@ async function renderSettings() {
   });
   p.appendChild(delivery);
 
+  // ── Plugins ───────────────────────────────────────────────────────────────
+  // Services on the host that send through this number. The switch is the
+  // operator's stop; everything else about a grant — who it may reach, what it
+  // may send — is written in config.json, deliberately not editable from a
+  // browser, because widening a recipient list is a decision worth a diff.
+  var plug = node('div', 'card');
+  plug.appendChild(node('h2', null, 'Plugins'));
+  plug.appendChild(node('p', 'sub', 'Services on this machine that send through ' + AGENT + '’s number — a morning check-in, a ticket desk, a photobooth. Each drops messages into its own folder and the bridge sends them, but only to the people its entry in config.json allows, only the kinds it allows, and only so many an hour. The agent cannot see or write to any of it. Switching one off stops it at once; whatever it had waiting stays queued until it is back on.'));
+  var pluginRows = s.pluginStatus || [];
+  if (!pluginRows.length) {
+    plug.appendChild(node('p', 'empty', 'No plugins. A service shows up here once its folder exists in this deployment’s plugins directory.'));
+  }
+  pluginRows.forEach(function (st) {
+    var cfg = (s.plugins || {})[st.name];
+    var bits = [];
+    if (!st.configured || !cfg) {
+      bits.push('A folder called “' + st.name + '” exists with no entry in config.json, so it can send nothing. Add an entry to grant it.');
+    } else {
+      var r = cfg.recipients;
+      bits.push('May send ' + cfg.kinds.join(' and ') + ' to '
+        + (r === 'any' ? 'any direct chat' : r.length ? plural(r.length, 'listed recipient') : 'nobody yet — its list is empty')
+        + ', at most ' + cfg.perHour + ' an hour.');
+      if (cfg.private) bits.push('Private: what it sends, and to whom, is kept out of the feed.');
+      if (!st.present) bits.push('Its folder does not exist yet, so nothing is arriving.');
+    }
+    if (st.pending) bits.push(plural(st.pending, 'message') + ' waiting.');
+    if (st.failed) bits.push(plural(st.failed, 'message') + ' failed and were left for the service to see.');
+    if (st.lastSentAt) bits.push('Last sent ' + relative(st.lastSentAt) + '; ' + plural(st.sent, 'message') + ' since the bridge started.');
+    if (st.lastError) bits.push('Last problem' + (st.lastErrorAt ? ', ' + relative(st.lastErrorAt) : '') + ': ' + st.lastError);
+    var wrap = node('div');
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.gap = '12px';
+    if (!st.configured) {
+      wrap.appendChild(node('span', 'badge off', 'not configured'));
+    } else {
+      wrap.appendChild(liveSwitch(st.enabled, function (on, input) {
+        var patch = { plugins: {} };
+        patch.plugins[st.name] = { enabled: on };
+        saveSettings(patch, function () { input.checked = !on; });
+      }));
+    }
+    field(plug, st.label || st.name, bits.join(' '), wrap);
+  });
+  p.appendChild(plug);
+
   // ── Capabilities ──────────────────────────────────────────────────────────
   var tools = node('div', 'card');
   tools.appendChild(node('h2', null, 'Capabilities'));
@@ -4999,7 +6015,7 @@ async function renderSettings() {
       return [l, l === 'auto' ? 'Detect automatically' : l];
     }));
   field(tools, 'Fallback language',
-    'Juan names the language on every voice note — it is a required argument — so this almost never '
+    AGENT + ' names the language on every voice note — it is a required argument — so this almost never '
     + 'applies. It is the value used if one ever arrives without a language, which in practice means '
     + 'a note written by the previous build during a deploy. Leave it on whatever he speaks most. '
     + 'Note that “Detect automatically” is a poor choice here: the provider hears Filipino and '
@@ -5018,7 +6034,7 @@ async function renderSettings() {
   field(tools, 'Voice per language',
     'One voice for ' + spokenCount + ' languages is one voice that is wrong for '
     + Math.max(0, spokenCount - 1) + ' of them. Set a voice id '
-    + 'for each language Juan speaks and press Play on the row to hear it — a real recording, generated '
+    + 'for each language ' + AGENT + ' speaks and press Play on the row to hear it — a real recording, generated '
     + 'when you press it, with whatever that row resolves to. Anything left blank uses the default above, '
     + 'and Play auditions that too. Cebuano and Filipino send the same setting to the provider — there is '
     + 'one Austronesian voice family — but they are separate rows so you can read them in different '
@@ -5344,7 +6360,7 @@ function scheduleCard(entry, live) {
 // Pages that need the state snapshot. The rest render on their own data and
 // must not wait for it — that was why a refresh on Settings, Messages, Media or
 // Log showed an empty page until something happened to trigger a re-render.
-var NEEDS_STATE = { overview: 1, chats: 1 };
+var NEEDS_STATE = { overview: 1, chats: 1, groups: 1 };
 
 /**
  * Pages that fetch their own data rather than reading the state snapshot.
@@ -5361,9 +6377,22 @@ var NEEDS_STATE = { overview: 1, chats: 1 };
  */
 var SELF_FETCHING = { pages: 1, memory: 1, media: 1, persona: 1, verbs: 1, log: 1, schedule: 1 };
 
-/** Re-read the current page after something changed it. */
+/**
+ * Re-read the current page after something changed it.
+ *
+ * The chat thread is not in `SELF_FETCHING` — it owns a poll and a text box,
+ * and a full re-render would restart the one and empty the other. But it is the
+ * page where changes are *made*, and until it was named here an operator could
+ * delete a message and watch it sit there: the request had succeeded, the
+ * message was gone from every phone in the conversation, and the only screen
+ * still showing it was the one they were looking at.
+ *
+ * `refreshThread` is the narrow version — it re-reads the transcript and
+ * repaints the messages, leaving the composer and the poll alone.
+ */
 function repaintAfterChange() {
   if (SELF_FETCHING[route]) render();
+  else if (route === 'chat' && chatOpen) void refreshThread();
 }
 
 function render() {
@@ -5371,6 +6400,7 @@ function render() {
   if (route === 'overview') renderOverview(state);
   else if (route === 'messages') renderMessages();
   else if (route === 'chats') renderChats(state);
+  else if (route === 'groups') renderGroups(state);
   // Deliberately not in NEEDS_STATE: this page owns a poll and a text box, and
   // repainting it every five seconds would restart the one and empty the other.
   // `paintChatLive` is what a poll calls instead.
@@ -5378,6 +6408,7 @@ function render() {
   else if (route === 'terminal') renderSessions();
   else if (route === 'media') renderMedia();
   else if (route === 'pages') void renderPages();
+  else if (route === 'apps') void renderApps();
   else if (route === 'memory') void renderMemory();
   else if (route === 'persona') void renderPersona();
   else if (route === 'verbs') void renderVerbs();
