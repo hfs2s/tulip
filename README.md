@@ -55,8 +55,9 @@ assuming any bound stated elsewhere here still holds.
 
 ## Architecture
 
-Three containers, two of which hold nothing worth stealing, connected by two
-one-directional volumes and no shared network at all.
+Three core containers, two of which hold nothing worth stealing, connected by
+two one-directional volumes and no shared network at all. A browser and its
+proxy sit beside them on a network of their own (below).
 
 ```
                       ┌──────────────────────────────────────────┐
@@ -106,6 +107,15 @@ files into two Docker volumes with opposite permissions. There is no RPC, no
 Docker socket, no `docker exec` from one into the other, and no port either can
 dial on the other. The entire interface between the trusted half and the
 untrusted half is "one process writes a JSON file, the other reads it".
+
+**`fetch` has a browser of its own.** Two more containers sit beside these:
+`tulip-browser`, a headless Chromium that is untrusted exactly as the agent is,
+and `tulip-webproxy`, the egress proxy again with the allowlist `*` — any public
+host on 443, never a private address. They have their own `internal: true`
+network, share none with the bridge or the agent, and talk to the bridge through
+two more volumes in the same pattern. The bridge still never dials a URL the
+agent chose; the browser does, from a container with nothing to reach. See
+[`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md#t9).
 
 ### The controls (six, since one was withdrawn)
 
@@ -178,7 +188,8 @@ never entering the container an attacker is assumed to own.
 | **Voice notes in** | Transcribed before the agent sees them — it is a Claude Code session and cannot hear. A failure is passed on as words, so it says so rather than answering as if nothing arrived. |
 | **Voice notes out** | Spoken with a configurable MiniMax voice. Four round-bracket sound tags — `(laughs) (chuckle) (sighs) (breath)` — are performed; anything else is read aloud, so the set is closed and one per message is enforced. |
 | **Pictures** | Generated on request and sent. |
-| **GIFs, web search** | Both bridge-side: the agent names what it wants, the bridge fetches it. |
+| **Web search** | Bridge-side: the agent names what it wants, the bridge fetches it. |
+| **Web browsing** | `fetch` opens a link in a real headless browser, in its own contained container behind a proxy that refuses private addresses — so sites that hide from search engines and apps drawn by JavaScript read as a person sees them. `look` adds a screenshot. Falls back to the search provider, and says which answered. Off until `TULIP_BROWSER=1`. |
 | **Cross-chat** | Off by default. When on, the agent may write to a named contact list. It *can* read other conversations — one shared session holds them all — so what stops it is the persona, not the architecture. |
 
 ### Pages
@@ -199,6 +210,20 @@ Pages themselves are served under `connect-src 'none'`: one may keep state in
 the browser and may not send it anywhere. A page that could reach the network
 would be the agent reaching it through a visitor's browser.
 
+A page can carry a SQLite database and query it in the visitor's browser.
+`/_kit/sqlite.js` is sql.js — SQLite compiled to WebAssembly — with its binary
+inlined, and the pages host answers `data.sqlite.js` with a script carrying the
+bytes of `data.sqlite`, because a script is the one thing a page may load. Nothing
+about a page's reach moves to allow it: the only new CSP token is
+`'wasm-unsafe-eval'`, which permits compiling WebAssembly and nothing else, and a
+visitor's changes stay in their own browser (IndexedDB) or leave as a file they
+download. There is no write path, because there is no request to carry one.
+
+Every page file is opened without following links. The directory is the agent's
+and the process reading it holds the WhatsApp session, so a planted
+`ln -s /state/session/creds.json` would otherwise be served to anyone with the
+address.
+
 ### The control panel
 
 Twelve surfaces, behind a bearer token and whatever authenticates in front of it.
@@ -211,7 +236,7 @@ Twelve surfaces, behind a bearer token and whatever authenticates in front of it
 | **Media** | Every attachment both directions. Pictures and video first; voice notes below as a list that leads with the transcript and opens a player when clicked. |
 | **Chat** | One conversation rendered as a conversation, and a box to type into that session. |
 | **Terminal** | The agent's live tmux, full-bleed. A real pty over ttyd, not a rendering of one. |
-| **Persona** | The four files assembled into the agent's brief, as the running session received them. Editing them changes nothing until it restarts. |
+| **Persona** | The four parts assembled into the agent's brief, editable. A save reaches the next message; Revert returns a part to the starter shipped in `persona/`. |
 | **Memory** | What the agent has deliberately written down to carry between conversations, with a Forget button. |
 | **Verbs** | Both command surfaces: the `!` commands an operator types into WhatsApp, and the `tulip-wa` verbs the agent runs inside its container. Rendered from the same catalogue the CLI's own help comes from. |
 | **Pages** | What the agent has published, with sizes and a delete button. |
@@ -289,7 +314,7 @@ knowing before you need them:
 | `agent/` | The untrusted half. Session pool, tmux driver, the `tulip-wa` CLI, hooks. |
 | `egress/` | The deny-by-default CONNECT proxy. |
 | `shared/` | Types and schemas describing the handoff contract, used by both halves. |
-| `persona/` | Tulip's identity, assembled into the agent's `CLAUDE.md`. No personal data. |
+| `persona/` | The starter persona — a neutral character every deployment begins with and replaces in the panel. No personal data. |
 | `docs/` | Deployment guide, a deploy prompt for an agent, the threat model, and the operations runbook. |
 | `scripts/` | Docker installation, health checks, the host-side terminal, and the systemd units that bring the stack back after a reboot. |
 
@@ -391,6 +416,14 @@ afterwards. There is no `any` in the trust-relevant path.
 
 ---
 
+## Several agents
+
+One checkout runs several agents, each its own deployment — its own number,
+containers, volumes, network, panel and persona — on shared images, so a change
+reaches all of them in one `scripts/2lp deploy`. The original deployment keeps
+the repository's own `.env`; every other lives in `instances/<name>/`. See
+[docs/INSTANCES.md](docs/INSTANCES.md).
+
 ## Relationship to Iris
 
 Tulip is a fork of a private bridge called Iris, which remains in service for a
@@ -410,7 +443,7 @@ And changes what a public audience makes untenable:
 | | Iris | Tulip |
 |---|---|---|
 | Audience | six allow-listed numbers | an allow list that can be opened to anyone |
-| Deployment | one process on the host | three containers, disjoint networks |
+| Deployment | one process on the host | five containers, disjoint networks |
 | WhatsApp credentials | same filesystem as the agent | unreachable from the agent |
 | Egress | unrestricted | deny-by-default proxy, no route, no DNS |
 | Chat isolation | one shared session, persona-level | **the same, since 2026-09-06** — was one session per chat, structural |
@@ -421,10 +454,13 @@ And changes what a public audience makes untenable:
 | Paid capabilities | keys in the agent's reach | performed by the bridge; no key enters the agent |
 
 Iris's bespoke business integrations — a morning-accountability bridge, a
-ticketing integration — are deliberately **not** carried over.
+ticketing integration — are deliberately **not** carried over as code. They run
+beside it instead, as [plugins](docs/PLUGINS.md): host services that drop
+messages in a directory only the bridge can read, sent within a grant the
+operator writes in `config.json`.
 
 Its paid capabilities *are*, but rebuilt rather than copied. Image generation,
-speech, web search and GIFs all run in the **bridge**: the agent names what it
+speech and web search all run in the **bridge**: the agent names what it
 wants and the trusted side produces it, so no billed credential enters the
 container the threat model assumes an attacker owns, and the agent's egress
 allowlist gains no host. The original objection — that a paid per-message

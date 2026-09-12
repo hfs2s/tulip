@@ -83,15 +83,15 @@ It will not be able to finish alone. Pairing needs your phone.
 > Tell me, briefly:
 >
 > - Which optional capabilities are **off** because no key is set (pictures,
->   voice in, voice out, search, GIFs, pages), and what each needs.
-> - That `persona/` currently holds someone else's character, that I should
->   rewrite `IDENTITY.md` and `VOICE.md`, and that the composed brief has to
->   stay under 40,000 characters or Claude Code silently stops carrying all of
->   it.
+>   voice in, voice out, search, pages), and what each needs.
+> - That the agent starts as a neutral starter character, and that I should
+>   make it mine on the panel's **Persona** page — IDENTITY and VOICE at least —
+>   rather than by editing `persona/`, which is only the starter. The page shows
+>   the size of the composed brief against Claude Code's 40,000-character limit.
 > - **That chat isolation is not structural.** Tulip runs one shared Claude
 >   Code session across every conversation, so the only thing keeping one
->   person's messages out of another's reply is the discretion rules in
->   `persona/BOUNDARIES.md`. If I am opening this number to the public, I should
+>   person's messages out of another's reply is the discretion rules in the
+>   persona's BOUNDARIES part. If I am opening this number to the public, I should
 >   read `docs/THREAT-MODEL.md` §T4 and residual risk R1 and decide whether I
 >   accept that.
 >

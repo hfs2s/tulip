@@ -31,7 +31,7 @@ container, and the threat model assumes an attacker reaches it.
 
 **Optional, each adding one capability:** MiniMax (pictures and voice notes),
 OpenAI (transcribing inbound voice notes — the one deliberate exception to
-MiniMax-only), Exa (web search), Giphy. Everything works without them; the
+MiniMax-only), Exa (web search). Everything works without them; the
 agent is told what it cannot do rather than failing silently.
 
 ---
@@ -141,9 +141,10 @@ docker compose build      # 10–25 minutes on a Pi, a couple on a laptop
 docker compose up -d
 ```
 
-Three containers come up: `tulip-bridge` (holds the WhatsApp credentials),
-`tulip-agent` (holds nothing, runs untrusted input by design) and `tulip-egress`
-(the one hole in the wall).
+Five containers come up: `tulip-bridge` (holds the WhatsApp credentials),
+`tulip-agent` (holds nothing, runs untrusted input by design), `tulip-egress`
+(the one hole in the wall), and `tulip-browser` with its proxy `tulip-webproxy`,
+which sit idle until `TULIP_BROWSER=1` (see Optional capabilities).
 
 ---
 
@@ -234,27 +235,30 @@ tailnet or a VPN. `tulip-boot` waits for the address, then starts the stack.
 
 ## 10 · Make it yours
 
-`persona/` holds four files, assembled in order into the agent's brief:
-`IDENTITY.md` (who it is), `VOICE.md` (how it talks), `OPERATING.md` (what it
-can do), `BOUNDARIES.md` (what it will not do).
+The persona is four parts, assembled in order into the agent's brief:
+IDENTITY (who it is), VOICE (how it talks), OPERATING (what it can do),
+BOUNDARIES (what it will not do). Edit them on the panel's **Persona** page.
 
-**Rewrite IDENTITY and VOICE.** What ships is one deployment's own character and
-will introduce itself by that name. Keep BOUNDARIES largely as it is unless you
+What ships in `persona/` is a neutral **starter**. Each part follows it until
+you save your own, and Revert goes back to it. Your saves live in
+`config/persona/`, which is gitignored — your character never has to be
+committed anywhere — with the last twenty versions of each part kept in
+`config/persona/.history/`.
+
+**Rewrite IDENTITY and VOICE.** Keep BOUNDARIES largely as it is unless you
 understand what each rule is holding up — since Tulip moved to a single shared
-session, the discretion rules in that file are the *only* thing keeping one
+session, the discretion rules in that part are the *only* thing keeping one
 person's conversation out of another's, and there is no longer an architectural
-backstop under them.
+backstop under them. OPERATING names the agent's tools; if you edit it and a
+later release changes them, Revert takes the new starter.
 
-The composed brief must stay under **40,000 characters**, which is Claude Code's
-limit for a `CLAUDE.md`. Past it the brief is not carried whole and the agent
-quietly stops following the parts that fell off. The shared memory is folded in
-too, so leave headroom.
+Keep the composed brief near **40,000 characters**. Claude Code loads a longer
+one whole, but warns that it follows instructions less reliably past that — and
+the shared memory is folded in too. The Persona page shows the running total.
 
-Changes take effect when the agent restarts:
-
-```bash
-docker compose up -d --force-recreate agent
-```
+A save reaches the next message. No restart: before each turn the agent checks
+whether the persona changed and resumes its session under the new brief, keeping
+the conversation.
 
 ---
 
@@ -302,12 +306,18 @@ the panel's Settings page so you can turn one off without editing `.env`.
 | `MINIMAX_API_KEY`, `MINIMAX_GROUP_ID` | pictures, and voice notes out |
 | `OPENAI_API_KEY` | transcribing voice notes *in* |
 | `EXA_API_KEY` | web search and page reading |
-| `GIPHY_API_KEY` | GIFs |
 | `TULIP_PAGES_HOST` | the agent can publish small static pages |
+| `TULIP_BROWSER=1` | `fetch` opens pages in a real browser first, with Exa as the fallback |
 
 **Every one of these runs in the bridge, not the agent.** The agent names what
 it wants and the trusted side performs it, so no billed credential enters the
 container an attacker is assumed to own, and the egress allowlist gains no host.
+
+The browser is the one exception, and deliberately so: rendering a page from
+anywhere is exactly what must not happen on the trusted side. It runs in its own
+untrusted container, `tulip-browser`, behind `tulip-webproxy`, and the bridge only
+passes it a URL and reads back its answer. Read
+[THREAT-MODEL.md §T9](THREAT-MODEL.md#t9) before turning it on.
 
 `TULIP_PAGES_HOST` **must not be the panel's hostname.** Agent-authored
 JavaScript served from the panel's origin would be same-origin with your

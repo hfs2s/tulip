@@ -207,14 +207,21 @@ it.
 | Settings, in the panel | nothing — applied immediately and written to `config.json` |
 | `config/config.json` by hand | `docker compose restart bridge` |
 | `.env` | `docker compose up -d` (recreates the containers) |
-| `persona/` | `docker compose build agent && docker compose up -d agent` — each chat's `CLAUDE.md` is regenerated when its session next starts |
+| The persona, in the panel | nothing — saved to `config/persona/` and reaches the very next message |
+| `persona/` (the starter) | `docker compose build && docker compose up -d` — reaches only the parts nobody has saved in the panel |
 | any TypeScript | `docker compose build && docker compose up -d` |
 | `docker-compose.yml` | `docker compose up -d`, then **re-run `verify-containment.sh`** |
 
-A persona edit reaches a conversation when that conversation's session next
-spawns, not immediately — a resident session keeps the file it started with.
-`!reset <key>` forces the issue for one chat; restarting the agent container
-does it for all of them without losing any context.
+A persona saved in the panel reaches the next message. The bridge publishes it
+with a version, and before each turn the agent resumes its session under a
+rebuilt brief if the version changed — same conversation, new instructions.
+Every save and revert keeps the text it replaced in `config/persona/.history/`,
+twenty per part; that directory is the record git used to be.
+
+`persona/` in the repository is only the **starter**: what a part says until an
+operator saves their own, and what Revert goes back to. A deployment's own
+character lives in `config/persona/`, which is gitignored and never leaves the
+host. Back it up with `config/`.
 
 ### Letting somebody in
 
@@ -374,7 +381,7 @@ docker run --rm -v tulip_state:/state -v "$PWD":/backup alpine \
 ```
 
 That archive contains the WhatsApp credentials, every message, **and copies of
-every picture, voice note and GIF the agent sent** for the last fourteen days.
+every picture and voice note the agent sent** for the last fourteen days.
 Treat it exactly as you would the phone. Store it encrypted, and never in this
 repository — `.gitignore` already refuses the obvious names, and
 `npm run check:secrets` fails the build if one is staged.

