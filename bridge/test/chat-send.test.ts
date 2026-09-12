@@ -111,10 +111,21 @@ function agentReports(chatKeys: readonly string[]): void {
   );
 }
 
-/** A registry that knows about the chats it was given and nothing else. */
-function deps(known: readonly string[] = [KEY, ASLEEP]): Parameters<typeof api.sendToChat>[0] {
+/**
+ * A registry that knows about the chats it was given, and a dispatcher that
+ * says which turn is open.
+ *
+ * `current.json` and the dispatcher answer two different questions — *which*
+ * conversation the pointer names, and whether a turn is live *now* — and only
+ * the second one can refuse a line typed after the agent went idle.
+ */
+function deps(
+  known: readonly string[] = [KEY, ASLEEP],
+  openTurn: string | null = KEY,
+): Parameters<typeof api.sendToChat>[0] {
   return {
     chats: { get: (key: string) => (known.includes(key) ? { chatKey: key, name: 'Ana' } : null) },
+    dispatcher: () => ({ inFlightChat: () => openTurn }),
   } as unknown as Parameters<typeof api.sendToChat>[0];
 }
 
@@ -131,6 +142,33 @@ function request(): { window: string | null; keys: Array<{ text: string; literal
 }
 
 describe('sendToChat — what it refuses', () => {
+  /**
+   * The failure this guard exists for, and it cost an afternoon.
+   *
+   * `current.json` is written when a turn starts and never cleared when one
+   * ends, so after the agent goes idle it still names that conversation. A line
+   * typed then passed every check, reached the session, and caused actions the
+   * outbox dropped as `unroutable/expired` — with nothing said to the operator,
+   * who spent the next hour debugging a database that was never broken.
+   */
+  it('refuses once the turn has ended, even though the pointer still names the chat', () => {
+    agentReports([KEY]);
+    answering(KEY);
+    const out = api.sendToChat(deps([KEY], null), KEY, 'pull the totals');
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/turn has ended/i);
+    expect(request()).toBeNull();
+  });
+
+  it('refuses when the agent has moved on to another conversation', () => {
+    agentReports([KEY]);
+    answering(KEY);
+    const out = api.sendToChat(deps([KEY], 'ffffffffffffffff'), KEY, 'pull the totals');
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/another conversation/i);
+    expect(request()).toBeNull();
+  });
+
   it('refuses a chat key that is not sixteen hex characters', () => {
     agentReports([KEY]);
     for (const bad of ['', 'ABCDEF0123456789', 'abcdef012345678', '../../etc', 'c-abcdef0123456789']) {

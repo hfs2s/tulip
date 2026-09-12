@@ -1,4 +1,5 @@
-import { controlHelpText } from '@tulip/shared';
+import { AGENT_NAME } from './instance.js';
+import { controlHelpText } from '@2lp/shared';
 /**
  * Operator commands, sent over WhatsApp from a number in `operators.numbers`.
  *
@@ -16,6 +17,7 @@ import type { Envelope } from './envelope.js';
 import { feed } from './feed.js';
 import { readStatus } from './handoff.js';
 import { log } from './log.js';
+import { startChat, stopChat } from './panel-api.js';
 import type { Limiter } from './ratelimit.js';
 import { state } from './state.js';
 import type { WhatsApp } from './whatsapp.js';
@@ -67,20 +69,92 @@ export type ControlDisposition = 'run' | 'wrongRoom' | 'ignore';
  * all — even to refuse — confirms that the commands exist and that this number
  * has an operator, which is the one thing worth not handing out.
  */
+/**
+ * The command name, without its `!`. One parser, used by both readers below.
+ *
+ * Normalised for what a phone actually sends rather than what somebody meant to
+ * type, because the one command that must never fail on a technicality is the
+ * one an upset person types in a hurry:
+ *
+ *   - **Case.** iOS capitalises the first letter of a message, and `!` does not
+ *     stop it, so `!stopjuan` arrives as `!Stopjuan`. `!STOPJUAN` is what
+ *     somebody types when they mean it.
+ *   - **No hyphen in the name, on purpose.** WhatsApp rewrites `--` to an em
+ *     dash as you type and smart punctuation can send an en dash for a hyphen,
+ *     so a hyphenated command is one a phone can silently break. `stopjuan` is
+ *     one word for that reason, and `stop` exists beside it because autocorrect
+ *     is just as happy to split an unfamiliar word into two.
+ */
+export function commandName(text: string): string {
+  const [word] = text.trim().split(/\s+/);
+  return (word ?? '').slice(1).toLowerCase();
+}
+
+/**
+ * Commands anybody may run, anywhere — including a stranger, including a room.
+ *
+ * Exactly one, and it is worth being explicit about why it is not the security
+ * hole it looks like.
+ *
+ * Every other control command *discloses*: `!chats` prints keys and names,
+ * `!status` reports the deployment, `!help` confirms the surface exists at all.
+ * Those are operator-only in a direct message for that reason. `!stop` discloses
+ * nothing. Its entire effect is silence, and silence is the safe direction — the
+ * worst a malicious stranger achieves is the outcome the command is *for*.
+ *
+ * The argument for opening it is that the moment somebody most needs this is
+ * when the agent is saying something wrong **in a room**, in front of people,
+ * and a rule that says "go and find the direct message" is a rule that fails
+ * exactly then. A room that cannot stop it has only one other lever, and that
+ * lever is removing the agent from the group — which has already happened once.
+ * Better a switch anybody can pull than a bot nobody trusts.
+ *
+ * The asymmetry is the safeguard: stopping is open, **starting is not**.
+ * `!release` stays operator-only, so anyone can push toward quiet and only an
+ * operator can push back. A stop is global rather than per-room, deliberately:
+ * somebody who has decided this thing needs to shut up should not have to know
+ * which rooms it is in.
+ */
+const STOP_ALIASES = ['stopjuan', 'stop'] as const;
+const OPEN_TO_EVERYONE: ReadonlySet<string> = new Set(STOP_ALIASES);
+
+/**
+ * Commands an operator may run in a room, rather than only in a direct message.
+ *
+ * The group rule exists because control commands answer where they were typed,
+ * and `!chats` in a room printed every key and name into it. Undoing a stop
+ * discloses nothing, and the room is exactly where somebody needs it: a room
+ * that can silence the agent with `!stopjuan` and can only be un-silenced from
+ * a browser is a switch with no matching off — which is what shipped, until the
+ * question "so we use !releasejuan?" turned out to have the answer "there is no
+ * such thing".
+ *
+ * Operator-only, which is the asymmetry the open stop depends on.
+ */
+const OPERATOR_ANYWHERE: ReadonlySet<string> = new Set(['releasejuan']);
+
 export function controlDisposition(input: {
   text: string;
   isOperator: boolean;
   isGroup: boolean;
 }): ControlDisposition {
   if (!isControlCommand(input.text)) return 'ignore';
+  // Before the operator test and before the group test, because this one is
+  // subject to neither.
+  if (OPEN_TO_EVERYONE.has(commandName(input.text))) return 'run';
   if (!input.isOperator) return 'ignore';
+  if (OPERATOR_ANYWHERE.has(commandName(input.text))) return 'run';
   return input.isGroup ? 'wrongRoom' : 'run';
 }
 
 export async function handleControl(deps: ControlDeps, envelope: Envelope, chatKey: string): Promise<void> {
-  const say = (text: string): Promise<void> => deps.wa.sendText(envelope.chatJid, text);
-  const [word, ...rest] = envelope.text.trim().split(/\s+/);
-  const command = (word ?? '').slice(1).toLowerCase();
+  // Control replies are fire-and-forget: nothing here is ever edited or
+  // retracted, so the key `sendText` now returns is deliberately dropped.
+  const say = async (text: string): Promise<void> => {
+    await deps.wa.sendText(envelope.chatJid, text);
+  };
+  const [, ...rest] = envelope.text.trim().split(/\s+/);
+  const command = commandName(envelope.text);
   const argument = rest[0] ?? '';
 
   log('control', { chatKey, command });
@@ -115,6 +189,62 @@ export async function handleControl(deps: ControlDeps, envelope: Envelope, chatK
       feed.event('hold.off', 'delivery released by an operator');
       void deps.dispatcher().pump();
       return say('Released — handing over anything that was waiting.');
+    }
+
+    case 'stopjuan':
+    case 'stop': {
+      // The one control that acts on the present rather than the future — see
+      // `stopNow`, since !hold cannot reach a turn that is already talking —
+      // and the one anybody may run, including here in a room. See
+      // OPEN_TO_EVERYONE.
+      const who = envelope.pushName ?? 'someone';
+      stopChat(chatKey, who.slice(0, 80), deps.dispatcher());
+
+      if (!envelope.isGroup) {
+        return say('Stopped here. I will not answer in this conversation until an operator starts me again.');
+      }
+
+      // In a room, acknowledge with a reaction rather than a message. Somebody
+      // has just asked for quiet; answering with a paragraph about control
+      // commands would be the noise they were objecting to, and it would
+      // advertise the surface to everybody standing there. A raised hand on
+      // their own message is unambiguous and says nothing to anyone else.
+      //
+      // Falling back to one line if the reaction fails, because silence here is
+      // indistinguishable from the command having done nothing — the same
+      // reason `wrongRoom` answers at all.
+      const participant = envelope.senderIds[0];
+      try {
+        await deps.wa.react(envelope.chatJid, envelope.id, '✋', participant);
+      } catch (err) {
+        log('control.reactFailed', { chatKey, why: String((err as Error).message).slice(0, 80) });
+        await say('Stopped.');
+      }
+      return;
+    }
+
+    case 'releasejuan': {
+      // The opposite of `!stopjuan`, and deliberately the same shape: it acts
+      // on the chat it was typed in, not on the deployment.
+      //
+      // It does not also clear a global hold. One command, one meaning, is what
+      // the rest of this switch does — but silence with no explanation is what
+      // sent somebody looking for this command in the first place, so if a hold
+      // is what is still keeping the agent quiet, the reply says so and names
+      // the command that lifts it.
+      startChat(chatKey, envelope.pushName ?? 'an operator');
+      const held = state.isHeld()
+        ? ' Delivery is still held everywhere, though — send `!release` to lift that too.'
+        : '';
+
+      if (!envelope.isGroup) return say('Answering here again.' + held);
+      try {
+        await deps.wa.react(envelope.chatJid, envelope.id, '✅', envelope.senderIds[0]);
+        if (held) await say('Answering here again.' + held);
+      } catch {
+        await say('Answering here again.' + held);
+      }
+      return;
     }
 
     case 'chats': {
@@ -152,8 +282,8 @@ export async function handleControl(deps: ControlDeps, envelope: Envelope, chatK
       const generation = state.newGeneration(argument);
       feed.event('chat.reset', `${argument} → generation ${generation}`);
       return say(
-        `\`${argument}\` will start a fresh context on its next message (generation ${generation}). ` +
-          `The old transcript is still on disk.`,
+        `${AGENT_NAME} will start a fresh context on the next message, in every chat — there is one session ` +
+          `(generation ${generation}). The old transcript is still on disk.`,
       );
     }
 

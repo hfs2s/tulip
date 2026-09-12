@@ -13,6 +13,7 @@
  * less: `docker compose up -d` while an old container is still shutting down is
  * an ordinary thing to type.
  */
+import { classifyLookupError, isParticipant, type Membership } from './membership.js';
 import { EventEmitter } from 'node:events';
 import { existsSync, readFileSync, readFileSync as read, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -85,6 +86,20 @@ function acquireLock(): void {
     }
   };
   process.on('exit', release);
+}
+
+/**
+ * The id of a message we just sent, when WhatsApp told us one.
+ *
+ * Null is a real and ordinary answer, not an error case to assert away: a send
+ * can succeed while the acknowledgement carrying the key is absent. Callers
+ * treat null as "delivered, not correctable".
+ */
+export type SentKey = string | null;
+
+function keyOf(sent: { key?: { id?: string | null } | null } | undefined): SentKey {
+  const id = sent?.key?.id;
+  return typeof id === 'string' && id.length > 0 ? id : null;
 }
 
 export type WhatsAppEvents = {
@@ -268,8 +283,46 @@ export class WhatsApp extends EventEmitter {
     return this.socket;
   }
 
-  async sendText(chatJid: string, text: string): Promise<void> {
-    await this.require().sendMessage(chatJid, { text });
+  /**
+   * Send text, and keep the handle.
+   *
+   * The return value used to be awaited and dropped. That single discarded
+   * value is why nothing Juan said could be edited or taken back: `WAMessage`
+   * carries the `key` both operations need, and once it is gone WhatsApp offers
+   * no way to ask "what was the id of the thing I just sent?". Null rather than
+   * a throw when it is missing — the message did go out, it simply cannot be
+   * corrected afterwards, and failing the send over that would be worse.
+   */
+  async sendText(chatJid: string, text: string): Promise<SentKey> {
+    return keyOf(await this.require().sendMessage(chatJid, { text }));
+  }
+
+  /**
+   * Replace the words of a message already delivered.
+   *
+   * WhatsApp allows this for about a quarter of an hour after sending and
+   * refuses it after that, which is a server-side rule we cannot soften. The
+   * recipient sees the new text marked as edited; they are not told what it
+   * said before, so the feed keeps that instead.
+   */
+  async editText(chatJid: string, messageId: string, text: string): Promise<void> {
+    await this.require().sendMessage(chatJid, {
+      text,
+      edit: { remoteJid: chatJid, id: messageId, fromMe: true },
+    });
+  }
+
+  /**
+   * Retract a message for everyone.
+   *
+   * `fromMe: true` is doing real work: it scopes the deletion to messages this
+   * account sent. Deleting somebody *else's* message is a separate, admin-only
+   * power in groups, and nothing here should be able to reach for it.
+   */
+  async unsend(chatJid: string, messageId: string): Promise<void> {
+    await this.require().sendMessage(chatJid, {
+      delete: { remoteJid: chatJid, id: messageId, fromMe: true },
+    });
   }
 
   /**
@@ -287,33 +340,38 @@ export class WhatsApp extends EventEmitter {
     mimetype: string,
     name: string,
     caption: string | null,
-  ): Promise<void> {
+  ): Promise<SentKey> {
     const socket = this.require();
     // Spread rather than `caption: caption ?? undefined`: under
     // exactOptionalPropertyTypes an explicit `undefined` is not the same as an
     // absent key, and Baileys declares the property as optional-not-nullable.
     const withCaption = caption === null ? {} : { caption };
     if (mimetype.startsWith('image/')) {
-      await socket.sendMessage(chatJid, { image: buffer, ...withCaption });
-    } else if (mimetype.startsWith('video/')) {
-      await socket.sendMessage(chatJid, { video: buffer, ...withCaption });
-    } else if (mimetype.startsWith('audio/')) {
-      await socket.sendMessage(chatJid, { audio: buffer, mimetype });
-    } else {
+      return keyOf(await socket.sendMessage(chatJid, { image: buffer, ...withCaption }));
+    }
+    if (mimetype.startsWith('video/')) {
+      return keyOf(await socket.sendMessage(chatJid, { video: buffer, ...withCaption }));
+    }
+    if (mimetype.startsWith('audio/')) {
+      return keyOf(await socket.sendMessage(chatJid, { audio: buffer, mimetype }));
+    }
+    return keyOf(
       await socket.sendMessage(chatJid, {
         document: buffer,
         mimetype,
         fileName: basename(name) || 'file',
-      });
-    }
+      }),
+    );
   }
 
   /** Send a generated image. Buffer rather than a path: nothing touches disk. */
-  async sendImage(chatJid: string, image: Buffer, caption: string | null): Promise<void> {
-    await this.require().sendMessage(chatJid, {
-      image,
-      ...(caption === null ? {} : { caption }),
-    });
+  async sendImage(chatJid: string, image: Buffer, caption: string | null): Promise<SentKey> {
+    return keyOf(
+      await this.require().sendMessage(chatJid, {
+        image,
+        ...(caption === null ? {} : { caption }),
+      }),
+    );
   }
 
   /**
@@ -322,27 +380,14 @@ export class WhatsApp extends EventEmitter {
    * `ptt: true` is what makes WhatsApp render it as a held-to-record voice
    * message rather than an audio file attachment.
    */
-  async sendVoice(chatJid: string, audio: Buffer): Promise<void> {
-    await this.require().sendMessage(chatJid, {
-      audio,
-      mimetype: 'audio/ogg; codecs=opus',
-      ptt: true,
-    });
-  }
-
-  /**
-   * Send an animated GIF.
-   *
-   * WhatsApp has no GIF type: an animated GIF is a short video with
-   * `gifPlayback`, so an animated attachment travels as MP4 rather than as GIF.
-   * Sending the actual `.gif` bytes as an image produces a still frame.
-   */
-  async sendGif(chatJid: string, video: Buffer, caption: string | null): Promise<void> {
-    await this.require().sendMessage(chatJid, {
-      video,
-      gifPlayback: true,
-      ...(caption === null ? {} : { caption }),
-    });
+  async sendVoice(chatJid: string, audio: Buffer): Promise<SentKey> {
+    return keyOf(
+      await this.require().sendMessage(chatJid, {
+        audio,
+        mimetype: 'audio/ogg; codecs=opus',
+        ptt: true,
+      }),
+    );
   }
 
   async react(chatJid: string, messageId: string, emoji: string, participant?: string): Promise<void> {
@@ -352,6 +397,48 @@ export class WhatsApp extends EventEmitter {
         key: { remoteJid: chatJid, id: messageId, fromMe: false, participant: participant ?? null },
       },
     });
+  }
+
+  /**
+   * Leave a group.
+   *
+   * Refuses anything that is not a group jid before asking WhatsApp — a second
+   * lock behind the outbox's check on the chat record, because `groupLeave` on
+   * a person's jid is not something this should ever be able to try. Throws on
+   * failure, like every send here, so the caller can say it did not leave
+   * rather than claim it did.
+   */
+  /**
+   * WhatsApp's own answer to "is he in this group?", for the panel. Reads only.
+   * A live query rather than anything cached, since the point is to find out.
+   */
+  async groupMembership(groupJid: string): Promise<{ state: Membership; members: number | null; detail: string | null }> {
+    if (!groupJid.endsWith('@g.us')) return { state: 'unknown', members: null, detail: 'not a group' };
+    const socket = this.require();
+    const me = [socket.user?.id, (socket.user as { lid?: string } | undefined)?.lid];
+    try {
+      const meta = await socket.groupMetadata(groupJid);
+      const participants = (meta.participants ?? []) as unknown as ReadonlyArray<Record<string, unknown>>;
+      if (me.every((m) => !m)) return { state: 'unknown', members: participants.length, detail: 'own identity unknown' };
+      return { state: isParticipant(participants, me) ? 'member' : 'not-member', members: participants.length, detail: null };
+    } catch (err) {
+      return { state: classifyLookupError(err), members: null, detail: String((err as Error).message).slice(0, 120) };
+    }
+  }
+
+  /** Whether he is still in a group. False on any refusal, which is what a non-member gets. */
+  async isInGroup(groupJid: string): Promise<boolean> {
+    try {
+      await this.require().groupMetadata(groupJid);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async leaveGroup(groupJid: string): Promise<void> {
+    if (!groupJid.endsWith('@g.us')) throw new Error('not a group');
+    await this.require().groupLeave(groupJid);
   }
 
   async typing(chatJid: string, on: boolean): Promise<void> {

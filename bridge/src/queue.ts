@@ -11,7 +11,7 @@
  */
 import { mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { writeJsonAtomic } from '@tulip/shared';
+import { writeJsonAtomic } from '@2lp/shared';
 import type { Envelope } from './envelope.js';
 import { log } from './log.js';
 import { paths } from './paths.js';

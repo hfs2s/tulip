@@ -15,7 +15,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
-import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES, TimeZone } from '@tulip/shared';
+import { LANGUAGE_BOOSTS, LanguageBoost, PLUGIN_MAX_TIMEOUT_MS, SPOKEN_LANGUAGES, TimeZone } from '@2lp/shared';
 
 // Re-exported so the panel's own schema keeps importing it from one place.
 export { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES };
@@ -119,6 +119,29 @@ const Groups = z
      */
     reactivity: z.number().int().min(0).max(4).default(2),
     triggers: z.array(z.string().min(1).max(32)).max(8).default([]),
+    /**
+     * How to behave in one named room, overriding `replyTo` for it alone.
+     *
+     * One setting for every room was always going to be wrong somewhere: a test
+     * group an operator is poking at and a room of forty people who did not ask
+     * for any of this want opposite answers, and picking either globally makes
+     * the other one worse. `enabled` stays global because it is the question of
+     * whether the agent is in rooms at all; this is the question of what it
+     * does once it is there, and that is per room.
+     *
+     * Config rather than state, unlike `stopped`: this is an operator deciding
+     * how the agent should behave, which is exactly what this file is for. A
+     * stop is a runtime fact anybody in a room can create, and mixing the two
+     * would mean a stranger's message rewrites the file an operator hand-edits.
+     *
+     * Absent means "follow the global setting" — not "mention". A room with no
+     * entry here must keep whatever `replyTo` says, including when that changes
+     * later, so the default has to be the absence of an answer rather than an
+     * answer that happens to match today's.
+     */
+    perChat: z
+      .record(z.string(), z.object({ replyTo: z.enum(['mention', 'trigger', 'observe']) }).strict())
+      .default({}),
   })
   .strict()
   .default({});
@@ -502,6 +525,47 @@ const Pages = z
   .strict()
   .default({});
 
+/** An hfs2s workspace id: eight hex characters, as the box prints them. */
+const WorkspaceId = z.string().regex(/^[0-9a-f]{8}$/, 'must be an 8-character workspace id');
+
+/**
+ * Which conversations may get the agent to work on which hfs2s app.
+ *
+ * The same shape as `pages.grants` and a different kind of thing. A page is
+ * ours: the bridge holds the files and serves them, so a grant on one is
+ * enforced by the process doing the work. An hfs2s app is a workspace on
+ * somebody else's machine, reached through the `hfs2s` plugin, and most of the
+ * thirty-odd on that box belong to clients. So this grants the *asking*, which
+ * is the part that happens here: whether a conversation may have the agent run
+ * `health`, `errors`, `snapshots` or `exec` against a named workspace.
+ *
+ * An operator is never refused by this. They set it, the plugin is theirs, and
+ * a rule that locked the person holding the panel out of their own hosting box
+ * would be worked around within the hour rather than obeyed.
+ *
+ * **There is no `open` here, and that is the difference from `pages`.** Pages
+ * carry a standing rule saying what may be done to one nobody has claimed, and
+ * it defaults to "anything, by anybody": an unclaimed page is the agent's own
+ * work and costs a stranger nothing. The equivalent switch for apps would open
+ * every unclaimed workspace on the box — most of them clients' live sites, with
+ * `exec` pointed at them — to any conversation that asked, one tap away from a
+ * panel someone else might also hold. So an app reaches a conversation one way
+ * only: an operator grants that conversation that app, by name.
+ */
+const Apps = z
+  .object({
+    /**
+     * Workspace id to the conversations allowed to have the agent work on it.
+     *
+     * Absent means nobody but an operator, which is also what an empty array
+     * means — with no `open` rule the two say the same thing, so the panel
+     * offers one state rather than a distinction without a difference.
+     */
+    grants: z.record(WorkspaceId, z.array(GrantEntry).max(20)).default({}),
+  })
+  .strict()
+  .default({});
+
 /**
  * Which conversations are the operator's own, and hidden from other moderators.
  *
@@ -557,6 +621,74 @@ const Privacy = z
  */
 const DEFAULT_TIMEZONE = 'Europe/Madrid';
 
+/**
+ * Plugins: services on the host that send through this number.
+ *
+ * A morning check-in, a ticket desk, a photobooth — things an operator runs
+ * beside the agent that need to reach people on WhatsApp without going through
+ * a conversation. Each drops actions into its own directory under
+ * `TULIP_PLUGINS_DIR` and the bridge sends them; see bridge/src/plugins.ts and
+ * docs/PLUGINS.md.
+ *
+ * Deny-by-default in every dimension, because a plugin is the one sender whose
+ * destination is written in the request rather than taken from a turn:
+ *
+ *   - A directory with no entry here is ignored, and an entry is off until
+ *     `enabled` is set.
+ *   - `recipients` starts empty, which reaches nobody. `"any"` opens it to every
+ *     direct chat — right for a ticket desk whose customers arrive from its own
+ *     system — and never to a group: a group has to be named.
+ *   - `kinds` bounds what it may send; `perHour` bounds how much.
+ *   - `private` keeps the words and the recipient out of the feed, for services
+ *     whose messages carry a customer's own ticket or photo.
+ */
+const PluginName = z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, 'lowercase letters, digits and dashes');
+const PluginRecipient = z
+  .string()
+  .regex(
+    /^(?:[1-9][0-9]{6,15}|[0-9]{5,25}@lid|[0-9-]{10,40}@g\.us)$/,
+    'a bare international number, an <id>@lid, or a group <id>@g.us',
+  );
+export const PluginSettings = z
+  .object({
+    enabled: z.boolean().default(false),
+    /** What the panel calls it. The directory name is the identity; this is only a label. */
+    label: z.string().max(64).default(''),
+    kinds: z.array(z.enum(['text', 'image'])).min(1).max(2).default(['text']),
+    recipients: z.union([z.literal('any'), z.array(PluginRecipient).max(200)]).default([]),
+    private: z.boolean().default(false),
+    perHour: z.number().int().min(1).max(1000).default(30),
+    /**
+     * Whether the agent may *ask* this plugin things, as well as — or instead
+     * of — the plugin sending through the number. See bridge/src/pluginCalls.ts.
+     *
+     * Absent is the same as off, and independent of `enabled` above, which is
+     * the outbound switch: an entry can be outbound-only, callable-only, or
+     * both. `operatorOnly` defaults *on*, because a plugin is the operator's
+     * own service with the operator's own credentials behind it, and letting
+     * anybody who can message the number drive it is a decision to make on
+     * purpose rather than by leaving a key out.
+     *
+     * Edited in this file only; the panel cannot widen it, for the reason the
+     * recipient list cannot be widened there either.
+     */
+    callable: z
+      .object({
+        enabled: z.boolean().default(false),
+        operatorOnly: z.boolean().default(true),
+        /** How long to wait for the plugin's answer before telling the agent it did not come. */
+        timeoutMs: z.number().int().min(1000).max(PLUGIN_MAX_TIMEOUT_MS).default(60_000),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type PluginSettings = z.infer<typeof PluginSettings>;
+const Plugins = z
+  .record(PluginName, PluginSettings)
+  .refine((m) => Object.keys(m).length <= 20, { message: 'at most 20 plugins' })
+  .default({});
+
 export const ConfigSchema = z
   .object({
     timezone: TimeZone.default(DEFAULT_TIMEZONE),
@@ -568,7 +700,9 @@ export const ConfigSchema = z
     panel: Panel,
     delivery: Delivery,
     pages: Pages,
+    apps: Apps,
     privacy: Privacy,
+    plugins: Plugins,
   })
   .strict();
 

@@ -57,6 +57,17 @@ export const paths = {
   /** Hold flag, session generations, and other small persistent flags. */
   state: join(STATE_DIR, 'state.json'),
 
+  /**
+   * Keys of messages Juan has sent, so they can be edited or unsent later.
+   *
+   * On the state volume, which the agent has no mount for. That is what makes
+   * `tulip-wa edit 2` safe to expose: the agent names a position in its own
+   * recent history and the bridge resolves it here, so nothing the agent can
+   * say — or be talked into saying — reaches a message it did not send, in a
+   * chat it is not answering.
+   */
+  sent: join(STATE_DIR, 'sent.json'),
+
   /** Bearer token for the control panel. Generated on first run, mode 0600. */
   panelToken: join(STATE_DIR, 'panel-token'),
 
@@ -76,4 +87,19 @@ export const paths = {
    * — with the destination taken from the turn rather than from the request.
    */
   schedule: join(STATE_DIR, 'schedule.json'),
+
+  /**
+   * What the agent calls each hfs2s app.
+   *
+   * Here rather than in config.json, and the distinction is the same one
+   * `memory.json` turns on: the agent can cause this to change, and config is
+   * the authorisation channel it must never reach. `apps.grants` decides who
+   * may work on an app and lives in the config; a label decides nothing and
+   * lives here. A compromised agent renaming every app is a mess an operator
+   * can see and undo, not a grant it awarded itself.
+   *
+   * The box has names of its own, which this does not touch — twenty-two of the
+   * thirty-two are `(unnamed)` there, and naming one from a chat is the point.
+   */
+  appLabels: join(STATE_DIR, 'app-labels.json'),
 } as const;

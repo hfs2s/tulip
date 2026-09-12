@@ -20,7 +20,7 @@ process.env['TULIP_OUT_DIR'] = join(root, 'out');
 const { publishPage, listPages, deletePage, isPagesRequest, SLUG, mayChange,
   hashPagePassword, pageAuthorised, unpublishPage, republishPage, isUnpublished } = await import('../src/pages.js');
 const { parseConfig } = await import('../src/config.js');
-const { outPaths } = await import('@tulip/shared');
+const { outPaths } = await import('@2lp/shared');
 
 function build(slug: string, files: Record<string, string> = { 'index.html': '<h1>hi</h1>' }): void {
   const dir = outPaths.page(slug);

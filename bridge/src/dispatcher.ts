@@ -18,14 +18,15 @@ import { EventEmitter } from 'node:events';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WAMessage } from 'baileys';
-import { inPaths, transcriptFor } from '@tulip/shared';
-import type { InboundMedia, InboundMessage } from '@tulip/shared';
+import { inPaths, transcriptFor } from '@2lp/shared';
+import type { InboundMedia, InboundMessage } from '@2lp/shared';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import { controlDisposition, WRONG_ROOM } from './control.js';
 import { feed } from './feed.js';
-import { gate, isOperator } from './gate.js';
+import { gate, groupModeFor, isOperator } from './gate.js';
 import { publishTurn, readStatus, retireBatch } from './handoff.js';
+import { roomContext } from './history.js';
 import { log, redactNumber } from './log.js';
 import { hasContent, senderPnOf, toEnvelope, type Envelope } from './envelope.js';
 import { canTranscribe, transcribe } from './transcribe.js';
@@ -37,6 +38,12 @@ import type { TurnRegistry } from './turns.js';
 import type { WhatsApp } from './whatsapp.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * How much of a room comes with a triggered turn. Enough to know what a
+ * question is about; not so much that one wake-up reads a day of chatter.
+ */
+const CONTEXT_LINES = 20;
 
 /**
  * Give audio to the agent as words.
@@ -218,6 +225,11 @@ export class Dispatcher extends EventEmitter {
       from: envelope.pushName,
       text: envelope.text,
       media: envelope.media.map((m) => ({ kind: m.kind, bytes: m.bytes })),
+      // Carried on every row, accepted or refused, because an operator may want
+      // to react to something the gate turned away — a message in a room he was
+      // never addressed in is still a message somebody sent.
+      waId: envelope.id,
+      participant: envelope.isGroup ? (envelope.senderIds[0] ?? null) : null,
     };
 
     // Operator control commands are handled before anything else and never
@@ -251,9 +263,33 @@ export class Dispatcher extends EventEmitter {
       return;
     }
 
+    // Stopped by somebody in the room itself. Below the control commands on
+    // purpose — those are handled above and still run here, which is what makes
+    // a stopped room able to un-stop itself when an operator asks.
+    //
+    // Recorded rather than dropped, like every other refusal: the room carries
+    // on talking and the feed carries on holding it, so an operator can read
+    // back what was said while it was quiet.
+    if (state.isStopped(chatKey)) {
+      feed.inbound({ ...summary, accepted: false, reason: 'stopped in this chat' });
+      log('gate.deny', { chatKey, reason: 'stopped in this chat' });
+      return;
+    }
+
     // `hasMedia` is derived here rather than carried on the envelope: it is a
     // question the gate asks, not a property of the message.
-    const verdict = gate({ ...envelope, hasMedia: envelope.media.length > 0 }, config);
+    // A real message from a group he left means somebody added him back. Here,
+    // before the gate, because in a mention or trigger room most messages are
+    // refused below and he would otherwise stay marked as gone from a room he
+    // is in. Content-free events — WhatsApp's own 'you left' notice — never
+    // reach this line.
+    if (isGroupChat && chats.get(chatKey)?.leftAt != null) {
+      chats.setLeft(chatKey, null);
+      chats.flush();
+      feed.event('group.rejoined', `${envelope.groupName ?? chatKey} — he is in it again`);
+    }
+
+    const verdict = gate({ ...envelope, chatKey, hasMedia: envelope.media.length > 0 }, config);
     if (!verdict.accept) {
       feed.inbound({ ...summary, accepted: false, reason: verdict.reason });
       log('gate.deny', {
@@ -426,6 +462,38 @@ export class Dispatcher extends EventEmitter {
     return true;
   }
 
+  /**
+   * End the turn in flight because somebody stopped it.
+   *
+   * `finishTurn` is private because ending a turn is normally this class's own
+   * business: the agent reports idle, or the timeout fires. A stop is the one
+   * thing outside it that legitimately ends one, and it has to, because of the
+   * order events happen in — the Escape lands in the pane, the agent stops
+   * mid-action, and it therefore never reaches the point of reporting idle.
+   *
+   * Without this the turn record stays open until `turnTimeoutMs`. That is ten
+   * minutes in which `awaitTurnEnd` is still waiting on a turn the agent has
+   * already abandoned, so a release hands over nothing and the queue does not
+   * move — a stop that cannot be undone for ten minutes, which is a worse
+   * failure than the one it was pulled to prevent. Found the first time the
+   * switch was used in anger.
+   */
+  abandonInFlight(why: string, onlyChatKey?: string): void {
+    if (this.inFlight === null) return;
+    // A room may only interrupt its own turn. Without this, `!stopjuan` in one
+    // group would cut off a sentence being written to somebody else entirely —
+    // which is the same cross-chat mis-delivery the terminal's window aim
+    // exists to prevent, arriving from the other direction.
+    if (onlyChatKey !== undefined && this.inFlight.chatKey !== onlyChatKey) return;
+    log('turn.stopped', { chatKey: this.inFlight.chatKey, why });
+    this.finishTurn(why);
+  }
+
+  /** Which chat is being answered right now, if any. */
+  inFlightChat(): string | null {
+    return this.inFlight?.chatKey ?? null;
+  }
+
   private finishTurn(why: string): void {
     if (!this.inFlight) return;
     const { turnId, chatKey, startedAt } = this.inFlight;
@@ -487,6 +555,18 @@ export class Dispatcher extends EventEmitter {
       })),
     );
 
+    // A room that hands over only what addressed Juan delivers "what do you
+    // think of this?" without the "this". Its own recent lines fill that in,
+    // minus the messages being answered — see ContextMessage in handoff.ts.
+    const context = last.envelope.isGroup && groupModeFor(this.deps.config, chatKey) !== 'observe'
+      ? roomContext(chatKey, new Set(batch.map(({ envelope }) => envelope.id)), CONTEXT_LINES).map((m) => ({
+          from: m.from.slice(0, 128),
+          at: m.at,
+          text: m.text.slice(0, 1000),
+          heard: m.refused === null,
+        }))
+      : [];
+
     publishTurn({
       turnId: turn.turnId,
       chatKey,
@@ -494,6 +574,7 @@ export class Dispatcher extends EventEmitter {
       isGroup: last.envelope.isGroup,
       receivedAt: new Date(now).toISOString(),
       messages,
+      ...(context.length > 0 ? { context } : {}),
     },
     // What is actually switched on, read from live config at the moment the
     // turn is published. The agent uses it to avoid planning a reply around
@@ -506,12 +587,15 @@ export class Dispatcher extends EventEmitter {
       recall: this.deps.config.agent.recall,
       schedule: this.deps.config.agent.schedule,
     },
-    // What `!reset` moves. Read per turn rather than held, so a reset taken
-    // while a chat is idle applies to its very next message.
-    state.generation(chatKey),
+    // What `!reset` moves. Read per turn rather than held, so a reset applies to
+    // the very next message. One number for every chat — see sharedGeneration
+    // for the two-session bug a per-chat value caused.
+    state.sharedGeneration(),
     // Only meaningful in `observe`: the other modes are gated by the bridge, so
-    // nothing reaches the agent it did not already decide to send.
-    this.deps.config.groups.replyTo === 'observe' ? this.deps.config.groups.reactivity : null,
+    // nothing reaches the agent it did not already decide to send. Read per room
+    // rather than globally, or a room set to judgement would be handed a null
+    // dial and told to use judgement anyway.
+    groupModeFor(this.deps.config, chatKey) === 'observe' ? this.deps.config.groups.reactivity : null,
     // The wall clock the people in this chat are living on. Carried per turn for
     // the same reason as the reactivity dial — an operator changing it should
     // not have to restart a session — and read here rather than in the agent

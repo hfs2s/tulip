@@ -21,7 +21,7 @@ const MAX_BYTES = 8 * 1024 * 1024;
 export interface FeedEntry {
   ts: number;
   uid: string;
-  kind: 'in' | 'out' | 'delivered' | 'event';
+  kind: 'in' | 'out' | 'delivered' | 'event' | 'edited' | 'unsent';
   chatKey?: string;
   chatName?: string | null;
   isGroup?: boolean;
@@ -30,10 +30,39 @@ export interface FeedEntry {
   text?: string | null;
   accepted?: boolean;
   reason?: string | null;
+  /**
+   * The WhatsApp message id, on inbound rows only.
+   *
+   * Recorded so an operator can react to something further back than the last
+   * message. It was never kept before, which is why reacting could only ever
+   * reach the most recent thing said — the bridge simply had no handle on
+   * anything older, and none of the messages already on screen when this
+   * shipped will have one.
+   *
+   * Never sent to the agent. `sent.ts` argues that at length for outbound ids
+   * and the reasoning is identical here: an id is an opaque string, the agent
+   * reads text written by strangers, and "react to message 3A8B…" is a sentence
+   * anybody can type. The panel is the trusted side and may hold one; the
+   * container may not.
+   */
+  waId?: string | null;
+  /** Whose message it was, in a group. WhatsApp needs it to place a reaction. */
+  participant?: string | null;
   media?: Array<{ kind: string; bytes: number | null }>;
   count?: number;
   event?: string;
   detail?: string | null;
+  /**
+   * What a message said before it was edited or retracted.
+   *
+   * The whole point of recording a correction. WhatsApp shows the recipient the
+   * new text — or nothing at all — so if the feed simply overwrote its own row
+   * there would be no surviving account of what was actually delivered. These
+   * are appended rather than applied, and the original is never dropped.
+   */
+  was?: string | null;
+  /** Who made the correction: the agent, or an operator in the panel. */
+  by?: 'agent' | 'operator';
 }
 
 class Feed extends EventEmitter {
@@ -74,6 +103,8 @@ class Feed extends EventEmitter {
     media: Array<{ kind: string; bytes: number | null }>;
     accepted: boolean;
     reason: string | null;
+    waId?: string | null;
+    participant?: string | null;
   }): FeedEntry {
     return this.append({ kind: 'in', ...row });
   }
@@ -86,6 +117,22 @@ class Feed extends EventEmitter {
   /** Sent back to WhatsApp. */
   outbound(chatKey: string, kind: string, text: string | null): FeedEntry {
     return this.append({ kind: 'out', chatKey, text, detail: kind });
+  }
+
+  /**
+   * A message's words replaced after delivery.
+   *
+   * Appended beside the original `out` row rather than modifying it, so the
+   * feed reads as a history: what was sent, then what it became. An operator
+   * scrolling back can always see what a recipient first saw.
+   */
+  edited(chatKey: string, was: string | null, now: string, by: 'agent' | 'operator'): FeedEntry {
+    return this.append({ kind: 'edited', chatKey, was, text: now, by });
+  }
+
+  /** A message retracted for everyone. The words it carried are kept here. */
+  unsent(chatKey: string, was: string | null, by: 'agent' | 'operator'): FeedEntry {
+    return this.append({ kind: 'unsent', chatKey, was, text: null, by });
   }
 
   /** Anything an operator should see: fatal states, restarts, refusals in bulk. */

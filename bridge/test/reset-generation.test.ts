@@ -26,7 +26,7 @@ process.env['TULIP_STATE_DIR'] = join(box, 'state');
 
 const { publishTurn } = await import('../src/handoff.js');
 const { state } = await import('../src/state.js');
-const { CurrentTurn } = await import('@tulip/shared');
+const { CurrentTurn } = await import('@2lp/shared');
 
 const KEY = 'abcdef0123456789';
 const TURN = '11111111-2222-4333-8444-555555555555';

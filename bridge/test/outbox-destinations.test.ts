@@ -46,7 +46,7 @@ let roots: string[] = [];
 let sent: Array<{ method: string; jid: string; detail?: string }> = [];
 
 /**
- * What the two billed providers and Giphy return, as module state.
+ * What the two billed providers return, as module state.
  *
  * Not `vi.mocked(...).mockResolvedValue(...)` on a top-level import, because the
  * harness resets the module registry per test: the mock factory runs again and
@@ -55,6 +55,8 @@ let sent: Array<{ method: string; jid: string; detail?: string }> = [];
  */
 let voiceOutcome: unknown = { ok: true, data: Buffer.from('ogg') };
 let imageOutcome: unknown = { ok: true, data: Buffer.from('png') };
+/** Set to make the fake `groupLeave` throw, the way WhatsApp refuses one. */
+let leaveError: Error | null = null;
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -94,6 +96,7 @@ interface Harness {
     keyFor: (jid: string, isGroup: boolean, now: number, altJid?: string | null) => string;
     setBlocked: (k: string, b: boolean) => boolean;
     jidFor: (k: string) => string | null;
+    touch: (k: string, patch: { name?: string | null }, now: number) => void;
   };
   turns: { open: (jid: string, key: string, now: number, fromOperator?: boolean) => { turnId: string } };
   /** Queue one action the way the agent does. Returns its id, for `answer`. */
@@ -101,7 +104,9 @@ interface Harness {
   /** Stage a file on the outbound volume, where `file` actions resolve names. */
   stage: (name: string, bytes: Buffer) => void;
   /** The tool answer written back onto the agent's read-only volume, if any. */
-  answer: (id: string) => { ok: boolean; error: string | null; items: Array<{ url: string }> } | null;
+  answer: (id: string) => { ok: boolean; error: string | null; items: Array<{ url: string; text?: string }> } | null;
+  /** What the bridge wrote to the feed an operator reads, oldest first. */
+  feed: () => Array<{ kind: string; event?: string; detail?: string | null; chatKey?: string; text?: string | null }>;
   emitted: Array<{ chatKey: string; kind: string }>;
   configFile: string;
 }
@@ -128,8 +133,9 @@ async function harness(overrides: Record<string, unknown> = {}): Promise<Harness
   const { TurnRegistry } = await import('../src/turns.js');
   const { Limiter } = await import('../src/ratelimit.js');
   const { parseConfig } = await import('../src/config.js');
-  const { outPaths, inPaths } = await import('@tulip/shared');
+  const { outPaths, inPaths } = await import('@2lp/shared');
   const { resetForTests } = await import('../src/spend.js');
+  const { feed } = await import('../src/feed.js');
   resetForTests();
 
   const config = parseConfig({
@@ -166,6 +172,13 @@ async function harness(overrides: Record<string, unknown> = {}): Promise<Harness
     sendFile: record('file'),
     react: record('react'),
     typing: record('typing'),
+    // Recorded in the same list as the sends, so a test can assert the order
+    // a goodbye and a leave happened in — which is the point of carrying both
+    // on one action.
+    leaveGroup: async (jid: string) => {
+      if (leaveError !== null) throw leaveError;
+      sent.push({ method: 'leave', jid });
+    },
   };
 
   const outbox = new Outbox({
@@ -195,6 +208,7 @@ async function harness(overrides: Record<string, unknown> = {}): Promise<Harness
       }
     },
     emitted,
+    feed: () => feed.recent(4000) as ReturnType<Harness['feed']>,
     queue: (action) => {
       const id = randomUUID();
       writeFileSync(outPaths.action(id), JSON.stringify({ id, ...action }));
@@ -208,7 +222,7 @@ async function harness(overrides: Record<string, unknown> = {}): Promise<Harness
         return JSON.parse(readFileSync(inPaths.result(id), 'utf8')) as {
           ok: boolean;
           error: string | null;
-          items: Array<{ url: string }>;
+          items: Array<{ url: string; text?: string }>;
         };
       } catch {
         return null;
@@ -221,6 +235,7 @@ beforeEach(() => {
   sent = [];
   voiceOutcome = { ok: true, data: Buffer.from('ogg') };
   imageOutcome = { ok: true, data: Buffer.from('png') };
+  leaveError = null;
 });
 
 describe('a named destination', () => {
@@ -359,7 +374,6 @@ describe('a destination the bridge will not resolve', () => {
     for (const action of [
       { kind: 'voice', text: 'hi' },
       { kind: 'image', prompt: 'a cat', caption: null },
-      { kind: 'gif', query: 'cat', caption: null },
       { kind: 'file', file: 'chart.png', caption: null },
       { kind: 'sendTo', text: 'hi' },
     ]) {
@@ -845,5 +859,196 @@ describe('a turn’s two allowances', () => {
     h.queue({ turnId: turn.turnId, kind: 'text', text: 'and here is what I found' });
     await h.outbox.drain();
     expect(sent.map((s) => s.detail)).toEqual(['and here is what I found']);
+  });
+});
+
+/** A group Juan is in. The registry records it as a group, which is what `leaveGroup` checks. */
+const GROUP = '120363000000000001@g.us';
+
+/** Register the operator's direct chat, somebody else's, and a named group. */
+function rooms(h: Harness, now: number): { mine: string; theirs: string; group: string } {
+  const mine = h.chats.keyFor(PHONE, false, now);
+  const theirs = h.chats.keyFor(OTHER, false, now);
+  const group = h.chats.keyFor(GROUP, true, now);
+  h.chats.touch(group, { name: 'Book club' }, now);
+  return { mine, theirs, group };
+}
+
+const leftEvents = (h: Harness) => h.feed().filter((e) => e.kind === 'event' && e.event === 'group.left');
+
+/**
+ * Leaving a group: provenance, then order.
+ *
+ * The same gate as `contact` — the turn must be an operator's, decided from the
+ * envelope — and then two properties a refactor breaks easily. The goodbye
+ * reaches the room *before* the leave, because afterwards nothing can. And a
+ * leave WhatsApp refused is never reported as one that happened, or the agent
+ * tells an operator it has gone from a room it is still in.
+ */
+describe('leaveGroup — only when an operator asks', () => {
+  it('refuses a turn that is not an operator’s, and neither says goodbye nor leaves', async () => {
+    const h = await harness();
+    const now = Date.now();
+    const { group } = rooms(h, now);
+    const turn = h.turns.open(GROUP, group, now, false);
+
+    const id = h.queue({ turnId: turn.turnId, kind: 'leaveGroup', chatKey: null, goodbye: 'bye, all' });
+    await h.outbox.drain();
+
+    expect(sent).toEqual([]);
+    expect(h.answer(id)).toMatchObject({ ok: false });
+    // Told where a member who wants Juan quiet should actually go.
+    expect(h.answer(id)?.error).toContain('!stopjuan');
+    expect(leftEvents(h)).toEqual([]);
+  });
+
+  it('refuses a direct chat — the operator’s own, or anybody else’s', async () => {
+    const h = await harness();
+    const now = Date.now();
+    const { mine, theirs } = rooms(h, now);
+    const turn = h.turns.open(PHONE, mine, now, true);
+
+    const own = h.queue({ turnId: turn.turnId, kind: 'leaveGroup', chatKey: null, goodbye: 'bye' });
+    const other = h.queue({ turnId: turn.turnId, kind: 'leaveGroup', chatKey: theirs, goodbye: 'bye' });
+    await h.outbox.drain();
+
+    expect(sent).toEqual([]);
+    for (const id of [own, other]) {
+      expect(h.answer(id)).toMatchObject({ ok: false });
+      expect(h.answer(id)?.error).toMatch(/not a group/);
+    }
+  });
+
+  it('refuses a key the bridge never issued', async () => {
+    const h = await harness();
+    const now = Date.now();
+    const { mine } = rooms(h, now);
+    const turn = h.turns.open(PHONE, mine, now, true);
+
+    const id = h.queue({ turnId: turn.turnId, kind: 'leaveGroup', chatKey: NEVER_ISSUED, goodbye: 'bye' });
+    await h.outbox.drain();
+
+    expect(sent).toEqual([]);
+    expect(h.answer(id)).toMatchObject({ ok: false });
+    expect(h.answer(id)?.error).toMatch(/no chat with that key/i);
+  });
+
+  it('leaves the group it was asked in, and says goodbye first', async () => {
+    // Constructed by hand: `carriesOperatorAuthority` never grants a room
+    // operator authority today, so the dispatcher does not open this turn.
+    // What is pinned here is the outbox's own behaviour, should that ever change.
+    const h = await harness();
+    const now = Date.now();
+    const { group } = rooms(h, now);
+    const turn = h.turns.open(GROUP, group, now, true);
+    const goodbye = 'Thanks, all — heading out.';
+
+    const id = h.queue({ turnId: turn.turnId, kind: 'leaveGroup', chatKey: null, goodbye });
+    await h.outbox.drain();
+
+    expect(sent).toEqual([
+      { method: 'text', jid: GROUP, detail: goodbye },
+      { method: 'leave', jid: GROUP },
+    ]);
+    expect(h.answer(id)).toMatchObject({ ok: true });
+    // Recorded like any other send, so `sent` and the panel both show it.
+    expect(h.feed().some((e) => e.kind === 'out' && e.chatKey === group && e.text === goodbye)).toBe(true);
+    const [event] = leftEvents(h);
+    expect(event?.detail).toContain('Book club');
+    expect(event?.detail).toContain('operator');
+  });
+
+  it('leaves a group an operator names from their direct message, with cross-chat off', async () => {
+    // Cross-chat governs sending to other chats. It has no say here, or the
+    // one path that works in production would depend on a switch about
+    // something else.
+    const h = await harness({ agent: { crossChat: false, voice: true, images: true, contacts: [] } });
+    const now = Date.now();
+    const { mine, group } = rooms(h, now);
+    const turn = h.turns.open(PHONE, mine, now, true);
+
+    const id = h.queue({ turnId: turn.turnId, kind: 'leaveGroup', chatKey: group, goodbye: null });
+    await h.outbox.drain();
+
+    expect(sent).toEqual([{ method: 'leave', jid: GROUP }]);
+    expect(h.answer(id)).toMatchObject({ ok: true });
+    expect(h.answer(id)?.items[0]?.text).toContain('Left Book club');
+    expect(leftEvents(h)).toHaveLength(1);
+  });
+
+  it('does not report a leave WhatsApp refused as done', async () => {
+    leaveError = new Error('not-authorized');
+    const h = await harness();
+    const now = Date.now();
+    const { mine, group } = rooms(h, now);
+    const turn = h.turns.open(PHONE, mine, now, true);
+
+    const id = h.queue({ turnId: turn.turnId, kind: 'leaveGroup', chatKey: group, goodbye: 'bye, all' });
+    await h.outbox.drain();
+
+    // The goodbye went; the leave did not.
+    expect(sent).toEqual([{ method: 'text', jid: GROUP, detail: 'bye, all' }]);
+    expect(h.answer(id)).toMatchObject({ ok: false });
+    expect(h.answer(id)?.error).toContain('still in it');
+    expect(h.answer(id)?.error).toContain('goodbye had already gone out');
+    expect(leftEvents(h)).toEqual([]);
+  });
+});
+
+/**
+ * The goodbye is a message like any other, so it spends what a message spends.
+ * Leaving itself delivers nothing and is charged as a tool — which is why a
+ * spent send allowance stops the goodbye but not a leave without one.
+ */
+describe('leaveGroup — the goodbye spends the send allowance', () => {
+  it('refuses to leave, rather than leave without it, once the turn’s sends are spent', async () => {
+    const h = await harness({ limits: { outboundPerTurn: 1 } });
+    const now = Date.now();
+    const { mine, group } = rooms(h, now);
+    const turn = h.turns.open(PHONE, mine, now, true);
+
+    h.queue({ turnId: turn.turnId, kind: 'text', text: 'on it' });
+    await h.outbox.drain();
+    const id = h.queue({ turnId: turn.turnId, kind: 'leaveGroup', chatKey: group, goodbye: 'bye, all' });
+    await h.outbox.drain();
+
+    expect(sent).toEqual([{ method: 'text', jid: PHONE, detail: 'on it' }]);
+    expect(h.answer(id)).toMatchObject({ ok: false });
+    expect(h.answer(id)?.error).toMatch(/goodbye could not go out.*not left/);
+  });
+
+  it('counts the goodbye against the turn, like a send', async () => {
+    const h = await harness({ limits: { outboundPerTurn: 1 } });
+    const now = Date.now();
+    const { mine, group } = rooms(h, now);
+    const turn = h.turns.open(PHONE, mine, now, true);
+
+    h.queue({ turnId: turn.turnId, kind: 'leaveGroup', chatKey: group, goodbye: 'bye, all' });
+    await h.outbox.drain();
+    h.queue({ turnId: turn.turnId, kind: 'text', text: 'done' });
+    await h.outbox.drain();
+
+    expect(sent).toEqual([
+      { method: 'text', jid: GROUP, detail: 'bye, all' },
+      { method: 'leave', jid: GROUP },
+    ]);
+  });
+
+  it('still leaves without a goodbye when the sends are spent', async () => {
+    const h = await harness({ limits: { outboundPerTurn: 1 } });
+    const now = Date.now();
+    const { mine, group } = rooms(h, now);
+    const turn = h.turns.open(PHONE, mine, now, true);
+
+    h.queue({ turnId: turn.turnId, kind: 'text', text: 'on it' });
+    await h.outbox.drain();
+    const id = h.queue({ turnId: turn.turnId, kind: 'leaveGroup', chatKey: group, goodbye: null });
+    await h.outbox.drain();
+
+    expect(sent).toEqual([
+      { method: 'text', jid: PHONE, detail: 'on it' },
+      { method: 'leave', jid: GROUP },
+    ]);
+    expect(h.answer(id)).toMatchObject({ ok: true });
   });
 });

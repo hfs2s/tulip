@@ -5,7 +5,7 @@
  * somebody said, what Juan replied, and a one-line trace of the tools he
  * reached for — rather than a TUI full of box-drawing characters and spinner
  * frames. Nothing here is voice-note transcription; `transcriptFor` in
- * `@tulip/shared` is a different thing entirely and the collision of words is
+ * `@2lp/shared` is a different thing entirely and the collision of words is
  * unfortunate.
  *
  * ─── Why the bridge reads the file rather than being handed a rendering ──────
@@ -149,6 +149,31 @@ export interface SaidItem {
   readonly direction: 'in' | 'out';
   readonly who: string;
   readonly text: string;
+  /**
+   * Where this message sits in Juan's own recent sends, counting back from 1.
+   *
+   * Present only on outbound text still inside WhatsApp's correction window and
+   * still held by the `sent` store. Absent means "not correctable", which the
+   * panel reads as "offer no edit button" — better than offering one that will
+   * fail, since the failure arrives after the operator has already typed the
+   * correction.
+   *
+   * A position rather than a message id, and that is the point: the id never
+   * leaves the bridge. See the header of `sent.ts` for why the agent counts
+   * backwards, and the panel counts the same way for the same reason.
+   */
+  readonly nth?: number;
+  /** Already retracted — shown struck through rather than hidden. */
+  readonly unsent?: boolean;
+  /**
+   * The WhatsApp id of an inbound message, so the panel can react to it.
+   *
+   * Absent on anything received before ids were recorded, and the panel reads
+   * that absence the same way it reads a missing `nth`: offer no control rather
+   * than one that cannot work.
+   */
+  readonly waId?: string;
+  readonly participant?: string;
 }
 
 export type ViewItem = SaidItem | TranscriptItem;
@@ -438,7 +463,7 @@ export function readTranscriptTail(path: string, root: string = WORKSPACE_MOUNT)
 /**
  * The chat's session, as items. Empty when there is nothing to read.
  *
- * Named `sessionTranscript` and not `transcriptFor` on purpose: `@tulip/shared`
+ * Named `sessionTranscript` and not `transcriptFor` on purpose: `@2lp/shared`
  * already exports a `transcriptFor`, and it is about voice notes. Two functions
  * with the same name and unrelated meanings, one import line apart, is a
  * mistake waiting for somebody in a hurry.

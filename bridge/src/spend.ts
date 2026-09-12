@@ -15,7 +15,7 @@
  * rather than a surprise, and that is the trade being made.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { writeJsonAtomic } from '@tulip/shared';
+import { writeJsonAtomic } from '@2lp/shared';
 import { paths } from './paths.js';
 import { log } from './log.js';
 

@@ -76,13 +76,14 @@ async function harness(agent: Record<string, unknown> = {}, limits: Record<strin
 describe('what the audition actually asks for', () => {
   it('speaks the language its own sample line, with that language boost', async () => {
     const { deps, preview } = await harness({ voiceId: 'Default_Voice' });
-    const { LANGUAGE_SAMPLES } = await import('@tulip/shared');
+    const { sampleFor } = await import('@2lp/shared');
 
     const result = await preview(deps, { language: 'German' });
 
     expect(result.ok).toBe(true);
     expect(spoken).toHaveLength(1);
-    expect(spoken[0]?.text).toBe(LANGUAGE_SAMPLES.German);
+    // With the deployment's own name in it — `Tulip` when none is configured.
+    expect(spoken[0]?.text).toBe(sampleFor('German', 'Tulip'));
     expect(spoken[0]?.language).toBe('German');
   });
 

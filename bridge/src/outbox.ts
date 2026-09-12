@@ -39,13 +39,17 @@ import {
   canRecall,
   describeSpec,
   formatLocal,
-} from '@tulip/shared';
-import type { OutboxAction as OutboxActionType } from '@tulip/shared';
+} from '@2lp/shared';
+import type { OutboxAction as OutboxActionType } from '@2lp/shared';
 import { feed } from './feed.js';
-import { fetchPage, search, type ExaOutcome } from './exa.js';
+import { search, type ExaOutcome } from './exa.js';
+import { readPage } from './browse.js';
+import { APPS_PLUGIN, NOT_THE_BOX, NOT_YOUR_APP, WORKSPACE_ARG, mayUse, setLabel } from './apps.js';
+import { callPlugin, listCallable } from './pluginCalls.js';
 import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
 import { retainOutbound } from './mediaStore.js';
+import { sent } from './sent.js';
 import { claim } from './spend.js';
 import {
   imageCount,
@@ -55,6 +59,7 @@ import {
   unpublishPage,
   NO_NEW_PAGES,
   NOT_YOURS,
+  databaseNotes,
   publishPage,
   scaffoldPage,
   usesKit,
@@ -278,6 +283,8 @@ export interface OutboxDeps {
   readonly lastMessageIn: (chatKey: string) => { id: string; participant?: string } | null;
   /** Persist page passwords. Injected so the outbox does not reach into the panel's API. */
   readonly setPagePasswords: (passwords: Readonly<Record<string, { salt: string; hash: string }>>) => void;
+  /** Where callable plugins live. Defaults to the plugins mount; tests point it elsewhere. */
+  readonly pluginsDir?: string;
 }
 
 /**
@@ -297,6 +304,12 @@ export interface OutboxDeps {
  * a real bug rather than an over-cautious default: the five-picture page the
  * persona recommends spent all eight of a turn's sends before the message
  * carrying the link was written, and that message was then refused.
+ *
+ * `edit` and `unsend` are deliberately absent, and so cost a tool rather than a
+ * send. Neither puts a *new* message in front of anybody: one replaces words
+ * already delivered and charged for, the other removes them. Rationing them
+ * alongside new messages would mean a turn that spent its allowance could no
+ * longer fix what it spent it on, which is exactly backwards.
  */
 const DELIVERS: ReadonlySet<string> = new Set(['text', 'sendTo', 'file', 'image', 'voice', 'react']);
 
@@ -314,6 +327,20 @@ export class Outbox extends EventEmitter {
 
   constructor(private readonly deps: OutboxDeps) {
     super();
+  }
+
+  /**
+   * Send text, and keep the handle that makes it correctable.
+   *
+   * A method rather than two lines repeated at seven call sites, because the
+   * failure mode of repeating them is invisible: forget `sent.record` at one
+   * site and that message simply cannot be edited later, with nothing to
+   * indicate why. `logged` exists for the one caller that sends a truncated
+   * message but records the whole of what the agent wrote.
+   */
+  private async sayText(chatKey: string, jid: string, text: string, logged?: string): Promise<void> {
+    const id = await this.deps.wa.sendText(jid, text);
+    sent.record(chatKey, id, 'text', text, feed.outbound(chatKey, 'text', logged ?? text).uid);
   }
 
   start(): this {
@@ -436,13 +463,12 @@ export class Outbox extends EventEmitter {
    *
    * So a refusal now falls back to whatever words already exist. A voice note
    * has its own text — the fallback is lossless, and the same one synthesis
-   * failure already used. A picture or a GIF has a caption or it has nothing,
-   * and a caption is usually the sentence the media was illustrating.
+   * failure already used. A picture has a caption or it has nothing, and a
+   * caption is usually the sentence the picture was illustrating.
    *
-   * Nothing is invented where there are no words: a bare `gif` with no caption
-   * really is decoration, and the existing gif-failure path already drops it on
-   * the grounds that a missing GIF must never cost somebody their reply. What
-   * must not happen is a *reply* being lost, and that is what this prevents.
+   * Nothing is invented where there are no words: a bare picture with no
+   * caption is decoration, and losing it costs nobody their reply. What must
+   * not happen is a *reply* being lost, and that is what this prevents.
    */
   private async refuse(
     capability: string,
@@ -453,8 +479,7 @@ export class Outbox extends EventEmitter {
     feed.event('capability.off', `${capability} is switched off; the agent asked for it`);
     const words = (fallback ?? '').trim();
     if (words.length === 0) return;
-    await this.deps.wa.sendText(dest.jid, words.slice(0, 4000));
-    feed.outbound(dest.key, 'text', words);
+    await this.sayText(dest.key, dest.jid, words.slice(0, 4000), words);
   }
 
   /** Answer a `chats` request on the inbound volume, like a search result. */
@@ -493,8 +518,7 @@ export class Outbox extends EventEmitter {
   private async holdingMessage(turn: Turn, text: string): Promise<void> {
     if (turn.sends > 0) return;
     try {
-      await this.deps.wa.sendText(turn.chatJid, text);
-      feed.outbound(turn.chatKey, 'text', text);
+      await this.sayText(turn.chatKey, turn.chatJid, text);
       log('outbox.holding', { chatKey: turn.chatKey, why: 'a page is being built' });
     } catch (err) {
       // A holding message that fails must not fail the thing it announced.
@@ -504,7 +528,9 @@ export class Outbox extends EventEmitter {
 
   private async answer(
     actionId: string,
-    kind: 'search' | 'fetch' | 'chats' | 'page' | 'contact' | 'sent' | 'history' | 'schedule',
+    kind:
+      | 'search' | 'fetch' | 'chats' | 'page' | 'contact' | 'sent' | 'history' | 'schedule' | 'edit' | 'unsend'
+      | 'leaveGroup' | 'plugin' | 'app',
     outcome: ExaOutcome,
   ): Promise<void> {
     const result = ToolResult.safeParse({
@@ -613,8 +639,14 @@ export class Outbox extends EventEmitter {
     // default on the media verbs, and both mean the same thing: the chat whose
     // turn this is. Resolved once, here, so no verb below can accidentally send
     // to the turn's chat while reporting it went somewhere else.
+    //
+    // `leaveGroup` is the exception. Its key names the group to leave, not a
+    // chat to deliver to, and it resolves that itself — after the operator
+    // check, and with an answer for every refusal. Sent through here it would
+    // be dropped in silence whenever cross-chat was off, which is a switch
+    // about something else entirely.
     let dest = { jid: turn.chatJid, key: turn.chatKey, crossed: false };
-    if ('chatKey' in action && action.chatKey !== null) {
+    if ('chatKey' in action && action.chatKey !== null && action.kind !== 'leaveGroup') {
       const target = this.crossChatTarget(action.chatKey);
       if (target === null) return; // refused and logged
       dest = { jid: target.jid, key: target.key, crossed: true };
@@ -642,8 +674,7 @@ export class Outbox extends EventEmitter {
 
     switch (action.kind) {
       case 'text': {
-        await this.deps.wa.sendText(turn.chatJid, action.text);
-        feed.outbound(turn.chatKey, 'text', action.text);
+        await this.sayText(turn.chatKey, turn.chatJid, action.text);
         break;
       }
       case 'file': {
@@ -653,9 +684,9 @@ export class Outbox extends EventEmitter {
           feed.event('outbox.fileRefused', `${action.file}: ${file.reason}`);
           return;
         }
-        await this.deps.wa.sendFile(dest.jid, file.data, file.mimetype, action.file, action.caption);
+        const filed = await this.deps.wa.sendFile(dest.jid, file.data, file.mimetype, action.file, action.caption);
         retainOutbound(dest.key, 'file', file.data, file.mimetype);
-        feed.outbound(dest.key, file.mimetype, action.caption);
+        sent.record(dest.key, filed, 'file', action.caption, feed.outbound(dest.key, file.mimetype, action.caption).uid);
         // Sent files are removed: the volume is not storage, and leaving them
         // lets a compromised agent fill the disk one send at a time. Deleting
         // by name is safe in a way that *reading* by name is not — if the agent
@@ -682,15 +713,23 @@ export class Outbox extends EventEmitter {
           await this.answer(action.id, 'fetch', { ok: false, error: 'web access is switched off by the operator' });
           return;
         }
-        await this.answer(action.id, 'fetch', await fetchPage(action.url));
+        // Not awaited, and that is deliberate. `drain` performs actions one at
+        // a time, and a page read in a browser — with the search provider
+        // behind it — can take most of a minute. Awaited here, it would hold
+        // every other chat's reply behind one person's link. The browser still
+        // sees one page at a time (browse.ts queues them), the per-turn tool
+        // allowance described above is unchanged, and neither `readPage` nor
+        // `answer` throws. See bridge/src/browse.ts for the order it tries.
+        void readPage(action.id, action.url, action.screenshot).then((outcome) =>
+          this.answer(action.id, 'fetch', outcome),
+        );
         break;
       }
       // Text to a named chat. Its destination was resolved above, like every
       // other verb's; what is left here is just the send. Gated on
       // `agent.crossChat`; off by default. See THREAT-MODEL.md T4.
       case 'sendTo': {
-        await this.deps.wa.sendText(dest.jid, action.text);
-        feed.outbound(dest.key, 'text', action.text);
+        await this.sayText(dest.key, dest.jid, action.text);
         break;
       }
 
@@ -970,9 +1009,14 @@ export class Outbox extends EventEmitter {
         // choice the agent is allowed to make, and refusing would turn a look
         // into a gate. Saying so is enough, and it is said where it will be
         // read rather than in a log nobody opens.
-        const note = published.ok && !usesKit(action.slug)
-          ? ' (this page does not use the house style — link /_kit/kit.css unless you meant to)'
-          : '';
+        // The same goes for a database the page cannot actually read.
+        const notes = published.ok
+          ? [
+            ...(usesKit(action.slug) ? [] : ['this page does not use the house style — link /_kit/kit.css unless you meant to']),
+            ...databaseNotes(action.slug),
+          ]
+          : [];
+        const note = notes.length > 0 ? ` (${notes.join('; ')})` : '';
         await this.answer(action.id, 'page', published.ok
           ? { ok: true, items: [{ title: action.slug + note, url: published.url, published: null, text: '' }] }
           : { ok: false, error: published.error });
@@ -1047,12 +1091,17 @@ export class Outbox extends EventEmitter {
           .recent(4000)
           .filter((e) => e.kind === 'out' && e.chatKey === key)
           .slice(-action.n);
+        // `published` carries the correctable position rather than a date —
+        // the shared answer shape has no field for it, and inventing a second
+        // shape for one caller costs more than borrowing this one. Null means
+        // the message is past WhatsApp's window, which is worth showing.
+        const slots = sent.positions(key);
         await this.answer(action.id, 'sent', {
           ok: true,
           items: rows.map((e) => ({
             title: new Date(e.ts).toISOString(),
             url: e.detail ?? 'text',
-            published: null,
+            published: e.uid !== undefined && slots.has(e.uid) ? String(slots.get(e.uid)) : null,
             text: (e.text ?? '').slice(0, 200),
           })),
         });
@@ -1092,18 +1141,33 @@ export class Outbox extends EventEmitter {
         }
 
         const messages = recentMessages(action.chatKey, action.limit);
+        const refused = messages.filter((m) => m.refused !== null).length;
         // Loud on success too, not only on refusal. A capability that reads
         // private messages should leave a trail an operator scrolls past even
         // when it worked, which is the same argument memory.ts makes for notes.
-        log('recall.read', { asked: turn.chatKey, read: action.chatKey, messages: messages.length });
-        feed.event('recall.read', `an operator asked to read ${target?.name ?? 'a conversation'} (${messages.length} messages)`);
+        // The refused count is part of that trail: it is the difference between
+        // reading a conversation and reading a room that was never answered.
+        log('recall.read', {
+          asked: turn.chatKey,
+          read: action.chatKey,
+          messages: messages.length,
+          refused,
+        });
+        feed.event(
+          'recall.read',
+          `an operator asked to read ${target?.name ?? 'a conversation'} ` +
+            `(${messages.length} messages, ${refused} never answered)`,
+        );
 
         await this.answer(action.id, 'history', {
           ok: true,
           items: messages.map((m) => ({
             title: m.from,
             url: m.at,
-            published: null,
+            // The refusal reason rides `published`: it is the one free slot in
+            // the shared item shape, and a recalled message has no publication
+            // date competing for it. Null means the message was delivered.
+            published: m.refused === null ? null : m.refused.slice(0, 40),
             text: m.text.slice(0, 400),
           })),
         });
@@ -1154,6 +1218,213 @@ export class Outbox extends EventEmitter {
         break;
       }
 
+      /**
+       * Leave a group, because an operator asked.
+       *
+       * The same gate as `contact`, in the same place: the first check is the
+       * turn's provenance, which the dispatcher decided from the sender's jid
+       * before the agent saw anything. `carriesOperatorAuthority` never grants a
+       * room that authority, whoever spoke in it, so today the path that works is
+       * an operator in their own direct message naming the group by key. The
+       * refusal names `!stopjuan` because that is what a member who wants Juan
+       * quiet actually needs, and it needs nobody's permission.
+       *
+       * Charged as a tool, like `contact`: leaving delivers nothing. The goodbye
+       * does, so it is charged separately and exactly as a send would be — to
+       * the turn's send allowance and to the group's outbound rate.
+       *
+       * Every refusal is answered and does nothing. The goodbye is never sent
+       * unless the leave is about to be attempted, and a leave WhatsApp refused
+       * is never reported as done: the agent would otherwise tell an operator it
+       * had gone from a room it is still in. The chat record is left alone — if
+       * somebody adds Juan back, that is their decision, and a block would
+       * quietly overrule it.
+       */
+      case 'leaveGroup': {
+        if (!turn.fromOperator) {
+          log('outbox.leaveRefused', { chatKey: turn.chatKey, note: 'not an operator turn' });
+          feed.event('group.leaveRefused', 'the agent was asked to leave a group by somebody who is not an operator');
+          await this.answer(action.id, 'leaveGroup', {
+            ok: false,
+            error: 'Only an operator can ask me to leave a group. In the room, !stopjuan silences me straight away.',
+          });
+          break;
+        }
+
+        const record = this.deps.chats.get(action.chatKey ?? turn.chatKey);
+        const jid = record === null ? null : this.deps.chats.jidFor(record.chatKey);
+        if (record === null || jid === null) {
+          log('outbox.leaveUnknown', { chatKey: action.chatKey ?? turn.chatKey });
+          await this.answer(action.id, 'leaveGroup', {
+            ok: false,
+            error: 'There is no chat with that key, so nothing was done. Group keys come from the chats listing.',
+          });
+          break;
+        }
+        if (!record.isGroup) {
+          log('outbox.leaveNotGroup', { chatKey: record.chatKey });
+          await this.answer(action.id, 'leaveGroup', {
+            ok: false,
+            error:
+              'That is a direct chat, not a group, so there is nothing to leave and nothing was done. ' +
+              'From a direct message, name the group by its key.',
+          });
+          break;
+        }
+        const name = record.name ?? 'the group';
+
+        if (action.goodbye !== null) {
+          // `resolve` above only checked the tool allowance. Asked again here
+          // for the send one, which is the question a normal send would have
+          // been asked — and refused *before* leaving rather than after, because
+          // a goodbye that could not be sent cannot be sent later either.
+          const allowance = this.deps.turns.resolve(action.turnId, now, 'send');
+          const rate = allowance.ok ? this.deps.limiter.admitOutbound(record.chatKey, now) : null;
+          if (!allowance.ok || rate === null || !rate.ok) {
+            log('outbox.throttled', {
+              chatKey: record.chatKey,
+              reason: allowance.ok ? rate?.ok === false ? rate.reason : 'unknown' : allowance.reason,
+              note: 'a goodbye before leaving',
+            });
+            await this.answer(action.id, 'leaveGroup', {
+              ok: false,
+              error:
+                'I have used up the messages I may send right now, so the goodbye could not go out — and I have ' +
+                'not left, because afterwards I could not say it. Ask again later, or without a goodbye.',
+            });
+            break;
+          }
+          this.deps.turns.countSend(action.turnId);
+          try {
+            await this.sayText(record.chatKey, jid, action.goodbye);
+          } catch (err) {
+            log('outbox.goodbyeFailed', { chatKey: record.chatKey, err: String((err as Error).message) });
+            await this.answer(action.id, 'leaveGroup', {
+              ok: false,
+              error: `The goodbye could not be sent (${String((err as Error).message).slice(0, 80)}), so I have not left.`,
+            });
+            break;
+          }
+        }
+
+        try {
+          await this.deps.wa.leaveGroup(jid);
+        } catch (err) {
+          const why = String((err as Error).message).slice(0, 80);
+          log('outbox.leaveFailed', { chatKey: record.chatKey, err: why });
+          feed.event('group.leaveFailed', `could not leave ${name}: ${why}`);
+          await this.answer(action.id, 'leaveGroup', {
+            ok: false,
+            error:
+              `WhatsApp would not let me leave ${name} (${why}), so I am still in it.` +
+              (action.goodbye === null ? '' : ' The goodbye had already gone out.'),
+          });
+          break;
+        }
+
+        log('group.left', { chatKey: record.chatKey, askedFrom: turn.chatKey, goodbye: action.goodbye !== null });
+        this.deps.chats.setLeft(record.chatKey, Date.now());
+        this.deps.chats.flush();
+        // Loud, like `recall.read`: something an operator should scroll past in
+        // the panel even if they were not the one who asked.
+        feed.event('group.left', `left ${name} because an operator asked`);
+        await this.answer(action.id, 'leaveGroup', {
+          ok: true,
+          items: [
+            {
+              title: name,
+              url: record.chatKey,
+              published: null,
+              text:
+                `Left ${name}.` +
+                (action.goodbye === null ? '' : ' The goodbye went out first.') +
+                ' Only somebody in the group can add me back.',
+            },
+          ],
+        });
+        break;
+      }
+
+      /**
+       * Callable plugins — services on the host the agent may ask things of.
+       *
+       * Both are tools: they put nothing in front of anybody, so they spend the
+       * turn's tool allowance, charged above. Every rule about which plugin,
+       * which action, which arguments and whose turn lives in pluginCalls.ts,
+       * so there is one copy of it; `fromOperator` is read from the turn, which
+       * the dispatcher decided from the envelope and a group never carries.
+       */
+      case 'pluginList': {
+        await this.answer(action.id, 'plugin', listCallable(this.deps.config, turn.fromOperator, this.deps.pluginsDir));
+        break;
+      }
+      case 'appLabel': {
+        // The same grant as working on it, for the same reason a page's delete
+        // shares its page's grant: naming somebody's app is a smaller act than
+        // running commands in it, and anyone who may do the second may do this.
+        if (!mayUse(this.deps.config, action.workspace, turn.chatKey, this.deps.chats.get(turn.chatKey), turn.fromOperator)) {
+          log('apps.refused', { chatKey: turn.chatKey, workspace: action.workspace, verb: 'appLabel' });
+          await this.answer(action.id, 'app', { ok: false, error: NOT_YOUR_APP });
+          break;
+        }
+        const named = setLabel(action.workspace, action.label, turn.chatKey);
+        if (!named.ok) {
+          await this.answer(action.id, 'app', { ok: false, error: named.error ?? 'the label was refused' });
+          break;
+        }
+        const said = action.label.trim().length === 0
+          ? `${action.workspace} has no name now.`
+          : `${action.workspace} is called “${action.label.trim()}” here.`;
+        feed.event('app.labelled', said);
+        await this.answer(action.id, 'app', {
+          ok: true,
+          items: [{ title: action.workspace, url: action.workspace, published: null, text: said }],
+        });
+        break;
+      }
+
+      case 'pluginCall': {
+        // Whose app is it? Every rule about which plugin, which action and
+        // whose turn lives in pluginCalls.ts — except this one, which cannot:
+        // only this side knows that `workspace` names an app on the hfs2s box
+        // and that `apps.grants` says who may have it worked on. Checked
+        // before the call is written, because the drop-box has no undo.
+        //
+        // A call that names no workspace — `status`, `box` — is not about one
+        // app and is governed by `operatorOnly` alone, as before.
+        if (action.plugin === APPS_PLUGIN) {
+          const workspace = action.args[WORKSPACE_ARG];
+          if (typeof workspace === 'string' && workspace.length > 0) {
+            if (!mayUse(this.deps.config, workspace, turn.chatKey, this.deps.chats.get(turn.chatKey), turn.fromOperator)) {
+              log('apps.refused', { chatKey: turn.chatKey, workspace, verb: action.action });
+              await this.answer(action.id, 'plugin', { ok: false, error: NOT_YOUR_APP });
+              break;
+            }
+          } else if (!turn.fromOperator) {
+            // Names no workspace, so it is about the box: the listing of every
+            // client's app, or the machine's disk and memory. A grant cannot
+            // scope those, and granting one app is not consent to see the rest
+            // — so they stay with the operator even where `operatorOnly` is off.
+            log('apps.refused', { chatKey: turn.chatKey, workspace: '(none)', verb: action.action });
+            await this.answer(action.id, 'plugin', { ok: false, error: NOT_THE_BOX });
+            break;
+          }
+        }
+        // Not awaited, for the reason `fetch` is not: `drain` performs actions
+        // one at a time, and a plugin may take minutes to answer. Awaited here
+        // it would hold every other chat's reply behind one call. `callPlugin`
+        // never throws and neither does `answer`.
+        void callPlugin({
+          config: this.deps.config,
+          plugin: action.plugin,
+          action: action.action,
+          args: action.args,
+          fromOperator: turn.fromOperator,
+          ...(this.deps.pluginsDir === undefined ? {} : { root: this.deps.pluginsDir }),
+        }).then((outcome) => this.answer(action.id, 'plugin', outcome));
+        break;
+      }
+
       case 'image': {
         if (!this.deps.config.agent.images) return this.refuse('images', dest, action.caption);
         // Claimed before the request, so a slow provider cannot let two through
@@ -1161,8 +1432,11 @@ export class Outbox extends EventEmitter {
         if (!claim('images', this.deps.config.limits.imagesPerDay)) {
           log('outbox.imageCapped', { perDay: this.deps.config.limits.imagesPerDay });
           feed.event('image.capped', "today's picture allowance is spent");
-          await this.deps.wa.sendText(dest.jid, 'I have made as many pictures as I can today — ask me again tomorrow.');
-          feed.outbound(dest.key, 'text', 'picture allowance spent');
+          await this.sayText(
+            dest.key, dest.jid,
+            'I have made as many pictures as I can today — ask me again tomorrow.',
+            'picture allowance spent',
+          );
           return;
         }
         const image = await generateImage(action.prompt);
@@ -1171,9 +1445,12 @@ export class Outbox extends EventEmitter {
           feed.event('image.failed', image.error);
           return;
         }
-        await this.deps.wa.sendImage(dest.jid, image.data, action.caption);
+        const pictured = await this.deps.wa.sendImage(dest.jid, image.data, action.caption);
         retainOutbound(dest.key, 'image', image.data);
-        feed.outbound(dest.key, 'image', action.caption ?? '[image]');
+        sent.record(
+          dest.key, pictured, 'image', action.caption,
+          feed.outbound(dest.key, 'image', action.caption ?? '[image]').uid,
+        );
         break;
       }
 
@@ -1214,8 +1491,7 @@ export class Outbox extends EventEmitter {
             'voice.noMouth',
             `${chosen.spoken?.name ?? 'that language'} has no voice, so it was sent as a message instead`,
           );
-          await this.deps.wa.sendText(dest.jid, action.text);
-          feed.outbound(dest.key, 'text', action.text);
+          await this.sayText(dest.key, dest.jid, action.text);
           break;
         }
 
@@ -1232,24 +1508,22 @@ export class Outbox extends EventEmitter {
           // Said in text rather than swallowed. The daily cap is our problem,
           // not the listener's, and silence is the one outcome that reads as a
           // fault on their end.
-          await this.deps.wa.sendText(dest.jid, action.text);
-          feed.outbound(dest.key, 'text', action.text);
+          await this.sayText(dest.key, dest.jid, action.text);
           break;
         }
         const audio = await synthesise(action.text, chosen.voiceId, chosen.boost);
         if (!audio.ok) {
           // Never drop the message: say it in text rather than stay silent.
           log('outbox.voiceFallback', { reason: audio.error });
-          await this.deps.wa.sendText(dest.jid, action.text);
-          feed.outbound(dest.key, 'text', action.text);
+          await this.sayText(dest.key, dest.jid, action.text);
           return;
         }
-        await this.deps.wa.sendVoice(dest.jid, audio.data);
+        const spoken = await this.deps.wa.sendVoice(dest.jid, audio.data);
         // Keep the script. `action.text` is exactly what the voice says — it was
         // synthesised from it a line ago — so the Media page can show the words
         // instead of a play button and the phrase "Play to hear it".
         retainOutbound(dest.key, 'voice', audio.data, undefined, action.text);
-        feed.outbound(dest.key, 'voice', action.text);
+        sent.record(dest.key, spoken, 'voice', action.text, feed.outbound(dest.key, 'voice', action.text).uid);
         break;
       }
 
@@ -1263,6 +1537,77 @@ export class Outbox extends EventEmitter {
         feed.outbound(turn.chatKey, 'react', action.emoji);
         break;
       }
+      /**
+       * Correct or retract something already said, in this chat only.
+       *
+       * `action.nth` is a position in Juan's own recent messages, never an id —
+       * see shared/src/handoff.ts. Resolution happens here, against a store on
+       * the state volume the agent cannot read, so the worst a hostile message
+       * can talk the agent into is amending one of its own recent replies in
+       * the conversation it is already answering.
+       */
+      case 'edit': {
+        const target = sent.nth(turn.chatKey, action.nth);
+        if (target === null) {
+          await this.answer(action.id, 'edit', {
+            ok: false,
+            error: `you have not said ${String(action.nth)} things here recently — \`tulip-wa sent\` lists them`,
+          });
+          break;
+        }
+        if (target.kind !== 'text') {
+          // WhatsApp edits text. A picture cannot become a different picture.
+          await this.answer(action.id, 'edit', {
+            ok: false,
+            error: `that one was a ${target.kind}, and WhatsApp only edits text. \`tulip-wa unsend\` can take it back.`,
+          });
+          break;
+        }
+        try {
+          await this.deps.wa.editText(turn.chatJid, target.id, action.text);
+        } catch (err) {
+          // Almost always the fifteen-minute window having closed. Say so
+          // plainly: the agent may otherwise tell somebody it fixed something.
+          await this.answer(action.id, 'edit', {
+            ok: false,
+            error:
+              'WhatsApp refused the edit — usually because it is more than about fifteen minutes old. '
+              + `Say what you meant in a new message instead. (${String((err as Error).message)})`,
+          });
+          break;
+        }
+        sent.edited(turn.chatKey, target.id, action.text);
+        feed.edited(turn.chatKey, target.text, action.text, 'agent');
+        await this.answer(action.id, 'edit', { ok: true, items: [] });
+        break;
+      }
+
+      case 'unsend': {
+        const target = sent.nth(turn.chatKey, action.nth);
+        if (target === null) {
+          await this.answer(action.id, 'unsend', {
+            ok: false,
+            error: `you have not said ${String(action.nth)} things here recently — \`tulip-wa sent\` lists them`,
+          });
+          break;
+        }
+        try {
+          await this.deps.wa.unsend(turn.chatJid, target.id);
+        } catch (err) {
+          await this.answer(action.id, 'unsend', {
+            ok: false,
+            error:
+              'WhatsApp refused the deletion — usually because it is too old to retract. '
+              + `(${String((err as Error).message)})`,
+          });
+          break;
+        }
+        sent.retracted(turn.chatKey, target.id);
+        feed.unsent(turn.chatKey, target.text, 'agent');
+        await this.answer(action.id, 'unsend', { ok: true, items: [] });
+        break;
+      }
+
       case 'typing': {
         await this.deps.wa.typing(turn.chatJid, action.on);
         break;

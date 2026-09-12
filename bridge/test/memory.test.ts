@@ -17,7 +17,7 @@ process.env['TULIP_IN_DIR'] = join(root, 'in');
 process.env['TULIP_OUT_DIR'] = join(root, 'out');
 
 const { remember, readMemory, forget, forgetAll } = await import('../src/memory.js');
-const { inPaths } = await import('@tulip/shared');
+const { inPaths } = await import('@2lp/shared');
 
 const CHAT = 'a'.repeat(16);
 const OTHER = 'b'.repeat(16);

@@ -49,12 +49,12 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONTROL_COMMANDS, CROSS_CHAT_VERBS, REACTIVITY, VERBS, VERB_GROUPS, writeFileAtomic } from '@tulip/shared';
+import { CONTROL_COMMANDS, CROSS_CHAT_VERBS, REACTIVITY, VERBS, VERB_GROUPS, writeFileAtomic } from '@2lp/shared';
 import { feed } from './feed.js';
 import { accessConfig, verifiedEmail } from './access.js';
 import { canSee, isOwner } from './privacy.js';
 import { PTY_PREFIX, proxyRequest, proxyUpgrade, ptyAvailable } from './pty.js';
-import { isPagesRequest, pagesHost, servePage } from './pages.js';
+import { isPagesRequest, pagesHost, servePage, servePageWrite } from './pages.js';
 import { log } from './log.js';
 import { paths } from './paths.js';
 import {
@@ -63,6 +63,8 @@ import {
   attachToChat,
   sayAsJuan,
   sendToChat,
+  correctable,
+  correctMessage,
   deleteMedia,
   logTail,
   mediaFile,
@@ -80,7 +82,15 @@ import {
   type ApiDeps,
   pagesList,
   pageDelete,
+  appGrant,
+  appsList,
   pageGrant,
+  groupMode,
+  groupLeave,
+  groupMembership,
+  chatEdit,
+  chatUnsend,
+  chatReact,
   memoryList,
   memoryForget,
   scheduleView,
@@ -88,6 +98,8 @@ import {
   scheduleCancel,
   scheduleCreate,
   personaDocs,
+  personaRevert,
+  personaSave,
   restorePage,
   clearPagePassword,
   setPagePassword,
@@ -361,6 +373,20 @@ export function startPanel(deps: ApiDeps): Server | null {
       // be reached on that hostname, so a page cannot borrow the panel's
       // authentication even if the check further down were wrong.
       if (isPagesRequest(req.headers.host)) {
+        // A POST is a page changing its own database — the one write a page may
+        // make, gated by that page's password in `servePageWrite`. Everything
+        // else on this host is still read-only.
+        if (req.method === 'POST') {
+          let body: Buffer;
+          try {
+            body = await readUpload(req, 64_000);
+          } catch {
+            res.writeHead(413, { 'content-type': 'text/plain' }).end('that change is too large\n');
+            return;
+          }
+          await servePageWrite(res, url, req, deps.config.pages.passwords, body.toString('utf8'));
+          return;
+        }
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           res.writeHead(405, { 'content-type': 'text/plain' }).end('pages are read-only\n');
           return;
@@ -603,6 +629,30 @@ export function startPanel(deps: ApiDeps): Server | null {
           );
           return send(res, headers, result.ok ? 200 : 400, result);
         }
+        if (url.pathname === '/api/chat/correctable' && req.method === 'GET') {
+          return send(res, headers, 200, correctable(deps, url.searchParams.get('key') ?? ''));
+        }
+        if (url.pathname === '/api/chat/correct' && req.method === 'POST') {
+          // `key` is read from the query string, not the body, and that is
+          // load-bearing: the privacy gate near the top of this handler tests
+          // `url.searchParams.get('key')`, so a key arriving only in a JSON
+          // body would never be checked against it.
+          const body = await readBody(req);
+          // `text: null` retracts; a string edits. Distinguished by type rather
+          // than by a separate endpoint or a mode flag, so a body that omits the
+          // field cannot accidentally mean "delete".
+          const hasText = typeof body['text'] === 'string';
+          if (!hasText && body['text'] !== null) {
+            return send(res, headers, 400, { ok: false, message: 'Send text to edit, or null to retract.' });
+          }
+          const result = await correctMessage(
+            deps,
+            url.searchParams.get('key') ?? '',
+            typeof body['nth'] === 'number' ? body['nth'] : 0,
+            hasText ? (body['text'] as string) : null,
+          );
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
         if (url.pathname === '/api/chat/send' && req.method === 'POST') {
           const body = await readBody(req);
           const result = sendToChat(
@@ -669,6 +719,22 @@ export function startPanel(deps: ApiDeps): Server | null {
         if (url.pathname === '/api/persona' && req.method === 'GET') {
           return send(res, headers, 200, personaDocs());
         }
+        // Writing the persona is gated like the privacy section of Settings,
+        // and for the same reason: BOUNDARIES is what the agent is told about
+        // other people's conversations, so whoever can rewrite it can undo what
+        // privacy hides. Reading stays open — it names no chat.
+        if ((url.pathname === '/api/persona' || url.pathname === '/api/persona/revert') && req.method === 'POST') {
+          if (!unrestricted) {
+            return send(res, headers, 403, {
+              ok: false,
+              message: 'Only the operator who owns privacy can change the persona — it decides what the agent says about hidden chats.',
+            });
+          }
+          const result = url.pathname === '/api/persona'
+            ? personaSave(await readBody(req))
+            : personaRevert(url.searchParams.get('name') ?? '');
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
         // Static, and served from the shared catalogue the agent's own CLI
         // renders its help from. One list, three readers — see shared/src/verbs.ts.
         if (url.pathname === '/api/verbs' && req.method === 'GET') {
@@ -722,6 +788,9 @@ export function startPanel(deps: ApiDeps): Server | null {
           const result = scheduleCreate(deps, url.searchParams.get('key') ?? '', await readBody(req));
           return send(res, headers, result.ok ? 200 : 400, result);
         }
+        if (url.pathname === '/api/apps' && req.method === 'GET') {
+          return send(res, headers, 200, await appsList(deps));
+        }
         if (url.pathname === '/api/pages' && req.method === 'GET') {
           return send(res, headers, 200, pagesList(deps));
         }
@@ -741,6 +810,59 @@ export function startPanel(deps: ApiDeps): Server | null {
         if (url.pathname === '/api/pages/unlock' && req.method === 'POST') {
           const result = clearPagePassword(deps, url.searchParams.get('slug') ?? '');
           return send(res, headers, result.ok ? 200 : 404, result);
+        }
+        // Correcting what Juan said, as the operator. POST, and each names the
+        // message by position rather than by id — see `chatEdit`.
+        if (url.pathname === '/api/chat/edit' && req.method === 'POST') {
+          const body = (await readBody(req)) as { nth?: unknown; text?: unknown } | null;
+          const result = await chatEdit(
+            deps,
+            url.searchParams.get('key') ?? '',
+            Number(body?.nth),
+            typeof body?.text === 'string' ? body.text : '',
+          );
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        if (url.pathname === '/api/chat/unsend' && req.method === 'POST') {
+          const body = (await readBody(req)) as { nth?: unknown } | null;
+          const result = await chatUnsend(deps, url.searchParams.get('key') ?? '', Number(body?.nth));
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        if (url.pathname === '/api/chat/react' && req.method === 'POST') {
+          const body = (await readBody(req)) as { emoji?: unknown; id?: unknown } | null;
+          const result = await chatReact(
+            deps,
+            url.searchParams.get('key') ?? '',
+            typeof body?.emoji === 'string' ? body.emoji : '',
+            typeof body?.id === 'string' ? body.id : undefined,
+          );
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        if (url.pathname === '/api/groups/mode' && req.method === 'POST') {
+          const result = groupMode(deps, url.searchParams.get('chat') ?? '', await readBody(req));
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        // Reads only, but owner-only like the Leave button beside it: it asks
+        // WhatsApp about a room on the operator's behalf.
+        if (url.pathname === '/api/groups/check' && req.method === 'POST') {
+          if (!unrestricted) {
+            return send(res, headers, 403, { ok: false, message: 'Only the operator can check a group.' });
+          }
+          const result = await groupMembership(deps, url.searchParams.get('chat') ?? '');
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        // Owner-only, like starting a stopped room: leaving is the hardest thing on
+        // the Groups page to undo, because somebody in the room has to add him back.
+        if (url.pathname === '/api/groups/leave' && req.method === 'POST') {
+          if (!unrestricted) {
+            return send(res, headers, 403, { ok: false, message: 'Only the operator can make him leave a group.' });
+          }
+          const result = await groupLeave(deps, url.searchParams.get('chat') ?? '');
+          return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        if (url.pathname === '/api/apps/grant' && req.method === 'POST') {
+          const result = appGrant(deps, url.searchParams.get('app') ?? '', await readBody(req));
+          return send(res, headers, result.ok ? 200 : 400, result);
         }
         if (url.pathname === '/api/pages/grant' && req.method === 'POST') {
           const result = pageGrant(deps, url.searchParams.get('slug') ?? '', await readBody(req));

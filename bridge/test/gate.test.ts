@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../src/config.js';
 import { gate, isOperator, type GateInput } from '../src/gate.js';
 
+const ROOM = 'aaaaaaaaaaaaaaaa';
+const OTHER_ROOM = 'bbbbbbbbbbbbbbbb';
+
 const message = (over: Partial<GateInput> = {}): GateInput => ({
+  chatKey: ROOM,
   senderIds: ['15551234567', '15551234567@s.whatsapp.net'],
   text: 'hello',
   isGroup: false,
@@ -256,5 +260,72 @@ describe('gate — attachments in a group', () => {
     // Correct rather than unfortunate: trigger mode is opt-in by phrase, and a
     // captionless photo contains no phrase to opt in with.
     expect(gate(message({ isGroup: true, text: '', hasMedia: true }), trigger).accept).toBe(false);
+  });
+});
+
+
+/**
+ * One room set differently from the rest.
+ *
+ * The global `replyTo` was the only answer for a long time, and it could not be
+ * right everywhere at once: a test group somebody is poking at and a room of
+ * forty people who did not ask for any of this want opposite settings, and
+ * picking either globally makes the other worse.
+ *
+ * The case worth pinning is the *absence* of an entry. A room with no override
+ * has to follow the global one and keep following it when it moves — not be
+ * quietly frozen to whatever the global happened to be when the room was first
+ * seen.
+ */
+describe('gate — a room with its own setting', () => {
+  const withRoom = (replyTo: 'mention' | 'trigger' | 'observe', global = 'mention' as const) =>
+    parseConfig({
+      audience: { everyone: true },
+      groups: { enabled: true, replyTo: global, triggers: ['juan'], perChat: { [ROOM]: { replyTo } } },
+    });
+
+  const inRoom = (text: string, chatKey = ROOM) =>
+    message({ chatKey, isGroup: true, text, mentionsMe: false });
+
+  it('answers everything in a room set to judgement, while the global stays mention', () => {
+    expect(gate(inRoom('nothing addressed to anyone'), withRoom('observe')).accept).toBe(true);
+  });
+
+  it('answers a trigger word in a room set to trigger, while the global stays mention', () => {
+    expect(gate(inRoom('juan can you look'), withRoom('trigger')).accept).toBe(true);
+  });
+
+  it('refuses a bare message in a room set to trigger', () => {
+    expect(gate(inRoom('nothing addressed to anyone'), withRoom('trigger'))).toEqual({
+      accept: false,
+      reason: 'no trigger word in group',
+    });
+  });
+
+  it('leaves every other room on the global setting', () => {
+    // The override is for one room. A second room must be unaffected by it.
+    const config = withRoom('observe', 'mention');
+    expect(gate(inRoom('nothing addressed', OTHER_ROOM), config)).toEqual({
+      accept: false,
+      reason: 'not mentioned in group',
+    });
+  });
+
+  it('follows the global when a room has no entry, rather than freezing to one', () => {
+    const config = parseConfig({
+      audience: { everyone: true },
+      groups: { enabled: true, replyTo: 'observe', triggers: ['juan'] },
+    });
+    expect(gate(inRoom('nothing addressed', OTHER_ROOM), config).accept).toBe(true);
+  });
+
+  it('still refuses everything in a room when groups are switched off', () => {
+    // `enabled` is global on purpose: it is the question of whether the agent is
+    // in rooms at all, and a per-room mode must not smuggle it back on.
+    const config = parseConfig({
+      audience: { everyone: true },
+      groups: { enabled: false, replyTo: 'mention', perChat: { [ROOM]: { replyTo: 'observe' } } },
+    });
+    expect(gate(inRoom('anything'), config)).toEqual({ accept: false, reason: 'groups are disabled' });
   });
 });

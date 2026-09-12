@@ -66,7 +66,7 @@ async function harness(overrides: Record<string, unknown> = {}) {
   const { Limiter } = await import('../src/ratelimit.js');
   const { parseConfig } = await import('../src/config.js');
   const { readSchedule, Scheduler } = await import('../src/schedule.js');
-  const { outPaths, inPaths } = await import('@tulip/shared');
+  const { outPaths, inPaths } = await import('@2lp/shared');
 
   const config = parseConfig({ timezone: MADRID, ...overrides });
   const chats = new ChatRegistry(join(root, 'salt'), join(root, 'chats.json'));

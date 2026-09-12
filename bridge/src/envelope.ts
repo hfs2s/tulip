@@ -14,7 +14,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { downloadMediaMessage, type WAMessage, type WASocket } from 'baileys';
-import type { InboundMedia, MediaKind } from '@tulip/shared';
+import type { InboundMedia, MediaKind } from '@2lp/shared';
 import { bare, identities, isGroup, slug, userPart } from './jid.js';
 import { log } from './log.js';
 

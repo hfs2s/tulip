@@ -15,7 +15,7 @@
  * the equivalence is by construction rather than by two copies that agree
  * today.
  */
-import { LANGUAGE_LIMITS, isUnspoken, spokenLanguageFor } from '@tulip/shared';
+import { LANGUAGE_LIMITS, isUnspoken, spokenLanguageFor } from '@2lp/shared';
 import type { Config } from './config.js';
 
 export interface ResolvedVoice {

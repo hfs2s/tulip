@@ -13,7 +13,7 @@
  * as text.
  */
 import { describe, expect, it } from 'vitest';
-import { LanguageBoost, OutboxAction } from '@tulip/shared';
+import { LanguageBoost, OutboxAction } from '@2lp/shared';
 
 const voice = (extra: Record<string, unknown> = {}): unknown =>
   OutboxAction.safeParse({

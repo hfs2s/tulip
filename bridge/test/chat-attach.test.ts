@@ -75,10 +75,16 @@ function agentReports(chatKeys: readonly string[]): void {
   }));
 }
 
-function deps(known: readonly string[] = [KEY, OTHER]): Parameters<typeof api.attachToChat>[0] {
+function deps(
+  known: readonly string[] = [KEY, OTHER],
+  openTurn: string | null = KEY,
+): Parameters<typeof api.attachToChat>[0] {
   return {
     chats: { get: (key: string) => (known.includes(key) ? { chatKey: key, name: 'Ana' } : null) },
     config: { limits: { maxMediaBytes: 16_777_216 } },
+    // Typing is refused unless a turn is actually open — see the note on the
+    // dispatcher check in `sendToChat`.
+    dispatcher: () => ({ inFlightChat: () => openTurn }),
   } as unknown as Parameters<typeof api.attachToChat>[0];
 }
 

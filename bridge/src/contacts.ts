@@ -22,7 +22,7 @@
  */
 import { readFileSync } from 'node:fs';
 
-import { writeJsonAtomic } from '@tulip/shared';
+import { writeJsonAtomic } from '@2lp/shared';
 
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';

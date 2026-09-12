@@ -48,8 +48,8 @@ import {
   formatLocalTime,
   nextOccurrence,
   writeJsonAtomic,
-} from '@tulip/shared';
-import type { ScheduleSpec as ScheduleSpecType } from '@tulip/shared';
+} from '@2lp/shared';
+import type { ScheduleSpec as ScheduleSpecType } from '@2lp/shared';
 import { feed } from './feed.js';
 import { log } from './log.js';
 import { paths } from './paths.js';

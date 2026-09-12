@@ -19,9 +19,11 @@ import { feed } from './feed.js';
 import { ensureHandoffDirs, readCurrentTurn, readStatus } from './handoff.js';
 import { log } from './log.js';
 import { Outbox } from './outbox.js';
+import { PluginHost } from './plugins.js';
 import { startPanel } from './panel.js';
 import { setPagePasswords } from './panel-api.js';
 import { paths } from './paths.js';
+import { publishPersona } from './persona.js';
 import { Limiter } from './ratelimit.js';
 import { Scheduler } from './schedule.js';
 import { TurnRegistry } from './turns.js';
@@ -58,6 +60,9 @@ async function main(): Promise<void> {
   mkdirSync(paths.root, { recursive: true });
   mkdirSync(paths.logs, { recursive: true });
   ensureHandoffDirs();
+  // Before anything can start a turn: the agent composes its brief from this,
+  // and an image rebuilt with a new starter should reach parts nobody has saved.
+  publishPersona();
 
   const config = loadConfig(CONFIG_FILE);
   banner(config);
@@ -164,8 +169,14 @@ async function main(): Promise<void> {
     process.exit(1);
   });
 
+  // Services on the host that send through this number. Constructed here and
+  // started after the socket, like the scheduler below, so the first drain has
+  // something to send over. See bridge/src/plugins.ts.
+  const plugins = new PluginHost({ wa, config, chats });
+
   await wa.start();
   outbox.start();
+  plugins.start();
   startPanel({ config, wa, chats, limiter, dispatcher: currentDispatcher });
 
   // Messages somebody was promised for later.
@@ -276,6 +287,7 @@ async function main(): Promise<void> {
     limiter.flush();
     chats.flush();
     outbox.stop();
+    plugins.stop();
     scheduler.stop();
     process.exit(0);
   };

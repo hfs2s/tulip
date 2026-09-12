@@ -10,7 +10,7 @@
  * that unsayable.
  */
 import { describe, expect, it } from 'vitest';
-import { LANGUAGE_BOOSTS, spokenLanguageFor, SPOKEN_LANGUAGES } from '@tulip/shared';
+import { LANGUAGE_BOOSTS, spokenLanguageFor, SPOKEN_LANGUAGES } from '@2lp/shared';
 
 describe('finding the row', () => {
   it('takes every language by name, however capitalised', () => {

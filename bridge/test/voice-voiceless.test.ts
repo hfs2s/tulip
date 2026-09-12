@@ -62,7 +62,7 @@ async function harness(agent: Record<string, unknown> = {}) {
   const { Limiter } = await import('../src/ratelimit.js');
   const { parseConfig } = await import('../src/config.js');
   const { resetForTests, spentToday } = await import('../src/spend.js');
-  const { outPaths } = await import('@tulip/shared');
+  const { outPaths } = await import('@2lp/shared');
   resetForTests();
 
   const config = parseConfig({ agent: { voice: true, ...agent } });

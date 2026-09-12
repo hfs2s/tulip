@@ -19,17 +19,20 @@
  * these pages are for. Storage needs a real origin, so it gets a real hostname.
  *
  * What the pages themselves may do is bounded by their own CSP: same-origin
- * assets, inline script and style so a single file works, and `connect-src
- * 'none'` — so a page can keep state in the browser and cannot send it
- * anywhere. A page that could phone home would be a way for the agent to reach
- * the internet through a visitor's browser, which is the containment property
- * wearing a disguise.
+ * assets, inline script and style so a single file works, and same-origin
+ * connections only. This lets an interactive page update its own database
+ * without opening a route to any other origin.
  */
-import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, extname, join, resolve, sep } from 'node:path';
+import {
+  closeSync, constants as fsConstants, createReadStream, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync,
+  openSync, readSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
+import { Transform, pipeline } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { outPaths } from '@tulip/shared';
+import { outPaths } from '@2lp/shared';
 import type { Config } from './config.js';
 import { identities, matchesList } from './jid.js';
 import { log } from './log.js';
@@ -52,7 +55,16 @@ const TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
+  // A database, for a page that offers it as a download. Pages themselves read
+  // it as `<name>.js` — see `serveDatabase`.
+  '.sqlite': 'application/vnd.sqlite3',
+  '.sqlite3': 'application/vnd.sqlite3',
+  '.db': 'application/vnd.sqlite3',
 };
+
+/** What a page's database may be called — the same three the kit accepts. */
+const DATABASES = new Set(['.sqlite', '.sqlite3', '.db']);
+const SQLITE_HEADER = Buffer.from('SQLite format 3\0', 'latin1');
 
 /** A Pi with one disk, and pages nobody is watching the size of. */
 const MAX_PAGES = 40;
@@ -86,7 +98,7 @@ function measure(slug: string): { files: number; bytes: number; at: number } | n
   let at = 0;
   try {
     for (const name of readdirSync(dir)) {
-      const stat = statSync(join(dir, name));
+      const stat = lstatSync(join(dir, name));
       if (!stat.isFile()) continue;
       files += 1;
       bytes += stat.size;
@@ -250,13 +262,144 @@ export function scaffoldPage(slug: string, title: string): Published {
   }
 }
 
+/**
+ * Open one file of one page for reading, without following a link anywhere.
+ *
+ * The agent writes this directory and the bridge reads it — in the bridge's own
+ * mount namespace, where `/state` holds the WhatsApp credentials. A symlink
+ * planted here (`ln -s /state/session/creds.json pages/x/creds.json`) is
+ * resolved by *this* process, so a check on the name says nothing about where
+ * it leads: `resolve` works on strings. That string check used to be the whole
+ * of it, and a planted link was served to anyone holding the address.
+ *
+ * So, the treatment `resolveOutboundFile` in outbox.ts gives the outbox, for
+ * the same reason. One open. `O_NOFOLLOW`, so the kernel refuses a linked leaf.
+ * `/proc/self/fd` to say what was actually opened, which catches a linked page
+ * directory — or `pages` itself swapped for a link — that `O_NOFOLLOW` on the
+ * leaf cannot see. `O_NONBLOCK`, so a planted FIFO cannot hang the event loop
+ * that also serves the panel. `fstat`, so only a regular file is read. The
+ * caller then reads the descriptor, never the name again.
+ *
+ * Null for every refusal, which the caller answers as 404: as far as a visitor
+ * can tell, there is no such file.
+ */
+function openPageFile(slug: string, name: string): { fd: number; size: number } | null {
+  if (!SLUG.test(slug) || name !== basename(name) || name.startsWith('.')) return null;
+  const root = resolve(outPaths.pages);
+  let expected: string;
+  try {
+    const stat = lstatSync(root);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return null;
+    // The parent is the volume's mount point, which the agent cannot replace.
+    // `pages` inside it is the agent's to swap, so it is spelled out, not resolved.
+    expected = join(realpathSync(dirname(root)), basename(root), slug, name);
+  } catch {
+    return null;
+  }
+
+  const path = join(root, slug, name);
+  let fd: number;
+  try {
+    fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  try {
+    // /proc is authoritative on Linux, which is production. Elsewhere — a
+    // developer's Mac — realpath is the best available.
+    const opened = describeFd(fd) ?? realpathSync(path);
+    const stat = fstatSync(fd);
+    if (opened === expected && stat.isFile()) return { fd, size: stat.size };
+  } catch {
+    // Refused below, like everything else that is not plainly a file.
+  }
+  closeSync(fd);
+  return null;
+}
+
+/** The real path behind a descriptor, on Linux. Null where there is no /proc. */
+function describeFd(fd: number): string | null {
+  try {
+    return readlinkSync(`/proc/self/fd/${String(fd)}`);
+  } catch {
+    return null;
+  }
+}
+
+/** Up to `limit` bytes of one page's file, read the same careful way. */
+function readPageFile(slug: string, name: string, limit: number): Buffer | null {
+  const file = openPageFile(slug, name);
+  if (file === null) return null;
+  try {
+    const data = Buffer.alloc(Math.min(file.size, limit));
+    let read = 0;
+    while (read < data.length) {
+      const n = readSync(file.fd, data, read, data.length - read, read);
+      if (n <= 0) break;
+      read += n;
+    }
+    return data.subarray(0, read);
+  } catch {
+    return null;
+  } finally {
+    closeSync(file.fd);
+  }
+}
+
 /** Whether a page opted out of the house style, so publishing can say so. */
 export function usesKit(slug: string): boolean {
+  const html = readPageFile(slug, 'index.html', MAX_PAGE_BYTES);
+  // Unreadable is not the same as unstyled; do not nag about it.
+  return html === null || html.toString('utf8').includes('/_kit/kit.css');
+}
+
+/**
+ * What is wrong with a page's databases, worded for the agent.
+ *
+ * Said at publish time and never a refusal: each of these is a way a page ends
+ * up querying something other than the database the agent just wrote, and each
+ * is something the agent can fix — so it is said where the agent is looking,
+ * rather than discovered by a visitor as an empty table.
+ */
+export function databaseNotes(slug: string): string[] {
+  let names: string[];
   try {
-    return readFileSync(join(outPaths.page(slug), 'index.html'), 'utf8').includes('/_kit/kit.css');
+    names = readdirSync(outPaths.page(slug));
   } catch {
-    return true; // Unreadable is not the same as unstyled; do not nag about it.
+    return [];
   }
+  const databases = names.filter((n) => !n.startsWith('.') && DATABASES.has(extname(n).toLowerCase()));
+  const notes: string[] = [];
+  for (const name of databases) {
+    const head = readPageFile(slug, name, SQLITE_HEADER.length);
+    if (head === null) {
+      notes.push(`${name} cannot be served — it must be an ordinary file, not a link`);
+      continue;
+    }
+    // Empty is allowed: the kit opens it as an empty database.
+    if (head.length > 0 && !head.equals(SQLITE_HEADER)) {
+      notes.push(`${name} is not a SQLite database`);
+      continue;
+    }
+    // The page gets the main file and nothing beside it.
+    const wal = join(outPaths.page(slug), `${name}-wal`);
+    if (names.includes(`${name}-wal`) && lstatSync(wal).size > 0) {
+      notes.push(`${name}-wal holds changes that are not in ${name} yet, so visitors will not see them — ` +
+        'close the database, or run PRAGMA wal_checkpoint(TRUNCATE)');
+    }
+    if (names.includes(`${name}-journal`)) {
+      notes.push(`${name} was left mid-write (${name}-journal is beside it) — close the database`);
+    }
+  }
+  if (databases.length > 0) {
+    const loadsKit = names
+      .filter((n) => extname(n).toLowerCase() === '.html')
+      .some((n) => readPageFile(slug, n, MAX_PAGE_BYTES)?.toString('utf8').includes('/_kit/sqlite.js') === true);
+    if (!loadsKit) {
+      notes.push(`${databases.join(', ')} cannot be read by the page until it loads /_kit/sqlite.js`);
+    }
+  }
+  return notes;
 }
 
 /** Pictures one page may hold. Enough to carry an argument, not a gallery. */
@@ -388,11 +531,13 @@ export function republishPage(slug: string): boolean {
 /**
  * Per-page passwords, checked here because nowhere else can.
  *
- * A page cannot check its own password. It is served under `connect-src 'none'`
- * and `form-action 'none'`, so it can neither call anything nor post anywhere —
- * and a check written in its own JavaScript would sit in the source the visitor
- * has already downloaded. The only place a secret can be compared is the side
- * that decides whether to send the bytes at all, which is here.
+ * A page cannot check its own password. A check written in its own JavaScript
+ * would sit in the source the visitor has already downloaded, and the page
+ * cannot fetch across origins, so it has nowhere else to send a password to be
+ * checked either. The only place a secret can be compared is the side that
+ * decides whether to send the bytes at all, which is here — and the same gate
+ * guards a write, so the password that unlocks a page is the one that may
+ * change it.
  *
  * HTTP Basic, for the same reason: it is the one authentication scheme that
  * needs no page, no form and no fetch, so it survives that CSP untouched. The
@@ -506,9 +651,46 @@ function rootRedirect(): string {
  * page can be called `_kit`, so nothing the agent writes can shadow it.
  */
 const KIT_PREFIX = '_kit';
+const KIT_FILES: Readonly<Record<string, string>> = {
+  'kit.css': 'text/css; charset=utf-8',
+  'kit.js': 'text/javascript; charset=utf-8',
+  // SQLite, as WebAssembly inlined into a script. Separate from kit.js so a page
+  // that has no database never downloads an engine.
+  'sqlite.js': 'text/javascript; charset=utf-8',
+};
 // Beside the compiled bridge, not in `bridge/assets` — the image ships built
 // output only, and a path into the source tree resolves to nothing at runtime.
 const KIT_DIR = new URL('./web/pagekit/', import.meta.url).pathname;
+
+/**
+ * What a page may do: everything a static page does, and nothing that reaches.
+ *
+ * Same-origin assets, inline script and style so a single file works, and
+ * `connect-src 'self'` permits only this isolated pages origin. It lets an
+ * interactive page save without navigating while still preventing any request
+ * to the panel origin or the wider network.
+ *
+ * `form-action 'self'`, not `'none'`, and that one word is the whole of how a
+ * page writes back. A page with a password may POST a change to its own
+ * database (see `applyPageWrite`); the browser carries that as a form
+ * submission or an asynchronous request. `'self'` is the pages host, never the
+ * panel's — the two are different origins — so this cannot reach the operator's
+ * session. Writes remain scoped and password-gated by `servePageWrite`.
+ *
+ * `'wasm-unsafe-eval'` is here for /_kit/sqlite.js, and it is narrower than it
+ * reads: it lets a page compile WebAssembly, and nothing else. It is not
+ * `'unsafe-eval'` — no string becomes code — and WebAssembly has no APIs of its
+ * own: anything it does, it does through the page's JavaScript, under this same
+ * policy. A page could already run any script it liked; now it can run SQLite.
+ *
+ * One string for every response from the pages host, including scripts: a
+ * worker takes its policy from its own script's response, so a script served
+ * without this could be started as a worker that answers to nothing.
+ */
+const PAGE_CSP =
+  "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data:; " +
+  "connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
 export function servePage(
   res: ServerResponse,
@@ -522,10 +704,7 @@ export function servePage(
 
   const common = {
     // Same rules as any built page: no outbound connections, nothing embedded.
-    'content-security-policy':
-      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
-      "img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data:; " +
-      "connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+    'content-security-policy': PAGE_CSP,
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
     'x-robots-tag': 'noindex, nofollow',
@@ -534,10 +713,8 @@ export function servePage(
 
   if (parts[0] === KIT_PREFIX) {
     const file = parts[1] ?? '';
-    const type = file === 'kit.css' ? 'text/css; charset=utf-8'
-      : file === 'kit.js' ? 'text/javascript; charset=utf-8'
-        : null;
-    if (type === null) {
+    const type = Object.hasOwn(KIT_FILES, file) ? KIT_FILES[file] : undefined;
+    if (type === undefined) {
       res.writeHead(404, { ...common, 'content-type': 'text/plain' }).end('no such file\n');
       return;
     }
@@ -606,34 +783,367 @@ export function servePage(
     res.writeHead(400, { 'content-type': 'text/plain' }).end('bad request\n');
     return;
   }
+  // A page's database, as the script that carries it. Before the extension
+  // allowlist, because `.js` is on it and a file by this name is never read.
+  if (name.toLowerCase().endsWith('.js') && DATABASES.has(extname(name.slice(0, -3)).toLowerCase())) {
+    serveDatabase(res, slug, name.slice(0, -3), common);
+    return;
+  }
+
   const type = TYPES[extname(name).toLowerCase()];
   if (type === undefined) {
     res.writeHead(404, { 'content-type': 'text/plain' }).end('not a servable file\n');
     return;
   }
 
-  const root = resolve(outPaths.pages);
-  const candidate = resolve(root, slug, name);
-  if (!candidate.startsWith(root + sep) || !existsSync(candidate)) {
+  const file = openPageFile(slug, name);
+  if (file === null) {
     res.writeHead(404, { 'content-type': 'text/plain' }).end('no such page\n');
     return;
   }
 
+  res.writeHead(200, { ...common, 'content-type': type, 'content-length': file.size });
+  if (file.size === 0) {
+    closeSync(file.fd);
+    res.end();
+    return;
+  }
+  pipeline(createReadStream('', { fd: file.fd, start: 0, end: file.size - 1 }), res, (err) => {
+    if (err) res.destroy();
+  });
+}
+
+/**
+ * A page's database, delivered as a script.
+ *
+ * A page cannot fetch anything cross-origin — including a CDN. It can run a
+ * same-origin script. So
+ * `data.sqlite.js` is answered with one statement handing the bytes of
+ * `data.sqlite` to /_kit/sqlite.js, base64-encoded, and the kit opens them.
+ * The visitor receives exactly what the file itself would give them; what does
+ * not change is that nothing a page does can reach anything.
+ *
+ * Built from the database every time and never read from a file of that name,
+ * so what the kit is handed is always the database and never something the
+ * agent wrote to look like one. Streamed, so an 8 MB database is never an
+ * 11 MB string in the bridge's memory.
+ */
+function serveDatabase(res: ServerResponse, slug: string, name: string, headers: Record<string, string>): void {
+  const file = openPageFile(slug, name);
+  if (file === null) {
+    res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('no such database\n');
+    return;
+  }
+  if (file.size > MAX_PAGE_BYTES) {
+    closeSync(file.fd);
+    res.writeHead(413, { ...headers, 'content-type': 'text/plain' }).end('that database is larger than a page may hold\n');
+    return;
+  }
+
+  const head = `(self.__tulipSqlite||(self.__tulipSqlite={}))[${JSON.stringify(name)}]="`;
+  const tail = '";\n';
   res.writeHead(200, {
-    'content-type': type,
-    'content-length': statSync(candidate).size,
-    // Same-origin assets, inline script and style so one file is enough, and no
-    // outbound connections at all: a page may keep state in the browser and may
-    // not send it anywhere. A page that could reach the network would be the
-    // agent reaching it through a visitor.
-    'content-security-policy':
-      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
-      "img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data:; " +
-      "connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+    ...headers,
+    'content-type': 'text/javascript; charset=utf-8',
+    'content-length': Buffer.byteLength(head) + Math.ceil(file.size / 3) * 4 + Buffer.byteLength(tail),
+  });
+  res.write(head);
+  if (file.size === 0) {
+    closeSync(file.fd);
+    res.end(tail);
+    return;
+  }
+
+  // Base64 works in groups of three bytes, and reads arrive in whatever sizes
+  // they arrive in: carry the remainder, so no padding lands mid-stream.
+  let carry = Buffer.alloc(0);
+  const encode = new Transform({
+    transform(chunk: Buffer, _encoding, done) {
+      const data = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk;
+      const whole = data.length - (data.length % 3);
+      carry = Buffer.from(data.subarray(whole));
+      done(null, data.subarray(0, whole).toString('base64'));
+    },
+    flush(done) {
+      done(null, carry.toString('base64') + tail);
+    },
+  });
+  pipeline(createReadStream('', { fd: file.fd, start: 0, end: file.size - 1 }), encode, res, (err) => {
+    if (err) res.destroy();
+  });
+}
+
+/**
+ * Writing to a page's own database, and the narrow shape of what a page may ask.
+ *
+ * This is the one thing a page can make happen on the server, and it exists
+ * because a roster nobody can change from the page is half a roster. It is
+ * deliberately not "run this SQL": the body of a form submitted by a stranger
+ * is the most hostile input there is, so nothing in it is ever treated as code.
+ * A write names a table, the columns to set, and optionally a row to find — and
+ * every one of those names is checked against the database's *actual* schema
+ * before it is used, so an identifier that is not already a real column cannot
+ * be written at all. Values are bound as parameters and never interpolated.
+ *
+ * What this does not carry is identity: a page has no account, so any holder of
+ * the page's password may change any row. That is the bound the operator chose
+ * when they put a password on a page and turned writing on — the password is
+ * the whole of who may write, and "only this page" is enforced because the
+ * password checked is this page's and the file written is this page's own.
+ */
+const MAX_WRITE_FIELDS = 40;
+const MAX_WRITE_VALUE = 4000;
+/** A real SQLite identifier, so a validated name can be quoted without escaping. */
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export interface PageWrite {
+  readonly db: string;
+  readonly table: string;
+  readonly set: ReadonlyArray<readonly [string, string]>;
+  readonly where: ReadonlyArray<readonly [string, string]>;
+}
+
+/**
+ * The absolute path of a page file to write, or null if the way there is not
+ * plainly a directory the bridge owns.
+ *
+ * The same belt-and-braces as reading, in the direction that matters more: a
+ * write follows `pages` and `pages/<slug>` as *directories*, refusing either if
+ * it is a symlink, so `ln -s /state pages/x` cannot turn a roster update into a
+ * write over the WhatsApp session. The leaf itself is allowed to be replaced
+ * (the rename below removes a planted link rather than following it).
+ */
+function writablePagePath(slug: string, name: string): string | null {
+  if (!SLUG.test(slug) || name !== basename(name) || name.startsWith('.')) return null;
+  if (!DATABASES.has(extname(name).toLowerCase())) return null;
+  const root = resolve(outPaths.pages);
+  try {
+    const rootStat = lstatSync(root);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return null;
+    const dir = join(root, slug);
+    const dirStat = lstatSync(dir);
+    if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) return null;
+    return join(dir, name);
+  } catch {
+    return null;
+  }
+}
+
+// Writes to one file are serialised within this process, because two form
+// submissions that both copy-edit-rename would otherwise race and one would be
+// lost. One bridge process, so an in-memory chain is enough; it is not a
+// cross-process lock and does not pretend to be.
+const writeChains = new Map<string, Promise<unknown>>();
+function serialise<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const prior = writeChains.get(key) ?? Promise.resolve();
+  const next = prior.then(work, work);
+  writeChains.set(key, next.catch(() => {}));
+  return next;
+}
+
+/**
+ * Apply one write to a page's database, atomically for the raw-byte reader.
+ *
+ * `servePage` reads the file as bytes rather than through SQLite, so SQLite's
+ * own atomicity would not protect a reader mid-write. So the change is applied
+ * to a private copy and renamed over the original — a reader ever sees one
+ * whole file or the other, never a torn one — and the journal mode is forced to
+ * the rollback journal so nothing is left in a sidecar the reader would miss.
+ */
+export function applyPageWrite(slug: string, write: PageWrite): Promise<Published> {
+  const path = writablePagePath(slug, write.db);
+  if (path === null) return Promise.resolve({ ok: false, error: 'that is not a database in this page' });
+  if (write.set.length === 0) return Promise.resolve({ ok: false, error: 'nothing to change' });
+  if (write.set.length + write.where.length > MAX_WRITE_FIELDS) {
+    return Promise.resolve({ ok: false, error: 'too many fields in one change' });
+  }
+  if (!IDENTIFIER.test(write.table)) return Promise.resolve({ ok: false, error: 'no such table' });
+  for (const [, value] of [...write.set, ...write.where]) {
+    if (value.length > MAX_WRITE_VALUE) return Promise.resolve({ ok: false, error: 'a value is too long' });
+  }
+
+  return serialise(path, () => Promise.resolve(applyNow(slug, path, write)));
+}
+
+function applyNow(slug: string, path: string, write: PageWrite): Published {
+  // Work on a private copy read the safe way, so a symlink swapped in for the
+  // leaf between the directory checks and here is opened by nobody.
+  const bytes = readPageFile(slug, write.db, MAX_PAGE_BYTES);
+  if (bytes === null) return { ok: false, error: 'the database could not be read' };
+  if (bytes.length > 0 && !bytes.subarray(0, SQLITE_HEADER.length).equals(SQLITE_HEADER)) {
+    return { ok: false, error: 'that file is not a SQLite database' };
+  }
+
+  const tmp = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString('hex')}.tmp`);
+  let db: DatabaseSync | null = null;
+  try {
+    writeFileSync(tmp, bytes, { mode: 0o644 });
+    db = new DatabaseSync(tmp);
+    // Rollback journal, not WAL: the served copy is these bytes and nothing
+    // beside them, so a change must land in this file or not at all.
+    db.exec('PRAGMA journal_mode = DELETE');
+
+    // Every identifier is checked against the schema that is actually there, so
+    // only a real table and real columns reach the statement; values are bound.
+    const isTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(write.table);
+    if (isTable === undefined) return { ok: false, error: `no table called ${write.table}` };
+    const columns = new Set(
+      (db.prepare(`PRAGMA table_info("${write.table}")`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    const known = (pairs: ReadonlyArray<readonly [string, string]>): boolean =>
+      pairs.every(([col]) => IDENTIFIER.test(col) && columns.has(col));
+    if (!known(write.set) || !known(write.where)) return { ok: false, error: 'a column does not exist' };
+
+    const quote = (id: string): string => `"${id}"`;
+    let sql: string;
+    let params: string[];
+    if (write.where.length === 0) {
+      sql = `INSERT INTO "${write.table}" (${write.set.map(([c]) => quote(c)).join(', ')}) ` +
+        `VALUES (${write.set.map(() => '?').join(', ')})`;
+      params = write.set.map(([, v]) => v);
+    } else {
+      sql = `UPDATE "${write.table}" SET ${write.set.map(([c]) => `${quote(c)} = ?`).join(', ')} ` +
+        `WHERE ${write.where.map(([c]) => `${quote(c)} = ?`).join(' AND ')}`;
+      params = [...write.set.map(([, v]) => v), ...write.where.map(([, v]) => v)];
+    }
+
+    let changes = 0;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = db.prepare(sql).run(...params);
+      changes = Number(result.changes);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      return { ok: false, error: `the change was refused (${(err as Error).message})` };
+    }
+    db.close();
+    db = null;
+
+    // Durable, then atomic: fsync the finished copy before the rename, so a
+    // crash cannot leave the new name pointing at half-written bytes.
+    const fd = openSync(tmp, fsConstants.O_RDONLY);
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+    renameSync(tmp, path);
+    log('pages.wrote', { slug, db: write.db, table: write.table, insert: write.where.length === 0, changes });
+    return { ok: true, url: '' };
+  } catch (err) {
+    return { ok: false, error: `the change could not be saved (${(err as Error).name})` };
+  } finally {
+    if (db !== null) { try { db.close(); } catch { /* already closing */ } }
+    try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
+  }
+}
+
+/** What a page may be told about a write it asked for. */
+export type WriteGate = 'ok' | 'no-password' | 'unauthorised';
+
+/**
+ * Whether this request may write this page.
+ *
+ * Writing turns on with a password and is gated by it: a page with none refuses
+ * every write (`no-password`), and a page with one admits only a request that
+ * carries it. The same `pageAuthorised` that decides whether to send the bytes
+ * decides whether to change them, so the two can never disagree.
+ */
+export function pageWriteGate(
+  stored: PagePassword | undefined,
+  authorization: string | undefined,
+): WriteGate {
+  if (stored === undefined) return 'no-password';
+  return pageAuthorised(stored, authorization) ? 'ok' : 'unauthorised';
+}
+
+/**
+ * Parse a form submission into a write, or null if it is not shaped like one.
+ *
+ * The wire form is ordinary `application/x-www-form-urlencoded`: `db` and
+ * `table`, then `set[col]=value` for each column to write and `where[col]=value`
+ * for each column to match. Bracketed names keep the two groups apart without a
+ * second request, and a plain HTML form can produce all of it with no script.
+ */
+export function parsePageWrite(body: string): PageWrite | null {
+  const params = new URLSearchParams(body);
+  const db = params.get('db') ?? '';
+  const table = params.get('table') ?? '';
+  if (db === '' || table === '') return null;
+  const set: Array<[string, string]> = [];
+  const where: Array<[string, string]> = [];
+  for (const [key, value] of params) {
+    const m = /^(set|where)\[(.+)\]$/.exec(key);
+    if (m === null) continue;
+    (m[1] === 'set' ? set : where).push([m[2] ?? '', value]);
+  }
+  return { db, table, set, where };
+}
+
+/**
+ * Handle a POST to the pages host: a page changing its own database.
+ *
+ * The body is read by the caller and handed in, because the request plumbing
+ * lives in panel.ts with every other body. On success the answer is a 303 back
+ * to the page for an ordinary form. A caller that asks for JSON receives a
+ * no-navigation response for fetch/XHR clients.
+ */
+export async function servePageWrite(
+  res: ServerResponse,
+  url: URL,
+  req: IncomingMessage,
+  passwords: Readonly<Record<string, PagePassword>>,
+  body: string,
+): Promise<void> {
+  const wantsJson = /(?:^|,)\s*application\/json(?:\s*;|\s*,|\s*$)/i.test(req.headers.accept ?? '');
+  const headers = {
+    'content-security-policy': PAGE_CSP,
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
     'x-robots-tag': 'noindex, nofollow',
-    'cache-control': 'no-cache',
-  });
-  createReadStream(candidate).pipe(res);
+    'cache-control': 'no-store',
+  };
+  const slug = url.pathname.split('/').filter((p) => p.length > 0)[0] ?? '';
+  if (!SLUG.test(slug) || isUnpublished(slug)) {
+    res.writeHead(404, { ...headers, 'content-type': 'text/plain; charset=utf-8' }).end('Not found\n');
+    return;
+  }
+
+  const gate = pageWriteGate(own(passwords, slug), req.headers?.authorization);
+  if (gate === 'no-password') {
+    res.writeHead(403, { ...headers, 'content-type': 'text/plain; charset=utf-8' })
+      .end('This page does not accept changes.\n');
+    return;
+  }
+  if (gate === 'unauthorised') {
+    res.writeHead(401, {
+      ...headers,
+      'www-authenticate': `Basic realm="${slug}", charset="UTF-8"`,
+      'content-type': 'text/plain; charset=utf-8',
+    }).end('This page is password protected.\n');
+    return;
+  }
+
+  const write = parsePageWrite(body);
+  if (write === null) {
+    res.writeHead(400, { ...headers, 'content-type': 'text/plain; charset=utf-8' }).end('Nothing to change.\n');
+    return;
+  }
+
+  const result = await applyPageWrite(slug, write);
+  if (!result.ok) {
+    log('pages.writeRefused', { slug, db: write.db, reason: result.error });
+    if (wantsJson) {
+      res.writeHead(400, { ...headers, 'content-type': 'application/json; charset=utf-8' })
+        .end(JSON.stringify({ ok: false, error: result.error }));
+    } else {
+      res.writeHead(400, { ...headers, 'content-type': 'text/plain; charset=utf-8' }).end(`${result.error}\n`);
+    }
+    return;
+  }
+  if (wantsJson) {
+    res.writeHead(200, { ...headers, 'content-type': 'application/json; charset=utf-8' })
+      .end(JSON.stringify({ ok: true }));
+    return;
+  }
+  // Back to the page by its directory, never by a path taken from the request:
+  // a redirect that echoed user input would be an open redirect on this host.
+  res.writeHead(303, { ...headers, location: `/${slug}/` }).end();
 }

@@ -25,24 +25,29 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
-import { CurrentTurn, SHARED_WINDOW, TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@tulip/shared';
-import { TimeZone, describeSpec, formatLocal, parseCron, parseWhen } from '@tulip/shared';
-import type { ScheduleSpec as ScheduleSpecType } from '@tulip/shared';
+import { CurrentTurn, SHARED_WINDOW, TerminalRequest, TerminalScreen, inPaths, outPaths, transcriptFor, writeJsonAtomic } from '@2lp/shared';
+import { TimeZone, describeSpec, formatLocal, parseCron, parseWhen } from '@2lp/shared';
+import type { ScheduleSpec as ScheduleSpecType } from '@2lp/shared';
 import { cancelSchedule, createSchedule, findSchedule, readSchedule } from './schedule.js';
 import { LANGUAGE_BOOSTS, LanguageBoost, SPOKEN_LANGUAGES, parseConfig, Contact } from './config.js';
-import { LANGUAGE_LIMITS, LANGUAGE_SAMPLES } from '@tulip/shared';
+import { LANGUAGE_LIMITS, sampleFor, samplesFor } from '@2lp/shared';
+import { AGENT_NAME, INSTANCE } from './instance.js';
+import { pluginStatus } from './plugins.js';
 import { synthesise } from './minimax.js';
 import { claim } from './spend.js';
 import { resolveVoice } from './voice.js';
+import { APPS_PLUGIN, WORKSPACE_ID, listApps } from './apps.js';
 import { deletePage, hashPagePassword, isUnpublished, listPages, pagesHost, republishPage, type PageSummary } from './pages.js';
 import { identities, matchesList } from './jid.js';
 import { forget, forgetAll, readMemory } from './memory.js';
+import { personaView, revertPersonaPart, savePersonaPart } from './persona.js';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import type { Dispatcher } from './dispatcher.js';
 import { feed, type FeedEntry } from './feed.js';
 import { readStatus, readUsage } from './handoff.js';
 import { log } from './log.js';
+import { sent } from './sent.js';
 import { paths } from './paths.js';
 import type { Limiter } from './ratelimit.js';
 import { state } from './state.js';
@@ -88,6 +93,10 @@ export function snapshot(deps: ApiDeps): Json {
 
   return {
     now: Date.now(),
+    // Which agent this panel belongs to. With more than one deployment on a
+    // host the panels are otherwise identical, and acting on the wrong one —
+    // stopping Juan when Maria is the one misbehaving — is an easy mistake.
+    instance: { name: INSTANCE, agentName: AGENT_NAME },
     whatsapp: { connected: deps.wa.connected, name: deps.wa.me?.name ?? null },
     agent: {
       reporting: status !== null,
@@ -106,8 +115,10 @@ export function snapshot(deps: ApiDeps): Json {
       everyone: deps.config.audience.everyone,
       groups: deps.config.groups.enabled,
       groupMode: deps.config.groups.replyTo,
+      groupModes: deps.config.groups.perChat,
     },
     hold: state.holdInfo(),
+    stopped: state.stoppedAll(),
     queue,
     // Null until the agent has reported once. The panel says "not reported yet"
     // rather than drawing zeroes, because zero spend and no measurement look
@@ -127,6 +138,7 @@ export function snapshot(deps: ApiDeps): Json {
         name: c.name,
         isGroup: c.isGroup,
         blocked: c.blocked,
+        leftAt: c.leftAt,
         // The `ChatRecord` docblock promises the panel says which rows an
         // operator put there by hand. It never sent the flag, so a contact just
         // added sat at the top of Chats with zero messages, indistinguishable
@@ -191,16 +203,34 @@ export function chatTranscript(deps: ApiDeps, chatKey: string, limit: number): J
   const record = deps.chats.get(chatKey);
   if (record === null) return { ok: false, message: 'No such chat.' };
 
+  // Which of Juan's messages can still be reached by `edit -n` / `unsend -n`.
+  // Built once for the whole transcript rather than per row: `positions` walks
+  // the store, and doing that inside the map would be one walk per message.
+  const correctable = sent.positions(chatKey);
+  // Not from `recent`: that hides retracted rows on purpose, so asking it what
+  // was retracted returns nothing at all.
+  const retracted = sent.retractedUids(chatKey);
+
   const said: SaidItem[] = feed
     .recent(4000)
     .filter((e) => e.chatKey === chatKey && (e.kind === 'in' || e.kind === 'out'))
-    .map((e) => ({
-      ts: e.ts,
-      kind: 'said' as const,
-      direction: e.kind === 'out' ? ('out' as const) : ('in' as const),
-      who: e.kind === 'out' ? 'Juan' : (e.from ?? e.chatName ?? 'Someone'),
-      text: e.text ?? (e.detail ? `(${e.detail})` : ''),
-    }));
+    .map((e) => {
+      // Narrowed rather than spread straight from the map: `exactOptionalPropertyTypes`
+      // treats an explicit `undefined` as different from an absent key, and the
+      // panel reads "absent" as "no edit button".
+      const nth = correctable.get(e.uid);
+      return {
+        ts: e.ts,
+        kind: 'said' as const,
+        direction: e.kind === 'out' ? ('out' as const) : ('in' as const),
+        who: e.kind === 'out' ? AGENT_NAME : (e.from ?? e.chatName ?? 'Someone'),
+        text: e.text ?? (e.detail ? `(${e.detail})` : ''),
+        ...(nth === undefined ? {} : { nth }),
+        ...(retracted.has(e.uid) ? { unsent: true as const } : {}),
+        ...(e.kind === 'in' && typeof e.waId === 'string' ? { waId: e.waId } : {}),
+        ...(e.kind === 'in' && typeof e.participant === 'string' ? { participant: e.participant } : {}),
+      };
+    });
 
   const status = readStatus();
   return {
@@ -221,6 +251,143 @@ export function chatTranscript(deps: ApiDeps, chatKey: string, limit: number): J
     reporting: status !== null,
     items: mergeTimeline(said, sessionTranscript(chatKey), limit),
   };
+}
+
+/**
+ * Correct, retract, or react — from the panel, as the operator.
+ *
+ * The same three things the agent can already do to its own messages, reached
+ * from the other side. They are written here rather than routed through the
+ * agent for the reason the whole control room exists: these are most wanted
+ * when the agent is the problem, and asking it to fix what it just said is the
+ * one request it might not carry out.
+ *
+ * A position, never an id. The panel addresses a message the same way the agent
+ * does — `nth` counting back through Juan's own sends — so the set of things
+ * reachable is exactly "messages Juan sent in this chat", enforced by the store
+ * rather than by trusting the caller. It also means the browser never holds a
+ * WhatsApp message key, which is the same bound `sent.ts` argues for.
+ */
+export async function chatEdit(
+  deps: ApiDeps,
+  chatKey: string,
+  nth: number,
+  text: string,
+): Promise<{ ok: boolean; message: string }> {
+  const record = deps.chats.get(chatKey);
+  if (record === null) return { ok: false, message: 'No such chat.' };
+  const words = text.trim();
+  if (words.length === 0) return { ok: false, message: 'An edit needs words. To take it back, delete it instead.' };
+  if (words.length > 4000) return { ok: false, message: 'That is longer than WhatsApp will take.' };
+
+  const target = sent.nth(chatKey, nth);
+  if (target === null) return { ok: false, message: 'That message is no longer correctable.' };
+  if (target.kind !== 'text') {
+    return { ok: false, message: `That one was a ${target.kind}, and WhatsApp only edits text. Delete it instead.` };
+  }
+  try {
+    await deps.wa.editText(record.jid, target.id, words);
+  } catch (err) {
+    // Almost always the fifteen-minute window having closed. Said plainly,
+    // because the operator has just typed a correction and needs to know it did
+    // not land rather than assume it did.
+    return {
+      ok: false,
+      message:
+        'WhatsApp refused the edit — usually because the message is more than about fifteen minutes old. '
+        + `Say what you meant in a new message instead. (${String((err as Error).message)})`,
+    };
+  }
+  sent.edited(chatKey, target.id, words);
+  feed.edited(chatKey, target.text, words, 'operator');
+  log('chat.edited', { chatKey, nth, by: 'operator' });
+  return { ok: true, message: 'Edited.' };
+}
+
+export async function chatUnsend(
+  deps: ApiDeps,
+  chatKey: string,
+  nth: number,
+): Promise<{ ok: boolean; message: string }> {
+  const record = deps.chats.get(chatKey);
+  if (record === null) return { ok: false, message: 'No such chat.' };
+  const target = sent.nth(chatKey, nth);
+  if (target === null) return { ok: false, message: 'That message is no longer retractable.' };
+  try {
+    await deps.wa.unsend(record.jid, target.id);
+  } catch (err) {
+    return {
+      ok: false,
+      message:
+        'WhatsApp refused to delete it — usually because it is more than a couple of days old. '
+        + `(${String((err as Error).message)})`,
+    };
+  }
+  sent.retracted(chatKey, target.id);
+  feed.unsent(chatKey, target.text, 'operator');
+  log('chat.unsent', { chatKey, nth, by: 'operator' });
+  return { ok: true, message: 'Deleted for everyone.' };
+}
+
+/**
+ * React to one message in this chat.
+ *
+ * The id comes from the browser, so it is *looked up* rather than trusted: only
+ * an id this bridge recorded against this chat can be reacted to. Without that
+ * check the panel would be a way to place a reaction on an arbitrary message in
+ * an arbitrary conversation by guessing a string, which is the same class of
+ * hole `crossChatTarget` closes on the agent's side.
+ *
+ * Falls back to the last message received when no id is named, which is what
+ * the composer's own control does — and what everything did before ids were
+ * recorded at all.
+ */
+export async function chatReact(
+  deps: ApiDeps,
+  chatKey: string,
+  emoji: string,
+  messageId?: string,
+): Promise<{ ok: boolean; message: string }> {
+  const record = deps.chats.get(chatKey);
+  if (record === null) return { ok: false, message: 'No such chat.' };
+  const glyph = emoji.trim();
+  // What WhatsApp draws is one emoji, but "one emoji" is not one code point:
+  // ⚠️ is two, 👍🏽 is two, and a family is seven. Counting code points and
+  // capping at three rejected most of what an operator can actually paste.
+  //
+  // So the test is on shape rather than length — no spaces, no ASCII letters or
+  // digits — which admits every sequence WhatsApp will render and still refuses
+  // a sentence typed into the box. Sixteen code points is the ceiling, matching
+  // the input's own limit, so nothing unbounded reaches the socket.
+  if (glyph.length === 0) return { ok: false, message: 'Pick an emoji first.' };
+  if ([...glyph].length > 16 || /[\s a-zA-Z0-9]/.test(glyph)) {
+    return { ok: false, message: 'A reaction is a single emoji, not text.' };
+  }
+
+  let target: { id: string; participant?: string } | null = null;
+  if (messageId !== undefined && messageId !== '') {
+    const row = feed
+      .recent(4000)
+      .find((e) => e.kind === 'in' && e.chatKey === chatKey && e.waId === messageId);
+    if (row === undefined) {
+      return { ok: false, message: 'That message is too far back to react to.' };
+    }
+    target = { id: messageId, ...(row.participant ? { participant: row.participant } : {}) };
+  } else {
+    target = deps.dispatcher().lastMessageIn(chatKey);
+  }
+  if (!target) {
+    return { ok: false, message: 'Nothing to react to here yet.' };
+  }
+
+  try {
+    await deps.wa.react(record.jid, target.id, glyph, target.participant);
+  } catch (err) {
+    return { ok: false, message: `WhatsApp refused the reaction. (${String((err as Error).message)})` };
+  }
+  feed.outbound(chatKey, 'react', glyph);
+  log('chat.reacted', { chatKey, by: 'operator', targeted: messageId !== undefined && messageId !== '' });
+  return { ok: true, message: 'Reacted.' };
 }
 
 /**
@@ -403,17 +570,19 @@ export async function sayAsJuan(
       const bytes = readFileSync(join(inPaths.root, rel));
       const ext = (/\.([a-z0-9]+)$/.exec(rel)?.[1] ?? '').toLowerCase();
       if (['png', 'jpg', 'gif', 'webp'].includes(ext)) {
-        await deps.wa.sendImage(jid, bytes, null);
-        feed.outbound(chatKey, 'image', '[image]');
+        const pictured = await deps.wa.sendImage(jid, bytes, null);
+        sent.record(chatKey, pictured, 'image', null, feed.outbound(chatKey, 'image', '[image]').uid);
       } else {
         const mimetype = ext === 'pdf' ? 'application/pdf' : 'text/plain';
-        await deps.wa.sendFile(jid, bytes, mimetype, basename(rel), null);
-        feed.outbound(chatKey, mimetype, basename(rel));
+        const filed = await deps.wa.sendFile(jid, bytes, mimetype, basename(rel), null);
+        sent.record(chatKey, filed, 'file', basename(rel), feed.outbound(chatKey, mimetype, basename(rel)).uid);
       }
     }
     if (text.length > 0) {
-      await deps.wa.sendText(jid, text);
-      feed.outbound(chatKey, 'text', text);
+      // Recorded like any other outbound: to the recipient this is a message
+      // from Juan's number, so it must be as correctable as one Juan wrote.
+      const said = await deps.wa.sendText(jid, text);
+      sent.record(chatKey, said, 'text', text, feed.outbound(chatKey, 'text', text).uid);
     }
   } catch (err) {
     log('operator.sayFailed', { chatKey, err: String((err as Error).message) });
@@ -421,8 +590,93 @@ export async function sayAsJuan(
   }
 
   log('operator.said', { chatKey, chars: text.length, attached: attached.length });
-  feed.event('operator.said', `${record.name ?? chatKey} — sent as Juan by the operator`);
-  return { ok: true, message: 'Sent as Juan.' };
+  feed.event('operator.said', `${record.name ?? chatKey} — sent as ${AGENT_NAME} by the operator`);
+  return { ok: true, message: `Sent as ${AGENT_NAME}.` };
+}
+
+/**
+ * What the operator may still correct in this chat, newest first.
+ *
+ * Returns positions and words, never WhatsApp ids. Not because the panel is
+ * untrusted — it is authenticated — but because the id buys the caller nothing
+ * the position does not, and an endpoint that accepts ids is one an operator
+ * could point at a message from another conversation by mistake.
+ */
+export function correctable(
+  deps: ApiDeps,
+  chatKey: string,
+): { ok: boolean; message: string; items: Array<{ nth: number; kind: string; text: string | null; at: number }> } {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.', items: [] };
+  if (deps.chats.get(chatKey) === null) return { ok: false, message: 'No such chat.', items: [] };
+  return {
+    ok: true,
+    message: '',
+    items: sent.recent(chatKey).map((row, i) => ({
+      nth: i + 1,
+      kind: row.kind,
+      text: row.text,
+      at: row.at,
+    })),
+  };
+}
+
+/**
+ * Edit or retract one of Juan's messages, as the operator.
+ *
+ * The override half of the same capability the agent has. An operator watching
+ * a bad answer go out should not have to wait for the agent to notice it, and
+ * on a busy number they will often see it first.
+ *
+ * Both outcomes are appended to the feed with `by: 'operator'`, so the record
+ * distinguishes a correction the agent made from one made over its head — the
+ * same reason `sayAsJuan` writes its own `operator.said` line.
+ */
+export async function correctMessage(
+  deps: ApiDeps,
+  chatKey: string,
+  nth: number,
+  text: string | null,
+): Promise<{ ok: boolean; message: string }> {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.' };
+  const record = deps.chats.get(chatKey);
+  if (record === null) return { ok: false, message: 'No such chat.' };
+  const jid = deps.chats.jidFor(chatKey);
+  if (jid === null) return { ok: false, message: 'That chat has no destination.' };
+
+  const target = sent.nth(chatKey, nth);
+  if (target === null) return { ok: false, message: 'That message is no longer correctable.' };
+
+  // Null text means retract. An empty string would be an edit to nothing, which
+  // WhatsApp has no way to render, so it is refused rather than guessed at.
+  if (text === null) {
+    try {
+      await deps.wa.unsend(jid, target.id);
+    } catch (err) {
+      return { ok: false, message: 'WhatsApp refused it, usually because it is too old to retract.' + ` (${String((err as Error).message)})` };
+    }
+    sent.retracted(chatKey, target.id);
+    feed.unsent(chatKey, target.text, 'operator');
+    log('operator.unsent', { chatKey, nth });
+    feed.event('operator.unsent', `${record.name ?? chatKey} — a message was retracted by the operator`);
+    return { ok: true, message: 'Retracted for everyone.' };
+  }
+
+  const words = text.replace(/\s+$/, '');
+  if (words.length === 0) return { ok: false, message: 'Nothing to say. To take it back instead, unsend it.' };
+  if (words.length > 4000) return { ok: false, message: 'That is longer than 4000 characters.' };
+  if (target.kind !== 'text') {
+    return { ok: false, message: `That was a ${target.kind}. WhatsApp only edits text — unsend it instead.` };
+  }
+  try {
+    await deps.wa.editText(jid, target.id, words);
+  } catch (err) {
+    return { ok: false, message: 'WhatsApp refused the edit, usually because it is over fifteen minutes old.' + ` (${String((err as Error).message)})` };
+  }
+  sent.edited(chatKey, target.id, words);
+  feed.edited(chatKey, target.text, words, 'operator');
+  log('operator.edited', { chatKey, nth, chars: words.length });
+  feed.event('operator.edited', `${record.name ?? chatKey} — a message was reworded by the operator`);
+  return { ok: true, message: 'Edited.' };
 }
 
 /**
@@ -488,6 +742,27 @@ export function sendToChat(
         current === null
           ? 'The agent is not answering anyone right now, so a reply would have nowhere to go. Wait for their next message.'
           : 'The agent is answering a different conversation right now. Anything typed here would be delivered there instead.',
+    };
+  }
+
+  // And whether a turn is still *open*, which `current.json` cannot say.
+  //
+  // That file is written when a turn starts and is not cleared when one ends,
+  // so it keeps naming the last conversation the agent was on. A line typed
+  // after the agent went idle therefore passed every check above, reached the
+  // session, and caused actions that the outbox then dropped as
+  // `unroutable/expired` — silently, with the operator watching a prompt that
+  // looked like it had accepted their words. That cost an afternoon of
+  // debugging a database that was never broken, so the dispatcher is asked
+  // directly: it is the only thing that knows a turn is live right now.
+  const open = deps.dispatcher().inFlightChat();
+  if (open !== chatKey) {
+    return {
+      ok: false,
+      message:
+        open === null
+          ? 'That turn has ended — the agent has finished replying, so anything typed now would be dropped rather than answered. Send them a message and the next turn will carry it.'
+          : 'The agent has moved on to another conversation. Anything typed here would be delivered there instead.',
     };
   }
 
@@ -799,19 +1074,84 @@ export function pagesList(deps: ApiDeps): Json {
     // The chats a grant can name. Sent with the listing rather than fetched
     // separately so the picker never has to make an operator type a chat key —
     // and it is a picker precisely because a `@lid` cannot be typed from memory.
-    chats: deps.chats
-      .all()
-      .filter((c) => !c.blocked)
-      .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
-      .map((c) => ({
-        chatKey: c.chatKey,
-        name: c.name,
-        isGroup: c.isGroup,
-        messages: c.messages,
-        lastSeenAt: c.lastSeenAt,
-        faces: c.isGroup && c.name === null ? groupFaces(c.chatKey) : [],
-      })),
+    chats: chatPickerRows(deps),
   };
+}
+
+/** The rows a grant picker offers, for pages and for apps alike. */
+function chatPickerRows(deps: ApiDeps): Json[] {
+  return deps.chats
+    .all()
+    .filter((c) => !c.blocked)
+    .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+    .map((c) => ({
+      chatKey: c.chatKey,
+      name: c.name,
+      isGroup: c.isGroup,
+      messages: c.messages,
+      lastSeenAt: c.lastSeenAt,
+      faces: c.isGroup && c.name === null ? groupFaces(c.chatKey) : [],
+    }));
+}
+
+/**
+ * Every app on the hfs2s box, and who may work on it.
+ *
+ * The listing comes from the box itself (apps.ts), so this page can be empty
+ * for three different reasons and says which: the plugin is not switched on,
+ * the box did not answer, or there are genuinely no apps. An operator who
+ * cannot tell those apart will restart the wrong thing.
+ *
+ * `chats` rides along for the same reason it does on the pages listing: the
+ * picker must never make somebody type a chat key, and a `@lid` cannot be
+ * typed from memory at all.
+ */
+export async function appsList(deps: ApiDeps): Promise<Json> {
+  const callable = deps.config.plugins[APPS_PLUGIN]?.callable?.enabled === true;
+  const listing = callable
+    ? await listApps({ config: deps.config })
+    : { apps: [], at: null, error: null };
+  const grants = deps.config.apps.grants;
+  return {
+    plugin: APPS_PLUGIN,
+    callable,
+    at: listing.at,
+    error: listing.error,
+    items: listing.apps.map((app) => ({
+      ...app,
+      addresses: [...app.addresses],
+      // null and [] are different answers, and the panel says so: nobody has
+      // claimed this app, versus somebody claimed it for no one.
+      grantedTo: grants[app.id] ?? null,
+      grantedLabels: (grants[app.id] ?? []).map((entry) => describeGrant(deps, entry)),
+    })),
+    chats: chatPickerRows(deps),
+  };
+}
+
+/**
+ * Set, or clear, who may work on one app.
+ *
+ * The sibling of `pageGrant`, routed through `updateSettings` for the same
+ * reasons: that is where the config-wipe protection, the atomic write and the
+ * write-then-apply ordering live, and the whole map is rebuilt here so that
+ * saving one app's grant can never drop another's.
+ */
+export function appGrant(deps: ApiDeps, id: string, body: unknown): { ok: boolean; message: string } {
+  if (!WORKSPACE_ID.test(id)) return { ok: false, message: 'No app named.' };
+  const raw = (body as Record<string, unknown> | null)?.['chats'];
+  if (raw !== null && !Array.isArray(raw)) {
+    return { ok: false, message: 'Expected a list of chats, or null to unclaim the app.' };
+  }
+
+  const grants: Record<string, string[]> = { ...deps.config.apps.grants };
+  if (raw === null) {
+    // Back to unclaimed, which is not the same as granted to nobody.
+    delete grants[id];
+  } else {
+    grants[id] = [...new Set(raw.filter((c): c is string => typeof c === 'string'))];
+  }
+  return updateSettings(deps, { apps: { grants } });
 }
 
 /**
@@ -841,6 +1181,107 @@ export function pageGrant(deps: ApiDeps, slug: string, body: unknown): { ok: boo
   return updateSettings(deps, { pages: { grants } });
 }
 
+/**
+ * Set, or clear, how the agent behaves in one room.
+ *
+ * Routed through `updateSettings` for the same reason `pageGrant` is: that is
+ * where the config-wipe protection, the atomic write and the write-then-apply
+ * ordering live. And the whole map is rebuilt here rather than in the browser,
+ * because a settings patch merges a section one level deep — so sending one
+ * room's entry would replace every other room's.
+ *
+ * `null` means "follow the global setting", which is not the same as setting
+ * this room to whatever the global happens to be today: one tracks it, the
+ * other freezes it.
+ */
+export function groupMode(deps: ApiDeps, chatKey: string, body: unknown): { ok: boolean; message: string } {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.' };
+  const raw = (body as Record<string, unknown> | null)?.['replyTo'];
+  const modes = ['mention', 'trigger', 'observe'] as const;
+  type Mode = (typeof modes)[number];
+  if (raw !== null && !modes.includes(raw as Mode)) {
+    return { ok: false, message: 'Expected mention, trigger, observe, or null to follow the global setting.' };
+  }
+
+  const perChat: Record<string, { replyTo: Mode }> = { ...deps.config.groups.perChat };
+  if (raw === null) delete perChat[chatKey];
+  else perChat[chatKey] = { replyTo: raw as Mode };
+
+  const written = updateSettings(deps, { groups: { perChat } });
+  if (!written.ok) return written;
+  feed.event('group.mode', raw === null ? 'a room went back to the global setting' : `a room was set to ${String(raw)}`);
+  return { ok: true, message: raw === null ? 'Following the global setting.' : 'Saved.' };
+}
+
+/**
+ * Ask WhatsApp whether he is still in a group. Reads only: it changes nothing
+ * the panel records, so a wrong answer costs a sentence rather than a room.
+ */
+export async function groupMembership(
+  deps: ApiDeps,
+  chatKey: string,
+): Promise<{ ok: boolean; message: string; state?: string; members?: number | null }> {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.' };
+  const record = deps.chats.get(chatKey);
+  if (record === null || !record.isGroup) return { ok: false, message: 'No such group.' };
+  const jid = deps.chats.jidFor(chatKey);
+  if (jid === null) return { ok: false, message: 'That group has no address on record.' };
+  const name = record.name ?? 'that group';
+  let answer: Awaited<ReturnType<WhatsApp['groupMembership']>>;
+  try {
+    answer = await deps.wa.groupMembership(jid);
+  } catch (err) {
+    return { ok: false, message: `Could not ask WhatsApp: ${String((err as Error).message).slice(0, 120)}` };
+  }
+  log('group.membership', { chatKey, state: answer.state, members: answer.members });
+  const recorded = record.leftAt !== null;
+  const count = answer.members === null ? '' : ` (${String(answer.members)} members)`;
+  const message = answer.state === 'member'
+    ? `WhatsApp says he is still in ${name}${count}${recorded ? ' — though the panel has it as left.' : '.'}`
+    : answer.state === 'not-member'
+      ? `WhatsApp says he is not in ${name}.${recorded ? '' : ' The panel had not recorded that yet.'}`
+      : `WhatsApp did not give a clear answer about ${name}${answer.detail === null ? '' : ` (${answer.detail})`}.`;
+  return { ok: true, message, state: answer.state, members: answer.members };
+}
+
+/**
+ * Make him leave a group, from the panel's Groups page.
+ *
+ * The same WhatsApp call `leave_group` makes, without a turn: the operator is
+ * holding the panel, so there is no conversation whose authority needs
+ * checking. No goodbye — an operator who wants one asks him in their direct
+ * message instead, where `leave_group` sends it before leaving.
+ */
+export async function groupLeave(deps: ApiDeps, chatKey: string): Promise<{ ok: boolean; message: string }> {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return { ok: false, message: 'A 16-character chat key is required.' };
+  const record = deps.chats.get(chatKey);
+  if (record === null) return { ok: false, message: 'No such chat.' };
+  if (!record.isGroup) return { ok: false, message: 'That is a direct chat, not a group.' };
+  if (record.leftAt !== null) return { ok: true, message: `He already left ${record.name ?? 'that group'}.` };
+  const jid = deps.chats.jidFor(chatKey);
+  if (jid === null) return { ok: false, message: 'That group has no address on record.' };
+  try {
+    await deps.wa.leaveGroup(jid);
+  } catch (err) {
+    const why = String((err as Error).message).slice(0, 160);
+    // Refused because he is not in it any more — a leave from before this was
+    // recorded, or somebody removed him. Say so and mark it, rather than
+    // offering a button that can never succeed.
+    if (!(await deps.wa.isInGroup(jid))) {
+      deps.chats.setLeft(chatKey, Date.now());
+      deps.chats.flush();
+      return { ok: true, message: `He is no longer in ${record.name ?? 'that group'} — marked as left.` };
+    }
+    log('group.leaveFailed', { chatKey, by: 'panel', err: why });
+    return { ok: false, message: `WhatsApp would not let him leave: ${why}` };
+  }
+  feed.event('group.left', `${record.name ?? chatKey} — left by the operator from the panel`);
+  log('group.left', { chatKey, by: 'panel' });
+  deps.chats.setLeft(chatKey, Date.now());
+  deps.chats.flush();
+  return { ok: true, message: `Left ${record.name ?? 'the group'}.` };
+}
+
 export function pageDelete(slug: string): { ok: boolean; message: string } {
   if (!deletePage(slug)) return { ok: false, message: 'No such page.' };
   feed.event('page.deleted', `the page ${slug} was removed`);
@@ -849,29 +1290,46 @@ export function pageDelete(slug: string): { ok: boolean; message: string } {
 
 // ─── Persona ─────────────────────────────────────────────────────────────────
 
-/** The four files, in the order they are assembled into the agent's brief. */
-const PERSONA_PARTS = ['IDENTITY.md', 'VOICE.md', 'OPERATING.md', 'BOUNDARIES.md'] as const;
-const PERSONA_DIR = process.env['TULIP_PERSONA_DOCS'] ?? '/persona';
-
 /**
- * What Tulip has been told to be, for reading.
+ * What the agent has been told to be: each part, where it came from, and how
+ * big the brief is.
  *
- * Read-only, deliberately. These files are version-controlled and reach a
- * conversation only when its session next spawns, so an editor here would
- * promise something it could not deliver — a change that appears saved and
- * takes effect at some unrelated moment. Editing belongs in the repository,
- * where it is reviewed and can be reverted.
+ * This was read-only, deliberately, while a save could only take effect "at
+ * some unrelated moment". It no longer can: the agent resumes its session under
+ * the new brief before its next turn. See bridge/src/persona.ts.
  */
 export function personaDocs(): Json {
-  const parts = PERSONA_PARTS.map((name) => {
-    try {
-      const path = join(PERSONA_DIR, name);
-      return { name, text: readFileSync(path, 'utf8'), bytes: statSync(path).size };
-    } catch {
-      return { name, text: null, bytes: 0 };
-    }
-  });
-  return { parts, total: parts.reduce((sum, p) => sum + p.bytes, 0) };
+  return personaView();
+}
+
+type PersonaAnswer = { ok: boolean; message: string; briefChars?: number };
+
+const PersonaBody = z.object({ name: z.string().max(40), text: z.string() }).strict();
+
+function personaMessage(r: { version: string | null; briefChars: number; overLimit: boolean }, done: string): string {
+  // Saved but not handed over: the agent keeps the brief it has, so saying
+  // "it reaches the next message" would be the one untrue thing here.
+  if (r.version === null) return `${done}, but it could not be handed to the agent, which keeps the brief it has. Check the bridge log.`;
+  const size = r.overLimit
+    ? ` The brief is ${r.briefChars.toLocaleString('en-GB')} characters, past the 40,000 Claude Code follows best.`
+    : '';
+  return `${done}. It reaches the next message.${size}`;
+}
+
+export function personaSave(raw: unknown): PersonaAnswer {
+  const body = PersonaBody.safeParse(raw);
+  if (!body.success) return { ok: false, message: 'Say which part, and what it should say.' };
+  const result = savePersonaPart(body.data.name, body.data.text);
+  if (!result.ok) return { ok: false, message: result.error };
+  feed.event('persona.saved', `${body.data.name} was edited in the panel`);
+  return { ok: true, message: personaMessage(result, 'Saved'), briefChars: result.briefChars };
+}
+
+export function personaRevert(name: string): PersonaAnswer {
+  const result = revertPersonaPart(name);
+  if (!result.ok) return { ok: false, message: result.error };
+  feed.event('persona.reverted', `${name} went back to the starter`);
+  return { ok: true, message: personaMessage(result, 'Back to the starter'), briefChars: result.briefChars };
 }
 
 // ─── Memory ──────────────────────────────────────────────────────────────────
@@ -1175,12 +1633,17 @@ export function settingsView(deps: ApiDeps): Json {
     // duplicated into the page, for the third time and the same reason: the
     // sentence an operator reads on the row must be the sentence the bridge
     // actually synthesises, or the bench is demonstrating something else.
-    voiceSamples: LANGUAGE_SAMPLES,
+    voiceSamples: samplesFor(AGENT_NAME),
     // Where the provider's catalogue falls short of what a row wants. Two
     // entries today, both real limitations rather than settings nobody has
     // filled in — see shared/src/languages.ts.
     voiceLimits: LANGUAGE_LIMITS,
     groups: c.groups,
+    // The grants, and what each plugin has actually been doing. Status includes
+    // directories nobody has configured, so a service pointed at the wrong
+    // place shows up here as "found, not configured" rather than as silence.
+    plugins: c.plugins,
+    pluginStatus: pluginStatus(),
     limits: c.limits,
     delivery: c.delivery,
     panel: { host: c.panel.host, port: c.panel.port },
@@ -1284,7 +1747,7 @@ export async function voicePreview(deps: ApiDeps, body: unknown, now = Date.now(
   if (row === undefined) {
     return { ok: false, status: 400, message: `${asked} is not one of the languages this deployment speaks.` };
   }
-  const text = LANGUAGE_SAMPLES[row.name];
+  const text = sampleFor(row.name, AGENT_NAME);
 
   if (!deps.config.agent.voice) {
     return { ok: false, status: 409, message: 'Voice notes are switched off, so there is nothing to test. Turn them on above.' };
@@ -1373,7 +1836,39 @@ const SettingsPatch = z
       replyTo: z.enum(['mention', 'trigger', 'observe']).optional(),
       triggers: z.array(z.string().min(1).max(32)).max(8).optional(),
       reactivity: z.number().int().min(0).max(4).optional(),
+      // Bounded, because this one grows with use rather than being a fixed set
+      // of knobs: one entry per room somebody has set differently. The key
+      // shape is checked here as well as in `groupMode`, since this schema is
+      // what stands between a settings POST and the config file.
+      perChat: z
+        .record(
+          z.string().regex(/^[0-9a-f]{16}$/),
+          z.object({ replyTo: z.enum(['mention', 'trigger', 'observe']) }).strict(),
+        )
+        .refine((m) => Object.keys(m).length <= 200, { message: 'too many rooms' })
+        .optional(),
     }).strict().optional(),
+    // Per plugin, and merged per plugin by `applyPatch` — switching one off
+    // must not reset its recipient list to the empty default.
+    plugins: z
+      .record(
+        z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/),
+        z.object({
+          enabled: z.boolean().optional(),
+          label: z.string().max(64).optional(),
+          kinds: z.array(z.enum(['text', 'image'])).min(1).max(2).optional(),
+          recipients: z
+            .union([
+              z.literal('any'),
+              z.array(z.string().regex(/^(?:[1-9][0-9]{6,15}|[0-9]{5,25}@lid|[0-9-]{10,40}@g\.us)$/)).max(200),
+            ])
+            .optional(),
+          private: z.boolean().optional(),
+          perHour: z.number().int().min(1).max(1000).optional(),
+        }).strict(),
+      )
+      .refine((m) => Object.keys(m).length <= 20, { message: 'too many plugins' })
+      .optional(),
     limits: z.object({
       messagesPerHour: z.number().int().min(1).max(1000).optional(),
       burst: z.number().int().min(1).max(50).optional(),
@@ -1401,6 +1896,12 @@ const SettingsPatch = z
     privacy: z.object({
       owner: z.string().max(320).nullable().optional(),
       chats: z.array(z.string().max(64)).max(200).optional(),
+    }).strict().optional(),
+    apps: z.object({
+      // Loose here for the same reason as `pages.grants` below: the merged
+      // result is validated by `parseConfig` against the real workspace-id and
+      // chat-key shapes, and that is the check that matters.
+      grants: z.record(z.string().max(64), z.array(z.string().max(64)).max(20)).optional(),
     }).strict().optional(),
     pages: z.object({
       open: z.boolean().optional(),
@@ -1485,6 +1986,7 @@ function applyPatch(
   // Read before the loop writes: the loop is what would overwrite it.
   const voicesBefore = ((target['agent'] as { voices?: Record<string, string> } | undefined)?.voices
     ?? {}) as Record<string, string>;
+  const pluginsBefore = (target['plugins'] ?? {}) as Record<string, Record<string, unknown>>;
 
   for (const [section, values] of Object.entries(data)) {
     if (values === undefined) continue;
@@ -1499,6 +2001,18 @@ function applyPatch(
       ...(target['agent'] as object),
       voices: { ...voicesBefore, ...(data['agent']['voices'] as Record<string, string>) },
     };
+  }
+
+  if (data['plugins'] !== undefined) {
+    // One level deeper than the sections above, for the same reason as voices:
+    // `{ plugins: { bibim: { enabled: false } } }` is a switch, and a shallow
+    // merge would replace bibim's whole entry — its recipient list included,
+    // which then defaults to nobody.
+    const merged: Record<string, unknown> = { ...pluginsBefore };
+    for (const [name, values] of Object.entries(data['plugins'] as Record<string, Record<string, unknown>>)) {
+      merged[name] = { ...(pluginsBefore[name] ?? {}), ...values };
+    }
+    target['plugins'] = merged;
   }
   return target;
 }
@@ -1786,6 +2300,81 @@ export function terminalKeys(window: string | null, keys: Array<{ text: string; 
 }
 
 /**
+ * Stop the agent now: interrupt the turn in flight, then hold.
+ *
+ * Both halves are needed, and neither is the other one.
+ *
+ * `!hold` governs what is *handed over next*. A turn already running is
+ * untouched by it: it finishes its thinking, writes its sends, and they go out.
+ * So a hold is not a stop — it is a promise about the future, made while the
+ * present is still talking. That gap is the whole reason this exists.
+ *
+ * Escape closes it. It reaches the pane on the agent's next 250ms tick and ends
+ * the generation mid-sentence, which is exactly what pressing Esc in the
+ * session does, because it *is* that: `sendKey` runs `tmux send-keys Escape`
+ * against the live window. But an interrupt on its own is a skip rather than a
+ * stop — the next queued message starts a new turn immediately — so the hold
+ * has to follow it.
+ *
+ * Ordering matters. Hold first, then Escape: with Escape first there is a
+ * window, however small, in which the interrupted turn ends, the dispatcher
+ * pumps, and a fresh turn starts before the hold lands — which would read to an
+ * operator as the stop having done nothing at all.
+ *
+ * The window is `null` — the agent resolves that to whichever chat is busy,
+ * which is the one generating and therefore the one to interrupt.
+ *
+ * Third, the turn record is closed. The agent has stopped, but it stopped
+ * *before* it could report the turn finished, so the dispatcher would otherwise
+ * go on waiting for it until the ten-minute timeout — and a release inside that
+ * window would hand over nothing at all. The dispatcher is passed in rather
+ * than reached for, so that a caller cannot forget it: a stop that leaves the
+ * queue wedged is the failure this argument exists to make impossible.
+ */
+export function stopNow(by: string, dispatcher: { abandonInFlight: (why: string) => void }): void {
+  state.setHold(true, by);
+  terminalKeys(null, [{ text: 'Escape', literal: false }]);
+  dispatcher.abandonInFlight(`stopped by ${by}`);
+  feed.event('stop', `stopped mid-turn and held (${by})`);
+  log('stop', { by, note: 'Escape sent to the busy window; turn closed; delivery held' });
+}
+
+/**
+ * Stop one chat, rather than the deployment.
+ *
+ * What `!stopjuan` does now, and the difference from `stopNow` is the whole
+ * point: a room that wants quiet is asking about *itself*. Silencing every
+ * other conversation because one group asked is a stranger in one room deciding
+ * for everybody, and the first real use of the global switch made that obvious
+ * — one `!stopjuan` in a test group took the agent off every chat at once.
+ *
+ * The interrupt is conditional for the same reason. An Escape is only sent if
+ * the turn in flight belongs to *this* chat; otherwise stopping a quiet room
+ * would cut off a sentence being written to somebody else, which is exactly the
+ * cross-chat mis-delivery the rest of this file works to prevent.
+ */
+export function stopChat(
+  chatKey: string,
+  by: string,
+  dispatcher: { abandonInFlight: (why: string, onlyChatKey?: string) => void; inFlightChat: () => string | null },
+): void {
+  state.setStopped(chatKey, by);
+  if (dispatcher.inFlightChat() === chatKey) {
+    terminalKeys(null, [{ text: 'Escape', literal: false }]);
+    dispatcher.abandonInFlight(`stopped by ${by}`, chatKey);
+  }
+  feed.event('chat.stopped', `stopped in one chat (${by})`);
+  log('chat.stopped', { chatKey, by });
+}
+
+/** Undo it. Operator only — see OPEN_TO_EVERYONE in control.ts for the asymmetry. */
+export function startChat(chatKey: string, by: string): void {
+  state.clearStopped(chatKey);
+  feed.event('chat.started', `a stopped chat was started again (${by})`);
+  log('chat.started', { chatKey, by });
+}
+
+/**
  * Keys addressed to a named window, held there until the agent has typed them.
  *
  * There is one request file, and it carries one window for the whole sliding
@@ -1930,9 +2519,27 @@ export function runAction(deps: ApiDeps, action: string, key: string): { ok: boo
       void deps.dispatcher().pump();
       return { ok: true, message: 'Released.' };
 
+    case 'stop':
+      stopNow('panel', deps.dispatcher());
+      return {
+        ok: true,
+        message: 'Stopped. The running turn was interrupted and delivery is held — release to resume.',
+      };
+
     case 'pump':
       void deps.dispatcher().pump();
       return { ok: true, message: 'Delivery loop kicked.' };
+
+    case 'stopchat':
+    case 'startchat': {
+      if (!/^[0-9a-f]{16}$/.test(key)) return { ok: false, message: 'A 16-character chat key is required.' };
+      if (action === 'stopchat') stopChat(key, 'panel', deps.dispatcher());
+      else startChat(key, 'panel');
+      return {
+        ok: true,
+        message: action === 'stopchat' ? 'Stopped in that chat.' : 'Answering that chat again.',
+      };
+    }
 
     case 'block':
     case 'unblock': {

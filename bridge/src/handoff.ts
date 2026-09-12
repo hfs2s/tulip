@@ -14,13 +14,13 @@
  * the timer overrides. Neither is a way to affect another chat.
  */
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { AgentStatus, InboxBatch, CurrentTurn, UsageReport, inPaths, outPaths, writeJsonAtomic } from '@tulip/shared';
+import { AgentStatus, InboxBatch, CurrentTurn, UsageReport, inPaths, outPaths, writeJsonAtomic } from '@2lp/shared';
 import type {
   CurrentTurn as CurrentTurnType,
   InboxBatch as InboxBatchType,
   AgentStatus as AgentStatusType,
   UsageReport as UsageReportType,
-} from '@tulip/shared';
+} from '@2lp/shared';
 import { log } from './log.js';
 
 /** Create the directory structure both containers expect. */

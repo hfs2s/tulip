@@ -21,7 +21,7 @@
  * limits. It is keyed by `chatKey`, so nothing here writes down a phone number.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { writeJsonAtomic } from '@tulip/shared';
+import { writeJsonAtomic } from '@2lp/shared';
 import { z } from 'zod';
 import { log } from './log.js';
 

@@ -14,7 +14,7 @@
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { chatKeyFor, newSalt, writeFileAtomic, writeJsonAtomic } from '@tulip/shared';
+import { chatKeyFor, newSalt, writeFileAtomic, writeJsonAtomic } from '@2lp/shared';
 import { z } from 'zod';
 import { log } from './log.js';
 import { paths } from './paths.js';
@@ -31,6 +31,12 @@ const ChatRecord = z
     messages: z.number().int().nonnegative().default(0),
     /** Set by an operator via `!block`. Checked before every other gate. */
     blocked: z.boolean().default(false),
+    /**
+     * When he last left this group, or null. Set by the panel's Leave button and by
+     * `leave_group`; cleared by the next real message from the group, which means
+     * somebody added him back. Defaulted, so records saved before it load unchanged.
+     */
+    leftAt: z.number().int().nullable().default(null),
     /**
      * Created from `agent.contacts` rather than by somebody messaging in.
      *
@@ -182,6 +188,7 @@ export class ChatRegistry {
         lastSeenAt: now,
         messages: 0,
         blocked: false,
+        leftAt: null,
         contact: false,
         altJid: jid,
         mergedInto: null,
@@ -202,6 +209,7 @@ export class ChatRegistry {
         lastSeenAt: now,
         messages: 0,
         blocked: false,
+        leftAt: null,
         contact: false,
         altJid: null,
         mergedInto: null,
@@ -285,6 +293,7 @@ export class ChatRegistry {
         lastSeenAt: now,
         messages: 0,
         blocked: false,
+        leftAt: null,
         contact: true,
         altJid: null,
         mergedInto: null,
@@ -378,6 +387,15 @@ export class ChatRegistry {
     const record = this.byKey.get(this.canonical(chatKey));
     if (!record) return false;
     record.blocked = blocked;
+    this.dirty = true;
+    return true;
+  }
+
+  /** Mark a group as left (a time) or rejoined (null). Resolves, like `setBlocked`. */
+  setLeft(chatKey: string, at: number | null): boolean {
+    const record = this.byKey.get(this.canonical(chatKey));
+    if (!record) return false;
+    record.leftAt = at;
     this.dirty = true;
     return true;
   }

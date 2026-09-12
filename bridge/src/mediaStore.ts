@@ -24,7 +24,7 @@
  */
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { transcriptFor, writeFileAtomic } from '@tulip/shared';
+import { transcriptFor, writeFileAtomic } from '@2lp/shared';
 import { paths } from './paths.js';
 import { log } from './log.js';
 

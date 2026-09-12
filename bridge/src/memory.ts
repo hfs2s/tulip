@@ -30,7 +30,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { MemoryFile, type MemoryNote, inPaths, writeJsonAtomic } from '@tulip/shared';
+import { MemoryFile, type MemoryNote, inPaths, writeJsonAtomic } from '@2lp/shared';
 import { log } from './log.js';
 
 const MAX_NOTES = 200;

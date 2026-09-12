@@ -22,7 +22,7 @@ process.env['TULIP_OUT_DIR'] = join(root, 'out');
 
 const { retainOutbound } = await import('../src/mediaStore.js');
 const { paths } = await import('../src/paths.js');
-const { inPaths } = await import('@tulip/shared');
+const { inPaths } = await import('@2lp/shared');
 
 const KEY = 'a'.repeat(16);
 const files = (): string[] => {
