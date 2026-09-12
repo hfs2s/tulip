@@ -21,6 +21,29 @@
 
 export type Decision = { allowed: true; host: string; port: number } | { allowed: false; reason: string };
 
+/**
+ * A parsed allowlist.
+ *
+ * `any` is the "any public host" mode, and it exists for exactly one deployment
+ * of this proxy: `tulip-webproxy`, the browser's way out. A browser that may
+ * only visit named sites is not a browser, and the whole point of giving Juan
+ * one is to open links nobody listed in advance. What `any` does *not* relax is
+ * everything else here: the port is still 443 only, the name must still be a
+ * plain hostname, and every address it resolves to still goes through
+ * `blockedReason()` in addresses.ts. With a wildcard list that address check
+ * stops being the second control and becomes the one that matters — which is
+ * why it is tested to the standard it is.
+ *
+ * The agent's own proxy, `tulip-egress`, never has `any` set, and nothing in
+ * the compose file can give it one by accident: the entry has to be written
+ * as exactly `*`.
+ */
+export interface Allowlist {
+  exact: Set<string>;
+  suffixes: string[];
+  any: boolean;
+}
+
 /** The only port the proxy will ever open. HTTPS or nothing. */
 export const ALLOWED_PORT = 443;
 
@@ -91,14 +114,27 @@ export function parseAuthority(authority: string): { host: string; port: number 
  * configuration — the proxy runs and refuses everything — and is what an
  * operator gets if they forget to set the variable. Failing closed on a missing
  * setting is the whole point.
+ *
+ * One more form: an entry of exactly `*` means any public hostname (see
+ * `Allowlist.any`). *Exactly* is the operative word. `**`, `*.`, `*.*` and
+ * `*com` are not generous spellings of it; they are malformed and throw, like
+ * any other entry this parser cannot read. A typo that silently widened the
+ * list to the whole internet would be the worst possible way for this function
+ * to be lenient.
  */
-export function parseAllowlist(raw: string | undefined): { exact: Set<string>; suffixes: string[] } {
+export function parseAllowlist(raw: string | undefined): Allowlist {
   const exact = new Set<string>();
   const suffixes: string[] = [];
+  let any = false;
 
   for (const entry of (raw ?? '').split(',')) {
     const trimmed = entry.trim().toLowerCase();
     if (!trimmed) continue;
+
+    if (trimmed === '*') {
+      any = true;
+      continue;
+    }
 
     if (trimmed.startsWith('*.')) {
       const base = normaliseHost(trimmed.slice(2));
@@ -113,7 +149,7 @@ export function parseAllowlist(raw: string | undefined): { exact: Set<string>; s
     exact.add(host);
   }
 
-  return { exact, suffixes };
+  return { exact, suffixes, any };
 }
 
 /**
@@ -122,11 +158,17 @@ export function parseAllowlist(raw: string | undefined): { exact: Set<string>; s
  * The wildcard test compares against `"." + base` rather than using `endsWith`
  * on the base alone. That single dot is the difference between allowing
  * `us.api.example.com` and allowing `evil-api.example.com.attacker.test`.
+ *
+ * In `any` mode one more shape is refused: a name whose last label does not
+ * begin with a letter. No top-level domain does — they are alphabetic, or
+ * punycode, which starts with `xn--` — so a name ending in a digit is an
+ * address wearing a hostname's clothes: `127.0.0.1`, or the older numeric
+ * spellings such as `0x7f.1` that the C resolver still reads as loopback. The
+ * address check would catch every one of those after resolution anyway. This
+ * refuses them before a lookup is made, so the log says what was attempted in
+ * the terms it was attempted in.
  */
-export function decide(
-  authority: string,
-  allow: { exact: Set<string>; suffixes: string[] },
-): Decision {
+export function decide(authority: string, allow: Allowlist): Decision {
   const target = parseAuthority(authority);
   if (target === null) return { allowed: false, reason: 'unparseable or non-hostname authority' };
 
@@ -138,6 +180,15 @@ export function decide(
 
   for (const base of allow.suffixes) {
     if (target.host.endsWith(`.${base}`)) return { allowed: true, ...target };
+  }
+
+  if (allow.any) {
+    // `normaliseHost` guarantees at least two labels, so there is always a dot.
+    const lastLabel = target.host.slice(target.host.lastIndexOf('.') + 1);
+    if (!/^[a-z]/.test(lastLabel)) {
+      return { allowed: false, reason: 'a numeric name is an address, not a hostname' };
+    }
+    return { allowed: true, ...target };
   }
 
   return { allowed: false, reason: 'host is not on the allowlist' };

@@ -20,6 +20,13 @@
  *     does not compromise the proxy: they are separate containers, and the only
  *     input crossing between them is a hostname that has been through
  *     `parseAuthority` before anything else touches it.
+ *
+ * The same image runs twice. As `tulip-egress` it is the agent's way out, with
+ * a short list of names. As `tulip-webproxy` it is the browser's, with the
+ * allowlist `*` — any public hostname, still 443 only, still refused if any
+ * address it resolves to is private. Nothing in this file branches on which one
+ * it is; the difference is one environment variable, and allowlist.ts explains
+ * why that variable cannot be widened by a typo.
  */
 import http from 'node:http';
 import net from 'node:net';
@@ -204,9 +211,16 @@ server.listen(PORT, HOST, () => {
     host: HOST,
     allowExact: [...allow.exact].join(',') || '(none)',
     allowSuffixes: allow.suffixes.map((s) => `*.${s}`).join(',') || '(none)',
+    allowAny: allow.any,
     maxTunnels: MAX_TUNNELS,
   });
-  if (allow.exact.size === 0 && allow.suffixes.length === 0) {
+  if (allow.any) {
+    // Said at startup, every startup, so an operator reading the logs of the
+    // agent's proxy can never mistake it for the browser's.
+    log('egress.warn', {
+      message: 'allowlist is `*` — any public hostname on 443; private addresses are still refused',
+    });
+  } else if (allow.exact.size === 0 && allow.suffixes.length === 0) {
     log('egress.warn', { message: 'allowlist is empty — every CONNECT will be refused' });
   }
 });

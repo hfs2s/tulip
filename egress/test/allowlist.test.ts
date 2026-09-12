@@ -142,4 +142,108 @@ describe('parseAllowlist', () => {
     expect(() => parseAllowlist('not a host')).toThrow(/invalid allowlist entry/);
     expect(() => parseAllowlist('*.not a host')).toThrow(/invalid wildcard allowlist entry/);
   });
+
+  it('is never in any-host mode unless it says `*`', () => {
+    expect(parseAllowlist(undefined).any).toBe(false);
+    expect(parseAllowlist('').any).toBe(false);
+    expect(parseAllowlist('api.anthropic.com,*.example.net').any).toBe(false);
+  });
+});
+
+/**
+ * `*` — any public host, for the browser's proxy only.
+ *
+ * The risk in this mode is not the case it is for; it is the near-misses. Each
+ * of the spellings below is something an operator might type believing it
+ * means "everything", and each must be a loud configuration error rather than
+ * a quiet widening.
+ */
+describe('parseAllowlist — any-host mode', () => {
+  it('reads exactly `*` as any host', () => {
+    const list = parseAllowlist('*');
+    expect(list.any).toBe(true);
+    expect(list.exact.size).toBe(0);
+    expect(list.suffixes).toEqual([]);
+  });
+
+  it('tolerates whitespace around it, as it does for every entry', () => {
+    expect(parseAllowlist('  *  ').any).toBe(true);
+  });
+
+  it('accepts `*` alongside other entries, which stay valid and are still checked', () => {
+    const list = parseAllowlist('api.anthropic.com, *, *.example.net');
+    expect(list.any).toBe(true);
+    expect(list.exact.has('api.anthropic.com')).toBe(true);
+    expect(list.suffixes).toEqual(['example.net']);
+  });
+
+  it('still throws on a malformed neighbour — `*` is not a licence to skip validation', () => {
+    expect(() => parseAllowlist('*,not a host')).toThrow(/invalid allowlist entry/);
+  });
+
+  it.each([
+    ['double star', '**'],
+    ['star dot', '*.'],
+    ['star dot star', '*.*'],
+    ['star glued to a name', '*com'],
+    ['star in the middle', 'api.*.com'],
+    ['star after a dot', 'example.*'],
+    ['star with a port', '*:443'],
+  ])('rejects %s rather than widening', (_label, entry) => {
+    expect(() => parseAllowlist(entry)).toThrow(/invalid/);
+  });
+});
+
+describe('decide — any-host mode', () => {
+  const ANY = parseAllowlist('*');
+  const permits = (authority: string): boolean => decide(authority, ANY).allowed;
+
+  it('permits an ordinary public hostname on 443', () => {
+    expect(decide('example.com:443', ANY)).toEqual({ allowed: true, host: 'example.com', port: 443 });
+    expect(permits('juan.hfs2s.app:443')).toBe(true);
+    expect(permits('xn--bcher-kva.example:443')).toBe(true);
+  });
+
+  it('normalises exactly as it does for listed hosts', () => {
+    expect(decide('EXAMPLE.COM.:443', ANY)).toEqual({ allowed: true, host: 'example.com', port: 443 });
+  });
+
+  it('still refuses every port but 443', () => {
+    for (const port of [80, 22, 25, 3128, 8443]) expect(permits(`example.com:${port}`)).toBe(false);
+    const verdict = decide('example.com:80', ANY);
+    if (!verdict.allowed) expect(verdict.reason).toMatch(/port 80/);
+  });
+
+  it.each([
+    ['dotted IPv4 loopback', '127.0.0.1:443'],
+    ['dotted IPv4 private', '10.0.0.1:443'],
+    ['dotted IPv4 public', '93.184.216.34:443'],
+    ['numeric shorthand the C resolver reads as loopback', '0x7f.1:443'],
+    ['name ending in a digit', 'host.123:443'],
+  ])('refuses %s before any lookup', (_label, authority) => {
+    const verdict = decide(authority, ANY);
+    expect(verdict.allowed).toBe(false);
+    if (!verdict.allowed) expect(verdict.reason).toBe('a numeric name is an address, not a hostname');
+  });
+
+  it.each([
+    ['bracketed IPv6', '[::1]:443'],
+    ['userinfo', 'user@example.com:443'],
+    ['single label', 'localhost:443'],
+    ['underscore', 'bad_name.example.com:443'],
+    ['non-ascii', 'еxample.com:443'],
+  ])('refuses %s — the hostname rules are unchanged', (_label, authority) => {
+    expect(permits(authority)).toBe(false);
+  });
+
+  it('lets a listed host through the ordinary path when `*` is present too', () => {
+    const mixed = parseAllowlist('api.anthropic.com,*');
+    expect(decide('api.anthropic.com:443', mixed).allowed).toBe(true);
+    expect(decide('anything.example:443', mixed).allowed).toBe(true);
+    expect(decide('anything.example:22', mixed).allowed).toBe(false);
+  });
+
+  it('does not turn a wildcard suffix list into any-host mode', () => {
+    expect(decide('unrelated.example:443', ALLOW).allowed).toBe(false);
+  });
 });

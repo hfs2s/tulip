@@ -48,15 +48,17 @@ function blockedV4(ip: string): string | null {
   if (value === null) return 'unparseable IPv4 address';
   for (const [base, bits, label] of BLOCKED_V4) {
     const baseValue = ipv4ToInt(base);
-    if (baseValue === null) continue;
     const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
-    if ((value & mask) === (baseValue & mask)) return label;
+    // Every base in the table parses; the null test is for the type checker,
+    // and written as a condition rather than a `continue` nothing can reach.
+    if (baseValue !== null && (value & mask) === (baseValue & mask)) return label;
   }
   return null;
 }
 
 function blockedV6(ip: string): string | null {
-  const lower = ip.toLowerCase().split('%')[0] ?? '';
+  // Drop a zone index (`fe80::1%eth0`). Everything from the first `%` goes.
+  const lower = ip.toLowerCase().replace(/%[\s\S]*$/, '');
 
   // IPv4-mapped and IPv4-compatible forms carry a v4 address inside a v6
   // literal. Judge them by the address they actually reach, or a loopback
