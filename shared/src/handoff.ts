@@ -674,6 +674,25 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       id: z.string().uuid(),
       turnId: TurnId,
       /**
+       * Ask another agent on this host a question.
+       *
+       * The peer is named by *handle*, never by number: the bridge resolves it,
+       * so the standing rule holds — a destination is this turn's chat or
+       * something the trusted side named, never digits the agent produced.
+       *
+       * Operator turns only, and never from inside an exchange with another
+       * agent. See bridge/src/peers.ts for why both are structural.
+       */
+      kind: z.literal('peerAsk'),
+      peer: z.string().regex(/^[a-z][a-z0-9-]{1,23}$/, 'a peer handle from the peers listing'),
+      text: z.string().min(1).max(1500),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().uuid(),
+      turnId: TurnId,
+      /**
        * Name an hfs2s app, or clear its name.
        *
        * The box names its own workspaces and most of them have no name at all;
@@ -946,6 +965,8 @@ export const ToolResult = z
       'plugin',
       // Naming an hfs2s app. Same reasoning as `plugin` above.
       'app',
+      // Asking another agent. Same reasoning again.
+      'peer',
     ]),
     at: z.string().datetime(),
     ok: z.boolean(),

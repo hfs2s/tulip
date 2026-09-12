@@ -525,6 +525,35 @@ const Pages = z
   .strict()
   .default({});
 
+/**
+ * The other agents on this host, and the one thing they may do to each other.
+ *
+ * Listing an agent here lets this one ask it a question over WhatsApp — the
+ * ordinary wire, the ordinary envelope path, visible in both panels. It does
+ * not mount anything, open a port, or let either read the other's chats; see
+ * bridge/src/peers.ts for the three properties that bound it.
+ *
+ * The handle is what the agent says out loud ("ask maria"). The number is
+ * resolved here rather than by the agent, so the standing rule survives: a
+ * destination is either this turn's own chat or something the trusted side
+ * named, never a number the agent produced.
+ */
+const PeerHandle = z.string().regex(/^[a-z][a-z0-9-]{1,23}$/, 'a short lowercase handle');
+const Peers = z
+  .record(
+    PeerHandle,
+    z
+      .object({
+        /** What the agent calls it, and what the banner says it is. */
+        label: z.string().min(1).max(40),
+        /** Its WhatsApp number, digits only, as `operators.numbers` is written. */
+        number: z.string().regex(/^[0-9]{5,20}$/, 'digits only, no + and no spaces'),
+      })
+      .strict(),
+  )
+  .refine((m) => Object.keys(m).length <= 8, { message: 'at most 8 peers' })
+  .default({});
+
 /** An hfs2s workspace id: eight hex characters, as the box prints them. */
 const WorkspaceId = z.string().regex(/^[0-9a-f]{8}$/, 'must be an 8-character workspace id');
 
@@ -701,6 +730,7 @@ export const ConfigSchema = z
     delivery: Delivery,
     pages: Pages,
     apps: Apps,
+    peers: Peers,
     privacy: Privacy,
     plugins: Plugins,
   })

@@ -28,6 +28,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { basename, join, resolve, sep } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import {
@@ -45,6 +46,10 @@ import { feed } from './feed.js';
 import { search, type ExaOutcome } from './exa.js';
 import { readPage } from './browse.js';
 import { APPS_PLUGIN, NOT_THE_BOX, NOT_YOUR_APP, WORKSPACE_ARG, mayUse, setLabel } from './apps.js';
+import {
+  EXCHANGE_CLOSED, NO_CHAINING, NO_SUCH_PEER, NOT_OPERATOR,
+  askOwed, isAnswerTurn, peerByHandle, peerOf, withMark,
+} from './peers.js';
 import { callPlugin, listCallable } from './pluginCalls.js';
 import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
@@ -530,7 +535,7 @@ export class Outbox extends EventEmitter {
     actionId: string,
     kind:
       | 'search' | 'fetch' | 'chats' | 'page' | 'contact' | 'sent' | 'history' | 'schedule' | 'edit' | 'unsend'
-      | 'leaveGroup' | 'plugin' | 'app',
+      | 'leaveGroup' | 'plugin' | 'app' | 'peer',
     outcome: ExaOutcome,
   ): Promise<void> {
     const result = ToolResult.safeParse({
@@ -674,6 +679,25 @@ export class Outbox extends EventEmitter {
 
     switch (action.kind) {
       case 'text': {
+        // Talking back to another agent, where the exchange is shaped by the
+        // bridge rather than by either agent's good manners.
+        //
+        // A reply in a peer's chat is that peer's answer, so it goes out marked
+        // as one — the asking side then knows the exchange is closed and says
+        // so in its banner. And once an answer has arrived, nothing more may be
+        // sent into that chat at all: "do not write back" in a prompt is a
+        // suggestion, and two of these will happily be polite to each other
+        // until the month's budget is gone.
+        const peer = peerOf(this.deps.config, this.deps.chats.get(turn.chatKey));
+        if (peer !== null) {
+          if (isAnswerTurn(turn.turnId)) {
+            log('peers.refused', { chatKey: turn.chatKey, peer: peer.handle, why: 'exchange closed' });
+            await this.answer(action.id, 'peer', { ok: false, error: EXCHANGE_CLOSED });
+            break;
+          }
+          await this.sayText(turn.chatKey, turn.chatJid, withMark('answer', askOwed(turn.chatKey), action.text));
+          break;
+        }
         await this.sayText(turn.chatKey, turn.chatJid, action.text);
         break;
       }
@@ -1358,6 +1382,50 @@ export class Outbox extends EventEmitter {
         await this.answer(action.id, 'plugin', listCallable(this.deps.config, turn.fromOperator, this.deps.pluginsDir));
         break;
       }
+      case 'peerAsk': {
+        /**
+         * Asking another agent, with both gates that bound it.
+         *
+         * Operator only, because text from a stranger becoming a second
+         * agent's input is the laundering path worth refusing by default; and
+         * never from inside an exchange with a peer, because that is how three
+         * agents end up in a conversation nobody is reading.
+         */
+        if (!turn.fromOperator) {
+          log('peers.refused', { chatKey: turn.chatKey, peer: action.peer, why: 'not an operator' });
+          await this.answer(action.id, 'peer', { ok: false, error: NOT_OPERATOR });
+          break;
+        }
+        if (peerOf(this.deps.config, this.deps.chats.get(turn.chatKey)) !== null) {
+          log('peers.refused', { chatKey: turn.chatKey, peer: action.peer, why: 'already a peer turn' });
+          await this.answer(action.id, 'peer', { ok: false, error: NO_CHAINING });
+          break;
+        }
+        const target = peerByHandle(this.deps.config, action.peer);
+        if (target === null) {
+          await this.answer(action.id, 'peer', { ok: false, error: NO_SUCH_PEER });
+          break;
+        }
+        // The id is the bridge's, so an answer can be recognised as one. The
+        // marker is added here and never by the agent.
+        const askId = randomBytes(4).toString('hex');
+        const jid = `${target.number}@s.whatsapp.net`;
+        await this.deps.wa.sendText(jid, withMark('ask', askId, action.text));
+        log('peers.asked', { peer: target.handle, askId, chars: action.text.length });
+        feed.event('peer.asked', `${target.label}: ${action.text.slice(0, 120)}`);
+        await this.answer(action.id, 'peer', {
+          ok: true,
+          items: [{
+            title: target.label,
+            url: target.handle,
+            published: null,
+            text: `Asked ${target.label}. Their answer will arrive as a message from them, in its own turn — ` +
+              `nothing more is needed from you until then.`,
+          }],
+        });
+        break;
+      }
+
       case 'appLabel': {
         // The same grant as working on it, for the same reason a page's delete
         // shares its page's grant: naming somebody's app is a smaller act than

@@ -25,6 +25,8 @@ import type { Config } from './config.js';
 import { controlDisposition, WRONG_ROOM } from './control.js';
 import { feed } from './feed.js';
 import { gate, groupModeFor, isOperator } from './gate.js';
+import { matchesList } from './jid.js';
+import { banner, noteAnswerTurn, noteAsk, peerOf, peers, readMark, type Peer } from './peers.js';
 import { publishTurn, readStatus, retireBatch } from './handoff.js';
 import { roomContext } from './history.js';
 import { log, redactNumber } from './log.js';
@@ -129,10 +131,34 @@ export interface DispatcherDeps {
  * should not depend on a caller's invariant to be safe.
  */
 export function carriesOperatorAuthority(envelopes: readonly Envelope[], config: Config): boolean {
+  // A peer is never an operator, and this is checked before the operator list
+  // rather than after. Another agent's number listed in `operators` — by a
+  // typo, or because the same person set both deployments up — would otherwise
+  // hand that agent every verb the operator has, from a conversation the
+  // operator is not in. See bridge/src/peers.ts.
+  if (envelopes.some((e) => fromPeer(config, e))) return false;
   return (
     envelopes.length > 0 &&
     envelopes.every((e) => e.isGroup !== true && isOperator(config, e.senderIds))
   );
+}
+
+/**
+ * What the agent reads when another agent writes.
+ *
+ * An unmarked message from a peer is still a peer's message — it may be a
+ * person typing on that number, or an older build — so it is wrapped too,
+ * as an ask, which is the reading that assumes least.
+ */
+function peerText(peer: Peer | null, text: string): string {
+  if (peer === null) return text;
+  const mark = readMark(text);
+  return banner(peer, mark ?? { kind: 'ask', id: '00000000', text });
+}
+
+/** Whether this envelope came from another agent on this host. */
+function fromPeer(config: Config, e: Envelope): boolean {
+  return peers(config).some((p) => matchesList({ jids: [p.number] }, e.senderIds));
 }
 
 export class Dispatcher extends EventEmitter {
@@ -542,11 +568,23 @@ export class Dispatcher extends EventEmitter {
     const fromOperator = carriesOperatorAuthority(batch.map((m) => m.envelope), this.deps.config);
     const turn = this.deps.turns.open(last.envelope.chatJid, chatKey, now, fromOperator);
 
+    // A peer's words arrive wrapped, for the reason pluginCalls.ts wraps a
+     // service's: they may be repeating a stranger who messaged them, and the
+     // voice is persuasive enough that "this is data" has to be said out loud.
+    const peer = peerOf(this.deps.config, record);
+    if (peer !== null) {
+      // Remember which ask this chat owes an answer to, and whether this turn
+      // is itself an answer — the outbox reads both. See peers.ts.
+      const mark = readMark(batch[batch.length - 1]?.envelope.text ?? '');
+      if (mark?.kind === 'answer') noteAnswerTurn(turn.turnId);
+      else noteAsk(chatKey, mark?.id ?? '00000000');
+    }
+
     const messages: InboundMessage[] = await Promise.all(
       batch.map(async ({ envelope }) => ({
-        from: envelope.pushName ?? 'someone',
+        from: peer === null ? (envelope.pushName ?? 'someone') : peer.label,
         at: new Date(envelope.ts).toISOString(),
-        text: envelope.text,
+        text: peerText(peer, envelope.text),
         mentionsMe: envelope.mentionsMe,
         quoted: envelope.quoted,
         media: await Promise.all(

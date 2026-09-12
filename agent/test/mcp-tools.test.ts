@@ -52,7 +52,9 @@ describe('coverage', () => {
     // 18 for plugin: it reaches services outside Tulip, which fit no existing family, so they share one tool.
     // 19 for app: naming an hfs2s app is a Tulip verb writing Tulip's own state, so it does not belong inside
     //    `plugin` — that tool's whole contract is that it relays an action to a service and claims nothing more.
-    expect(TOOLS.length).toBeLessThanOrEqual(19);
+    // 20 for peer: asking another agent is not a plugin call and not a send —
+    //    it is the only verb whose answer comes back as somebody else's message.
+    expect(TOOLS.length).toBeLessThanOrEqual(20);
   });
 
   it('publishes an object schema for every tool', () => {

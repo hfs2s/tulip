@@ -710,6 +710,19 @@ switch (command) {
     break;
   }
 
+  case 'peer-ask': {
+    const peer = (rest[0] ?? '').trim().toLowerCase();
+    const question = rest.slice(1).join(' ').trim();
+    if (!peer || !question) die('tulip-wa peer-ask: `tulip-wa peer-ask <agent> <question>`');
+    const id = queue({ kind: 'peerAsk', peer, text: question.slice(0, 1500) });
+    // Their answer arrives as an ordinary message from them, in its own turn —
+    // this only waits for the bridge to confirm the question went out.
+    const result = await awaitResult(id, 20_000);
+    if (result === null) { process.stdout.write('peer-ask: no answer from the bridge within 20s.\n'); break; }
+    process.stdout.write(`${result.ok ? (result.items[0]?.text ?? 'asked.') : (result.error ?? 'peer-ask: refused')}\n`);
+    break;
+  }
+
   case 'app-label': {
     const workspace = (rest[0] ?? '').trim().toLowerCase();
     // Everything after the id is the name, so it need not be quoted; nothing
