@@ -14,7 +14,7 @@
  *
  * Run automatically by `npm run build` in the bridge workspace.
  */
-import { cpSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -145,6 +145,40 @@ if (!shaders) {
     console.warn(`  ! shaders.js: ${err.message}`);
     writeFileSync(join(out, 'shaders.js'), '/* shader bundle unavailable at build time */\n');
   }
+}
+
+// ── SQLite for pages ─────────────────────────────────────────────────────────
+// sql.js — SQLite compiled to WebAssembly — and the kit's own API over it
+// (pagekit/sqlite.js), as one script. The binary is inlined as base64 rather
+// than served beside it because a page is `connect-src 'none'` and so cannot
+// fetch a .wasm file any more than anything else: a script is the one thing it
+// may load. Its own file rather than part of kit.js, so a page without a
+// database never downloads an engine.
+const sqlGlue = fromPackage('sql.js/dist/sql-wasm-browser.js');
+const sqlWasm = fromPackage('sql.js/dist/sql-wasm-browser.wasm');
+if (!sqlGlue || !sqlWasm) {
+  console.warn('  ! pagekit/sqlite.js: sql.js is not installed, skipping');
+} else {
+  const pkg = join(dirname(sqlGlue), '..');
+  const { version } = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8'));
+  // MIT asks for its notice to travel with every copy, and every page that
+  // links this file receives one.
+  const notice = readFileSync(join(pkg, 'LICENSE'), 'utf8').replaceAll('*/', '* /').trim();
+  const glue = readFileSync(sqlGlue, 'utf8').replace(/^\/\/# sourceMappingURL=.*$/gm, '');
+  const bundle = [
+    `/*! sql.js ${version} — https://github.com/sql-js/sql.js — SQLite itself is in the public domain.`,
+    notice,
+    '*/',
+    '(function () {',
+    glue,
+    `var WASM_BASE64 = "${readFileSync(sqlWasm).toString('base64')}";`,
+    readFileSync(join(root, 'bridge', 'assets', 'pagekit', 'sqlite.js'), 'utf8'),
+    '})();',
+    '',
+  ].join('\n');
+  writeFileSync(join(kit, 'sqlite.js'), bundle);
+  console.log(`  ✓ pagekit/sqlite.js (sql.js ${version}, ${statSync(join(kit, 'sqlite.js')).size} bytes)`);
+  vendored += 1;
 }
 
 console.log(`panel assets: ${vendored} vendored into ${out}`);

@@ -1,0 +1,22 @@
+# The agent terminal for one instance: `tulip-ttyd@maria`.
+#
+# Same script as tulip-ttyd.service, pointed at that instance's agent container
+# and at its own socket directory — which must match TULIP_HOST_RUN in its .env,
+# since that is what the instance's bridge mounts at /run/tulip. The instance
+# name here is its compose project (TULIP_INSTANCE). See docs/INSTANCES.md.
+[Unit]
+Description=Tulip agent terminal for %i (ttyd on a UNIX socket)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=exec
+Environment=TULIP_AGENT_CONTAINER=%i-agent
+Environment=TULIP_TTYD_DIR=/run/%i
+ExecStart=@@TULIP_DIR@@/scripts/tulip-ttyd.sh
+Restart=always
+RestartSec=3
+ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do [ -S /run/%i/ttyd.sock ] && break; sleep 0.2; done; chown 1000:1000 /run/%i/ttyd.sock && chmod 0600 /run/%i/ttyd.sock'
+
+[Install]
+WantedBy=multi-user.target

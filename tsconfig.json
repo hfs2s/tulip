@@ -4,6 +4,7 @@
     { "path": "./shared" },
     { "path": "./bridge" },
     { "path": "./agent" },
-    { "path": "./egress" }
+    { "path": "./egress" },
+    { "path": "./browser" }
   ]
 }

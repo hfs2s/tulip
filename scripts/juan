@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#
+# juan — stop and start an agent from a shell.
+#
+# The switch you reach for when the agent is saying something you want stopped
+# *now*. `--stop-juan` is the equivalent of pressing Esc in the Claude Code
+# session, because it is that: the bridge writes an Escape into the agent's
+# terminal request file, and the agent's own 250ms tick runs
+# `tmux send-keys Escape` against the window that is generating.
+#
+# It is not `!hold` and does not replace it. A hold governs what is handed over
+# next, so a turn already talking runs to completion and still sends. This
+# interrupts that turn, and then holds so the next queued message does not
+# immediately start another.
+#
+# Which agent is taken from the name this was run as: `juan` stops Juan, and a
+# link to this file called `maria` stops Maria. The work is done by `2lp`, which
+# goes through the panel's action route rather than writing state files — that
+# is where the hold, the feed entry and the terminal request are already done
+# correctly, and a second writer would be a second copy of all three.
+set -euo pipefail
+
+SELF="$(basename "$0")"
+TWOLP="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/2lp"
+
+usage() {
+  cat <<EOF2
+$SELF — stop and start the agent
+
+  $SELF --stop-$SELF     interrupt the turn running right now, then hold
+  $SELF --start-$SELF    release the hold and hand over anything waiting
+  $SELF --status        what state it is currently in
+
+Short forms: stop, start, status.
+
+--stop-$SELF is the equivalent of pressing Esc in the session. A hold on its own
+cannot do it: a turn already talking finishes and still sends.
+EOF2
+}
+
+case "${1:-}" in
+  --stop-*|stop) exec "$TWOLP" "$SELF" stop ;;
+  --start-*|start) exec "$TWOLP" "$SELF" start ;;
+  --status|status) exec "$TWOLP" "$SELF" status ;;
+  -h|--help|'') usage ;;
+  *)
+    echo "$SELF: unknown option '$1'" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

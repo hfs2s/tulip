@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+#
+# 2lp — one codebase, several agents.
+#
+# Every agent is its own compose project: its own containers, volumes, WhatsApp
+# number, internal network and panel. What they share is the code, and that is
+# the point of this script: `2lp deploy` builds the images once and recreates
+# every instance on them, so a change to Tulip reaches Juan and Maria together
+# rather than whichever one somebody remembered to restart.
+#
+# Where an instance lives:
+#
+#   · the original deployment keeps the repository's own .env and ./config, so
+#     nothing about it had to move. Its handle is its TULIP_AGENT_NAME in lower
+#     case ("juan"), or `default`.
+#   · every other one is a directory, instances/<handle>/, holding its .env,
+#     config/ and plugins/. See docs/INSTANCES.md.
+#
+#   2lp list                      every instance, and whether it is running
+#   2lp new <handle>              scaffold instances/<handle>/ on a free subnet and port
+#   2lp deploy [handle...]        build once, then recreate the named (default: all)
+#   2lp <handle> up               start it on the images already built
+#   2lp <handle> logs [service]   follow its logs (bridge by default)
+#   2lp <handle> stop             interrupt the running turn, then hold
+#   2lp <handle> start            release the hold
+#   2lp <handle> status           what state it is in
+#   2lp <handle> compose <args>   anything else, as `docker compose`
+set -euo pipefail
+
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+COMPOSE_FILE="$REPO/docker-compose.yml"
+
+# Docker may or may not need sudo for this user; ask once rather than guessing.
+if docker info >/dev/null 2>&1; then DOCKER=(docker); else DOCKER=(sudo docker); fi
+
+die() { echo "2lp: $*" >&2; exit 1; }
+
+# The last assignment of KEY in an env file, unquoted. Mirrors how compose reads
+# it closely enough for the handful of plain values this script needs.
+envval() {
+  local file=$1 key=$2
+  [ -r "$file" ] || return 0
+  sed -n "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*//p" "$file" | tail -n1 | sed -e 's/[[:space:]]#.*$//' -e "s/^[\"']//" -e "s/[\"']\$//"
+}
+
+root_handle() {
+  local name
+  name=$(envval "$REPO/.env" TULIP_AGENT_NAME | tr '[:upper:]' '[:lower:]')
+  printf '%s' "${name:-default}"
+}
+
+handles() {
+  [ -f "$REPO/.env" ] && root_handle && echo
+  local d
+  for d in "$REPO"/instances/*/; do
+    [ -f "$d/.env" ] && basename "$d"
+  done
+  return 0
+}
+
+env_file() {
+  local h=$1
+  if [ -f "$REPO/instances/$h/.env" ]; then
+    printf '%s' "$REPO/instances/$h/.env"
+  elif [ -f "$REPO/.env" ] && { [ "$h" = "$(root_handle)" ] || [ "$h" = default ]; }; then
+    printf '%s' "$REPO/.env"
+  else
+    die "no instance called '$h'. Known: $(handles | tr '\n' ' ')"
+  fi
+}
+
+project() { local p; p=$(envval "$(env_file "$1")" TULIP_INSTANCE); printf '%s' "${p:-tulip}"; }
+
+compose() {
+  local h=$1; shift
+  "${DOCKER[@]}" compose --project-directory "$REPO" -f "$COMPOSE_FILE" --env-file "$(env_file "$h")" "$@"
+}
+
+# The host directories an instance bind-mounts. Created here, as this user,
+# because a bind source that does not exist is created by Docker as root — and
+# the bridge runs as uid 1000 and must write receipts into the plugins one.
+prepare() {
+  local h=$1 file dir
+  file=$(env_file "$h")
+  for dir in "$(envval "$file" TULIP_HOST_CONFIG)" "$(envval "$file" TULIP_HOST_PLUGINS)"; do
+    [ -n "$dir" ] || continue
+    case "$dir" in /*) ;; *) dir="$REPO/$dir" ;; esac
+    mkdir -p "$dir"
+  done
+  [ -n "$(envval "$file" TULIP_HOST_CONFIG)" ] || mkdir -p "$REPO/config"
+  [ -n "$(envval "$file" TULIP_HOST_PLUGINS)" ] || mkdir -p "$REPO/plugins"
+}
+
+panel_base() {
+  local hostport
+  hostport=$("${DOCKER[@]}" port "$(project "$1")-bridge" 8791 2>/dev/null | head -1)
+  [ -n "$hostport" ] || die "$(project "$1")-bridge is not running."
+  printf 'http://%s' "$hostport"
+}
+
+token() { "${DOCKER[@]}" exec "$(project "$1")-bridge" cat /state/panel-token; }
+
+show_state() {
+  curl -fsS -m 15 "$(panel_base "$1")/api/state?t=$(token "$1")" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+inst = d.get("instance") or {}
+hold = d.get("hold") or {}
+agent = d.get("agent") or {}
+queue = d.get("queue") or {}
+wa = d.get("whatsapp") or {}
+print("agent:    %s (%s)" % (inst.get("agentName", "?"), inst.get("name", "?")))
+print("stopped:  %s%s" % (
+    "YES" if hold.get("active") else "no",
+    ("  (by %s, since %s)" % (hold.get("by"), hold.get("since"))) if hold.get("active") else "",
+))
+print("whatsapp: %s" % ("connected as " + str(wa.get("name")) if wa.get("connected") else "DISCONNECTED"))
+print("session:  %s" % (agent.get("fatal") or ("reporting" if agent.get("reporting") else "NOT REPORTING")))
+print("in turn:  %s" % (queue.get("inFlight") or "idle"))
+print("queued:   %s waiting" % queue.get("queued", 0))'
+}
+
+act() {
+  local h=$1 action=$2 result
+  # -f so an HTTP error is a non-zero exit rather than a body printed as if it
+  # had worked, which is how a failed stop would otherwise look like a stop.
+  if ! result=$(curl -fsS -m 15 -X POST "$(panel_base "$h")/api/action/$action?t=$(token "$h")" 2>&1); then
+    echo "2lp: the panel did not accept it — $result" >&2
+    [ "$action" = stop ] && echo "2lp: NOT STOPPED. Try !stop from your own WhatsApp DM instead." >&2
+    exit 1
+  fi
+  printf '%s\n' "$result"
+}
+
+list() {
+  local h p name port state
+  printf '%-10s %-10s %-10s %-22s %s\n' HANDLE PROJECT AGENT PANEL STATE
+  while read -r h; do
+    [ -n "$h" ] || continue
+    p=$(project "$h")
+    name=$(envval "$(env_file "$h")" TULIP_AGENT_NAME)
+    port="$(envval "$(env_file "$h")" TULIP_PANEL_BIND):$(envval "$(env_file "$h")" TULIP_PANEL_PORT)"
+    [ "${port##*:}" = "" ] && port="${port}8791"
+    state=$("${DOCKER[@]}" ps -a --filter "name=^${p}-" --format '{{.Names}}={{.State}}' 2>/dev/null | sort | tr '\n' ' ')
+    printf '%-10s %-10s %-10s %-22s %s\n' "$h" "$p" "${name:-?}" "$port" "${state:-not created}"
+  done < <(handles)
+}
+
+scaffold() {
+  local h=$1 dir n used subnet port
+  [[ "$h" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || die "a handle is lowercase letters, digits and dashes"
+  dir="$REPO/instances/$h"
+  [ -e "$dir" ] && die "$dir already exists"
+  # The next internal subnet and panel port nobody has taken. 172.31.240/24 and
+  # 8791 are the default instance's.
+  used=$(cat "$REPO/.env" "$REPO"/instances/*/.env 2>/dev/null | sed -n 's/^TULIP_LAN_SUBNET=172\.31\.\([0-9]*\)\..*/\1/p')
+  for n in $(seq 241 254); do grep -qx "$n" <<<"$used" || { subnet=$n; break; }; done
+  used=$(cat "$REPO/.env" "$REPO"/instances/*/.env 2>/dev/null | sed -n 's/^TULIP_PANEL_PORT=//p')
+  for n in $(seq 8792 8899); do grep -qx "$n" <<<"$used" || { port=$n; break; }; done
+  mkdir -p "$dir/config" "$dir/plugins"
+  cat > "$dir/.env" <<ENV
+# ─── Instance ─────────────────────────────────────────────────────────────────
+# Everything that makes this deployment a different one from the default. See
+# docs/INSTANCES.md. Copy the keys you need from the repository's .env below.
+TULIP_INSTANCE=$h
+TULIP_AGENT_NAME=${h^}
+TULIP_LAN_SUBNET=172.31.$subnet.0/24
+TULIP_EGRESS_IP=172.31.$subnet.10
+TULIP_PANEL_BIND=127.0.0.1
+TULIP_PANEL_PORT=$port
+TULIP_HOST_CONFIG=./instances/$h/config
+TULIP_HOST_PLUGINS=./instances/$h/plugins
+TULIP_HOST_RUN=/run/$h
+
+# ─── Credentials and the rest ─────────────────────────────────────────────────
+# Anything from .env.example. Nothing is inherited from the default instance's
+# .env: a value left out here is unset, not borrowed — which matters most for
+# TULIP_PAGES_HOST and TULIP_ACCESS_AUD, which must be this instance's own.
+ENV
+  chmod 600 "$dir/.env"
+  echo "created $dir"
+  echo "  subnet 172.31.$subnet.0/24, panel port $port"
+  echo "next: fill in $dir/.env, then  scripts/2lp deploy $h"
+}
+
+deploy() {
+  local targets=("$@") h first
+  [ ${#targets[@]} -gt 0 ] || mapfile -t targets < <(handles | sed '/^$/d')
+  [ ${#targets[@]} -gt 0 ] || die "no instances"
+  for h in "${targets[@]}"; do env_file "$h" >/dev/null; prepare "$h"; done
+  first=${targets[0]}
+  echo "2lp: building the shared images once"
+  compose "$first" build
+  for h in "${targets[@]}"; do
+    echo "2lp: recreating $h ($(project "$h")) on the new images"
+    compose "$h" up -d
+  done
+  list
+}
+
+case "${1:-}" in
+  ''|-h|--help|help) sed -n '3,/^set -euo/p' "${BASH_SOURCE[0]}" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
+  list) list ;;
+  new) scaffold "${2:?usage: 2lp new <handle>}" ;;
+  deploy) shift; deploy "$@" ;;
+  *)
+    h=$1; cmd=${2:-status}; shift 2 || shift $#
+    env_file "$h" >/dev/null
+    case "$cmd" in
+      up) prepare "$h"; compose "$h" up -d "$@" ;;
+      logs) compose "$h" logs -f --tail 100 "${@:-bridge}" ;;
+      stop)
+        act "$h" stop
+        # Read the state back rather than trusting the write. A kill switch that
+        # reports a success it has not verified is worse than one that fails
+        # loudly: the whole value of this command is being able to believe it.
+        echo; show_state "$h" || echo '(could not read the state back — check the panel)'
+        ;;
+      start) act "$h" release ;;
+      status) show_state "$h" ;;
+      compose) compose "$h" "$@" ;;
+      *) die "unknown command '$cmd' — see 2lp --help" ;;
+    esac
+    ;;
+esac

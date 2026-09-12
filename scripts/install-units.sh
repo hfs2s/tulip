@@ -57,6 +57,22 @@ for unit in "${UNITS[@]}"; do
   systemctl enable "$unit" >/dev/null 2>&1 && echo "  enabled $unit"
 done
 
+# One terminal per additional instance, from a template. The default instance
+# keeps tulip-ttyd.service above; every instances/<name>/ gets
+# tulip-ttyd@<project>.service. See docs/INSTANCES.md.
+if [ -f "$DIR/scripts/tulip-ttyd@.service" ]; then
+  sed -e "s|@@TULIP_DIR@@|$DIR|g" "$DIR/scripts/tulip-ttyd@.service" > "$UNIT_DIR/tulip-ttyd@.service"
+  echo "  installed tulip-ttyd@.service"
+  systemctl daemon-reload
+  for env in "$DIR"/instances/*/.env; do
+    [ -f "$env" ] || continue
+    project=$(sed -n 's/^[[:space:]]*TULIP_INSTANCE[[:space:]]*=[[:space:]]*//p' "$env" | tail -n1 | tr -d "\"'")
+    [ -n "$project" ] || continue
+    systemctl enable "tulip-ttyd@$project" >/dev/null 2>&1 && echo "  enabled tulip-ttyd@$project"
+    UNITS+=("tulip-ttyd@$project")
+  done
+fi
+
 echo
 echo "Start them now with:  sudo systemctl start ${UNITS[*]}"
 echo "Check with:           systemctl status ${UNITS[*]}"

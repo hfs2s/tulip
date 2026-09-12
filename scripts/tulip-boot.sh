@@ -29,53 +29,57 @@ REPO="${TULIP_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ENV_FILE="${TULIP_ENV:-$REPO/.env}"
 WAIT_SECS="${TULIP_BOOT_WAIT:-120}"
 
-# egress first, then the bridge, then the agent — the same order compose uses,
-# because the agent's proxy has to be listening before it starts a turn.
-CONTAINERS=(tulip-egress tulip-bridge tulip-agent)
+# Each proxy before the thing that uses it — egress before the agent, webproxy
+# before the browser — the same order compose uses, because a proxy has to be
+# listening before its client starts work. An instance without the browser
+# profile has no webproxy or browser container and simply skips those two.
+# Every instance: the repository's own .env, and each instances/<name>/.env.
+# One unit starts them all, so adding an agent never means another boot unit.
+ENV_FILES=("$ENV_FILE")
+for f in "$REPO"/instances/*/.env; do [ -f "$f" ] && ENV_FILES+=("$f"); done
 
-# Read the publish address from .env rather than hardcoding it, so this cannot
-# drift from what Docker will actually try to bind.
-publish_address() {
-  [ -r "$ENV_FILE" ] || return 0
-  sed -n 's/^[[:space:]]*TULIP_PANEL_BIND[[:space:]]*=[[:space:]]*//p' "$ENV_FILE" |
+envval() {
+  [ -r "$1" ] || return 0
+  sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" |
     tail -n1 | tr -d "\"'" | sed 's/[[:space:]#].*$//'
 }
 
-ADDR="$(publish_address || true)"
-
-case "$ADDR" in
-  '' | 127.0.0.1 | localhost | 0.0.0.0)
-    # Nothing to wait for: these exist before the network does.
-    echo "tulip-boot: publish address '${ADDR:-unset}' needs no wait"
-    ;;
-  *)
-    echo "tulip-boot: waiting up to ${WAIT_SECS}s for $ADDR"
-    deadline=$((SECONDS + WAIT_SECS))
-    until ip -4 -o addr show | grep -qF " inet $ADDR/"; do
-      if [ "$SECONDS" -ge "$deadline" ]; then
-        # Start anyway. If the address really is gone the start fails and this
-        # unit goes red, which is a better outcome than declining to try.
-        echo "tulip-boot: $ADDR never appeared; starting anyway" >&2
-        break
-      fi
-      sleep 1
-    done
-    ;;
-esac
+wait_for() {
+  local addr=$1
+  case "$addr" in
+    '' | 127.0.0.1 | localhost | 0.0.0.0)
+      echo "tulip-boot: publish address '${addr:-unset}' needs no wait"
+      return 0
+      ;;
+  esac
+  echo "tulip-boot: waiting up to ${WAIT_SECS}s for $addr"
+  local deadline=$((SECONDS + WAIT_SECS))
+  until ip -4 -o addr show | grep -qF " inet $addr/"; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "tulip-boot: $addr never appeared; starting anyway" >&2
+      return 0
+    fi
+    sleep 1
+  done
+}
 
 rc=0
-for c in "${CONTAINERS[@]}"; do
-  if ! docker inspect "$c" >/dev/null 2>&1; then
-    # A box where the stack was never created is not a failure, it is a box
-    # waiting for `docker compose up -d`.
-    echo "tulip-boot: $c does not exist; skipping" >&2
-    continue
-  fi
-  if docker start "$c" >/dev/null 2>&1; then
-    echo "tulip-boot: $c is $(docker inspect -f '{{.State.Status}}' "$c")"
-  else
-    echo "tulip-boot: $c failed to start" >&2
-    rc=1
-  fi
+for env_file in "${ENV_FILES[@]}"; do
+  [ -r "$env_file" ] || continue
+  project="$(envval "$env_file" TULIP_INSTANCE)"
+  project="${project:-tulip}"
+  wait_for "$(envval "$env_file" TULIP_PANEL_BIND || true)"
+  for c in "$project-egress" "$project-webproxy" "$project-bridge" "$project-agent" "$project-browser"; do
+    if ! docker inspect "$c" >/dev/null 2>&1; then
+      echo "tulip-boot: $c does not exist; skipping" >&2
+      continue
+    fi
+    if docker start "$c" >/dev/null 2>&1; then
+      echo "tulip-boot: $c is $(docker inspect -f '{{.State.Status}}' "$c")"
+    else
+      echo "tulip-boot: $c failed to start" >&2
+      rc=1
+    fi
+  done
 done
 exit "$rc"

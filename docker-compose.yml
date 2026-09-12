@@ -11,13 +11,23 @@
 #     interface is two volumes with opposite permissions
 #   · the WhatsApp credentials are mounted in exactly one container
 #   · every service is non-root, read-only, capability-free and unprivileged
+#   · tulip-browser renders pages from anywhere and is treated like the agent:
+#     untrusted, on its own `internal: true` network whose only other member is
+#     tulip-webproxy, no working DNS, and no network shared with the bridge —
+#     the two talk through two volumes, exactly as the bridge and the agent do
 #
 # Changing any of it changes docs/THREAT-MODEL.md. Update both in one commit.
 
-name: tulip
+# One codebase, several agents. Each deployment is its own compose project —
+# its own containers, volumes, WhatsApp number, network and panel — and every
+# default below is the original single deployment's, so a checkout with no
+# instance variables set is exactly what it always was. See docs/INSTANCES.md
+# and scripts/2lp, which is how a second one is run and how a change reaches all
+# of them at once.
+name: ${TULIP_INSTANCE:-tulip}
 
 x-hardening: &hardening
-  # Applied to all three services. Being the trusted side of a boundary is not
+  # Applied to every service. Being the trusted side of a boundary is not
   # a reason to be the soft one — the bridge holds the credentials, so it is the
   # most valuable target here, not the least.
   read_only: true
@@ -45,7 +55,26 @@ networks:
     internal: true
     ipam:
       config:
-        - subnet: 172.31.240.0/24
+        # Distinct per instance: two projects cannot share an internal subnet.
+        - subnet: ${TULIP_LAN_SUBNET:-172.31.240.0/24}
+
+  # The browser's network. Internal like `lan`, for the same reason — no default
+  # route, so nothing leaves except through the proxy — and separate from it on
+  # purpose: the browser and the agent have no business reaching each other, and
+  # a proxy whose allowlist is `*` must never be reachable from the agent. The
+  # subnet is fixed so the browser can be given its proxy as an address; it has
+  # no DNS to look up a name with.
+  #
+  # Distinct per instance, like `lan`, and deliberately outside the 172.31.24x
+  # range instances take their `lan` from: the first version of this hard-coded
+  # 172.31.241.0/24, which is exactly the second instance's `lan`, and Docker
+  # refuses overlapping pools — `up` would have failed halfway through.
+  web:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${TULIP_WEB_SUBNET:-172.31.250.0/24}
 
 volumes:
   # WhatsApp credentials and bridge state. Mounted in tulip-bridge and nowhere
@@ -63,11 +92,24 @@ volumes:
   # Mounted in tulip-agent and nowhere else.
   workspace:
 
+  # The browser's handoff, in the same shape as the agent's and for the same
+  # reason: the bridge writes one request per page into `browse-req`, which the
+  # browser mounts read-only; the browser writes its answer into `browse-res`.
+  # This is the whole interface between them — no shared network, because the
+  # bridge's panel listens on 0.0.0.0 inside its container. See
+  # shared/src/browse.ts and bridge/src/browse.ts.
+  browse-req:
+  browse-res:
+
 services:
   # ── The trusted half ────────────────────────────────────────────────────────
   bridge:
     <<: *hardening
-    container_name: tulip-bridge
+    container_name: ${TULIP_INSTANCE:-tulip}-bridge
+    # Named, and the same name for every instance: the images are the code, and
+    # the code is shared. `scripts/2lp deploy` builds once and recreates every
+    # instance, which is what keeps them from running different versions.
+    image: tulip-bridge:latest
     build:
       context: .
       target: bridge
@@ -82,13 +124,10 @@ services:
       # this moves what a person reads and not what is written. Storage stays
       # UTC on purpose — it is the only form that is unambiguous across DST.
       TZ: ${TULIP_TIMEZONE:-Europe/Madrid}
-      # Deliberately here and not in the agent. The agent asks for a GIF by
-      # search phrase; the bridge does the searching, so the key never enters
-      # the container the threat model assumes an attacker owns, and no new
-      # host is added to the egress allowlist. See bridge/src/giphy.ts.
-      # g | pg | pg-13 | r — enforced where the agent cannot reach it.
-      # Web search and page reading, for the same reason and on the same terms:
-      # the agent asks, the bridge performs. Rotated on rate limits. See
+      # Web search and page reading, deliberately here and not in the agent:
+      # the agent asks, the bridge performs, so the key never enters the
+      # container the threat model assumes an attacker owns and no host is
+      # added to the egress allowlist. Rotated on rate limits. See
       # bridge/src/exa.ts for why `fetch` is not an HTTP request from here.
       # Pictures and speech, same terms: the agent asks, the bridge produces.
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
@@ -142,6 +181,14 @@ services:
       TULIP_PAGES_ROOT_REDIRECT: ${TULIP_PAGES_ROOT_REDIRECT:-}
       TULIP_ACCESS_TEAM_DOMAIN: ${TULIP_ACCESS_TEAM_DOMAIN:-}
       TULIP_ACCESS_AUD: ${TULIP_ACCESS_AUD:-}
+      # Which deployment this is, for the panel and the operator commands. The
+      # name is display-only: what the agent is told it is lives in the persona.
+      TULIP_INSTANCE: ${TULIP_INSTANCE:-tulip}
+      TULIP_AGENT_NAME: ${TULIP_AGENT_NAME:-}
+      # `fetch` in a real browser: 1 to ask tulip-browser first and fall back to
+      # Exa, unset to use Exa alone exactly as before. The bridge never dials the
+      # URL either way; see bridge/src/browse.ts.
+      TULIP_BROWSER: ${TULIP_BROWSER:-}
     volumes:
       - state:/state
       - handoff-in:/handoff/in
@@ -172,13 +219,26 @@ services:
       # scripts/tulip-ttyd.sh for why it is a socket and not a port.
       #
       # Optional: without it the Terminal page answers 503 and says so.
-      - /run/tulip:/run/tulip
+      - ${TULIP_HOST_RUN:-/run/tulip}:/run/tulip
       # A directory, not the file. The root filesystem is read-only, so binding
       # just `config.json` leaves `/config` itself unwritable — and an atomic
       # write creates a temporary sibling before renaming it into place, which
       # then fails with EROFS. Mounting the directory gives the rename somewhere
       # to happen. The agent has no mount of either.
-      - ./config:/config
+      - ${TULIP_HOST_CONFIG:-./config}:/config
+      # Plugins: services on the host that send through this number. One
+      # directory per plugin; the bridge sends what they drop there, within what
+      # config.json grants each one. Mounted here and nowhere else — the agent
+      # has no path to it, so no conversation can become a plugin action. See
+      # bridge/src/plugins.ts and docs/PLUGINS.md.
+      - ${TULIP_HOST_PLUGINS:-./plugins}:/plugins
+      # The browser's handoff. Read-write here: the bridge writes requests and
+      # deletes answers. Everything it reads from `browse-res` was written by a
+      # process that renders hostile pages, so bridge/src/browse.ts opens it with
+      # O_NOFOLLOW for the same reason outbox.ts does — a symlink planted there
+      # resolves in THIS namespace, next to the WhatsApp credentials.
+      - browse-req:/browse/req
+      - browse-res:/browse/res
     tmpfs:
       - /tmp:mode=1777,size=64m,noexec,nosuid,nodev
     ports:
@@ -189,7 +249,7 @@ services:
       # something else must reach it — a Cloudflare tunnel on another host, say
       # — and put an authenticating proxy in front when you do. Never 0.0.0.0:
       # that publishes an operator console to every network the host is on.
-      - "${TULIP_PANEL_BIND:-127.0.0.1}:8791:8791"
+      - "${TULIP_PANEL_BIND:-127.0.0.1}:${TULIP_PANEL_PORT:-8791}:8791"
     mem_limit: 768m
     pids_limit: 256
     healthcheck:
@@ -202,7 +262,8 @@ services:
   # ── The untrusted half ──────────────────────────────────────────────────────
   agent:
     <<: *hardening
-    container_name: tulip-agent
+    container_name: ${TULIP_INSTANCE:-tulip}-agent
+    image: tulip-agent:latest
     build:
       context: .
       target: agent
@@ -218,7 +279,7 @@ services:
 
     # The one name it needs, pinned rather than resolved.
     extra_hosts:
-      - "egress:172.31.240.10"
+      - "egress:${TULIP_EGRESS_IP:-172.31.240.10}"
 
     environment:
       # The agent's own clock, and the reason it is not left at the default.
@@ -239,6 +300,12 @@ services:
       # with ANTHROPIC_BASE_URL (an Anthropic-compatible provider). The unused
       # ones arrive as empty strings, which the supervisor strips before the
       # tmux server inherits them — an empty base URL is not the same as none.
+      # Or a third way: a subscription OAuth token from `claude setup-token`,
+      # which Claude Code reads instead of either of the above. It is the least
+      # capped of the three — it unlocks a person's Claude account rather than a
+      # dedicated key — so it is the one most worth revoking if this container
+      # is ever suspected. See docs/THREAT-MODEL.md.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
@@ -282,13 +349,14 @@ services:
   # ── The one hole in the wall ────────────────────────────────────────────────
   egress:
     <<: *hardening
-    container_name: tulip-egress
+    container_name: ${TULIP_INSTANCE:-tulip}-egress
+    image: tulip-egress:latest
     build:
       context: .
       target: egress
     networks:
       lan:
-        ipv4_address: 172.31.240.10
+        ipv4_address: ${TULIP_EGRESS_IP:-172.31.240.10}
       wan:
     environment:
       # Deny-by-default: an unset or empty list refuses every CONNECT. Add hosts
@@ -306,3 +374,105 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # ── The browser's way out ───────────────────────────────────────────────────
+  # The same image as tulip-egress, with one difference that matters: the
+  # allowlist is `*`, any public hostname. A browser that could only visit named
+  # sites could not check a link somebody sent. Everything else is unchanged —
+  # port 443 only, every resolved address refused if it is private, loopback,
+  # link-local, CGNAT or Tailscale (egress/src/addresses.ts), every decision
+  # logged. It is on `wan` to be a proxy and on `web` to be reachable. It is not
+  # on `lan`, so the agent cannot use it to get round its own, shorter list.
+  webproxy:
+    <<: *hardening
+    container_name: ${TULIP_INSTANCE:-tulip}-webproxy
+    # Opt-in per instance: `COMPOSE_PROFILES=browser` in that instance's env
+    # file. Without it `up` creates neither this nor the browser, so an instance
+    # that has not chosen a browser is not handed one by somebody else's deploy.
+    profiles: [browser]
+    build:
+      context: .
+      target: egress
+    networks:
+      web:
+        ipv4_address: ${TULIP_WEBPROXY_IP:-172.31.250.10}
+      wan:
+    environment:
+      # Exactly `*`. allowlist.ts refuses `**`, `*.` and friends rather than
+      # reading them as "everything", so a typo here fails loudly at startup.
+      TULIP_EGRESS_ALLOW: ${TULIP_WEBPROXY_ALLOW:-*}
+      # A page is dozens of connections; one page at a time keeps this far below
+      # the limit. The limit is for a browser that has stopped behaving.
+      TULIP_EGRESS_MAX_TUNNELS: ${TULIP_WEBPROXY_MAX_TUNNELS:-48}
+      # Browser tunnels are short-lived. A minute idle is plenty.
+      TULIP_EGRESS_IDLE_MS: "60000"
+    tmpfs:
+      - /tmp:mode=1777,size=16m,noexec,nosuid,nodev
+    mem_limit: 128m
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3128/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── The second untrusted container ──────────────────────────────────────────
+  # Headless Chromium, one page at a time. It renders anything, so it is
+  # contained exactly like the agent: its only network is `web`, it cannot
+  # resolve a name, it shares no network with the bridge or the agent, and it
+  # holds nothing. See docs/THREAT-MODEL.md §T9 and browser/src/chromium.ts.
+  browser:
+    <<: *hardening
+    container_name: ${TULIP_INSTANCE:-tulip}-browser
+    profiles: [browser]
+    build:
+      context: .
+      target: browser
+    depends_on:
+      - webproxy
+    networks: [web]
+
+    # No usable resolver, as for the agent. Chromium hands the hostname to the
+    # proxy in the CONNECT line and never needs to look one up itself.
+    dns:
+      - 127.0.0.1
+
+    environment:
+      TZ: ${TULIP_TIMEZONE:-Europe/Madrid}
+      # An address, not a name: there is no DNS to resolve one with. The
+      # browser refuses to start without it rather than trying to go direct.
+      TULIP_BROWSER_PROXY: http://${TULIP_WEBPROXY_IP:-172.31.250.10}:3128
+      # Chromium's default user agent says "HeadlessChrome", which some sites
+      # challenge. Unset keeps it honest; set it if that turns out to matter.
+      TULIP_BROWSER_USER_AGENT: ${TULIP_BROWSER_USER_AGENT:-}
+
+    volumes:
+      - browse-req:/browse/req:ro
+      - browse-res:/browse/res
+
+    tmpfs:
+      # Per-page profiles live here and are deleted after each page. Sized, and
+      # the size is a real limit even on the Pi: tmpfs enforces it itself,
+      # unlike mem_limit below. Not noexec: under --disable-dev-shm-usage
+      # Chromium keeps its shared memory here, and a process that already runs
+      # arbitrary JavaScript gains nothing from noexec that would justify the
+      # risk of a browser that will not start.
+      - /tmp:mode=1777,size=256m,nosuid,nodev
+
+    # NOT ENFORCED on the Pi. Raspberry Pi OS ships with the memory cgroup
+    # controller disabled, and Docker drops this with one warning line at
+    # startup (THREAT-MODEL.md R6). It is here for hosts that have it. What
+    # actually protects the Pi is in browser/src/chromium.ts: one page at a
+    # time, SIGKILL to the process group at 20 seconds, a JavaScript heap cap
+    # and a single renderer.
+    mem_limit: 1g
+    pids_limit: 128
+    cpus: 2.0
+    healthcheck:
+      # The heartbeat the bridge also reads: touched every five seconds while
+      # the loop is alive.
+      test: ["CMD", "node", "-e", "process.exit(Date.now()-require('node:fs').statSync('/browse/res/.alive').mtimeMs<30000?0:1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

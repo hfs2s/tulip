@@ -20,6 +20,13 @@ blocklist.json
 data/
 state/
 
+# Every deployment's own .env, config.json, persona and plugin drop-boxes. One
+# directory per instance; nothing under it is shareable. See docs/INSTANCES.md.
+instances/*
+!instances/README.md
+# The default instance's plugin drop-boxes. Messages in flight, with numbers in.
+plugins/
+
 # ─── Build output and dependencies ────────────────────────────────────────────
 node_modules/
 dist/
