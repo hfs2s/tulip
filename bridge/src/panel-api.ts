@@ -37,6 +37,7 @@ import { synthesise } from './minimax.js';
 import { claim } from './spend.js';
 import { resolveVoice } from './voice.js';
 import { APPS_PLUGIN, WORKSPACE_ID, listApps } from './apps.js';
+import { VIEW_SUFFIX } from './images.js';
 import { deletePage, hashPagePassword, isUnpublished, listPages, pagesHost, republishPage, type PageSummary } from './pages.js';
 import { identities, matchesList } from './jid.js';
 import { forget, forgetAll, readMemory } from './memory.js';
@@ -897,6 +898,9 @@ export function mediaList(deps: ApiDeps, limit: number): Json {
         // A sidecar belongs to the recording beside it, not in the list as an
         // attachment of its own.
         if (isTranscript(name)) continue;
+        // Same for the smaller copy made for the agent's reader: the operator
+        // wants the photo that arrived, not our downscale of it beside it.
+        if (name.endsWith(VIEW_SUFFIX)) continue;
         const mime = VIEWABLE[extname(name).toLowerCase()] ?? 'application/octet-stream';
         let transcript: string | null = null;
         try {

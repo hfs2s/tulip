@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { downloadMediaMessage, type WAMessage, type WASocket } from 'baileys';
 import type { InboundMedia, MediaKind } from '@2lp/shared';
 import { bare, identities, isGroup, slug, userPart } from './jid.js';
+import { viewCopy } from './images.js';
 import { log } from './log.js';
 
 export interface Envelope {
@@ -209,9 +210,15 @@ async function fetchMedia(
     mkdirSync(directory, { recursive: true });
     const safeId = messageId.replace(/[^A-Za-z0-9]/g, '').slice(0, 12) || 'msg';
     const name = `${ts}-${safeId}.${EXTENSION[found.kind]}`;
+    const stored = `media/${ctx.chatKey}/${name}`;
     writeFileSync(join(directory, name), buffer, { mode: 0o600 });
 
-    return { ...base, bytes: buffer.length, path: `media/${ctx.chatKey}/${name}`, error: null };
+    // The agent is pointed at a copy it can open, when the original is larger
+    // than its reader accepts. The original stays exactly as it arrived — it is
+    // the operator's, and the Media page serves it. See bridge/src/images.ts.
+    const view = found.kind === 'image' ? await viewCopy(join(directory, name), stored) : null;
+
+    return { ...base, bytes: buffer.length, path: view ?? stored, error: null };
   } catch (err) {
     return { ...base, path: null, error: String((err as Error).message).slice(0, 200) };
   }
