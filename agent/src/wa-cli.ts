@@ -441,11 +441,26 @@ switch (command) {
   case 'image': {
     requireCapability('images', 'image');
     const { chatKey, rest: words } = takeDestination(rest, 'image');
-    const idx = words.indexOf('--caption');
-    const caption = idx === -1 ? null : words.slice(idx + 1).join(' ') || null;
-    const prompt = (idx === -1 ? words : words.slice(0, idx)).join(' ').trim();
+    // `--ref` may be given more than once: up to sixteen pictures to work
+    // from, each named the way the batch names it.
+    const refs: string[] = [];
+    const kept: string[] = [];
+    for (let i = 0; i < words.length; i += 1) {
+      const word = words[i];
+      if (word === '--ref') {
+        const named = words[i + 1];
+        if (named === undefined) die('tulip-wa image: --ref needs the picture, as the message named it');
+        refs.push(named);
+        i += 1;
+        continue;
+      }
+      kept.push(word ?? '');
+    }
+    const idx = kept.indexOf('--caption');
+    const caption = idx === -1 ? null : kept.slice(idx + 1).join(' ') || null;
+    const prompt = (idx === -1 ? kept : kept.slice(0, idx)).join(' ').trim();
     if (prompt.length === 0) die('tulip-wa image: describe the picture you want');
-    queue({ kind: 'image', chatKey, prompt: prompt.slice(0, 1000), caption });
+    queue({ kind: 'image', chatKey, prompt: prompt.slice(0, 1000), caption, refs: refs.slice(0, 16) });
     break;
   }
 

@@ -744,6 +744,17 @@ export const OutboxAction = z.discriminatedUnion('kind', [
       /** A description. The bridge generates and sends it; no key reaches the agent. */
       prompt: z.string().min(1).max(1000),
       caption: z.string().max(1024).nullable(),
+      /**
+       * Pictures to work from, named as they arrive in the batch.
+       *
+       * Each is a `media/<chatKey>/<file>` path, and the bridge accepts only
+       * ones inside *this turn's own chat* — a path naming another
+       * conversation's photo is refused there rather than trusted here. The
+       * provider is handed the bytes, never a link: these live on a volume
+       * with no public address, and publishing them to make a URL is the
+       * opposite of what the agent was asked for.
+       */
+      refs: z.array(z.string().max(200)).max(16).default([]),
     })
     .strict(),
   z

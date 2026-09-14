@@ -141,6 +141,14 @@ services:
       # voice notes for weeks.
       MINIMAX_VOICE_MODEL: ${MINIMAX_VOICE_MODEL:-}
       MINIMAX_IMAGE_MODEL: ${MINIMAX_IMAGE_MODEL:-}
+      # The other picture provider. It is the one that takes reference images,
+      # so a request naming pictures goes here whatever the preference says.
+      # The key stays on this side, as every provider credential does.
+      APIMART_API_KEY: ${APIMART_API_KEY:-}
+      APIMART_IMAGE_MODEL: ${APIMART_IMAGE_MODEL:-}
+      APIMART_IMAGE_SIZE: ${APIMART_IMAGE_SIZE:-}
+      APIMART_IMAGE_RESOLUTION: ${APIMART_IMAGE_RESOLUTION:-}
+      TULIP_IMAGE_PROVIDER: ${TULIP_IMAGE_PROVIDER:-}
       # Only the 2.5 speech models accept this; 02 and 01 reject it outright, so
       # move it and MINIMAX_VOICE_MODEL together.
       MINIMAX_LANGUAGE_BOOST: ${MINIMAX_LANGUAGE_BOOST:-}

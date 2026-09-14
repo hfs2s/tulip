@@ -160,14 +160,26 @@ export const TOOLS: readonly ToolDef[] = [
     name: 'image',
     covers: ['image'],
     description:
-      'Generate a picture and send it. Takes a few seconds, so say something first if somebody is waiting.',
+      'Generate a picture and send it. Takes a few seconds, so say something first if somebody is waiting. ' +
+      'from: pictures in THIS conversation to work from — pass them exactly as the message named them ' +
+      '(media/<chat>/<file>), up to sixteen. Use it when somebody asks for something based on a photo they sent: ' +
+      'a poster from their snapshot, the same room restyled. Without it the picture is made from the words alone.',
     input: z.object({
       prompt: z.string().min(1).max(1000),
       caption: z.string().max(1024).optional(),
+      from: z
+        .array(z.string().max(200))
+        .max(16)
+        .optional()
+        .describe('Pictures from this chat to work from, named as the message named them.'),
       to,
     }),
-    argv: ({ prompt, caption, to: key }) => ({
-      argv: ['image', ...toArgs(key), prompt, ...(caption === undefined ? [] : ['--caption', caption])],
+    argv: ({ prompt, caption, from, to: key }) => ({
+      argv: [
+        'image', ...toArgs(key), prompt,
+        ...(caption === undefined ? [] : ['--caption', caption]),
+        ...(from ?? []).flatMap((ref) => ['--ref', ref]),
+      ],
     }),
   }),
   tool({

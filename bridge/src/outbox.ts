@@ -51,6 +51,8 @@ import {
   askOwed, isAnswerTurn, peerByHandle, peerOf, withMark,
 } from './peers.js';
 import { callPlugin, listCallable } from './pluginCalls.js';
+import { configured as apimartReady, generateImage as apimartImage } from './apimart.js';
+import { referencePaths } from './images.js';
 import { generateImage, synthesise } from './minimax.js';
 import { log } from './log.js';
 import { retainOutbound } from './mediaStore.js';
@@ -319,6 +321,24 @@ export interface OutboxDeps {
 const DELIVERS: ReadonlySet<string> = new Set(['text', 'sendTo', 'file', 'image', 'voice', 'react']);
 
 /** What one action costs its turn. `typing` is cosmetic and free. */
+/**
+ * Where inbound photos live, and which provider an operator prefers.
+ *
+ * The root matches the dispatcher's own media root so a reference names the
+ * same file the agent was shown. The preference is an environment variable
+ * rather than config.json because it names a credential's provider, which is
+ * what `.env` is for everywhere else here.
+ */
+const MEDIA_ROOT = join(inPaths.root, 'media');
+const preferApimart = (): boolean => {
+  const named = (process.env['TULIP_IMAGE_PROVIDER'] ?? '').trim().toLowerCase();
+  if (named === 'apimart') return true;
+  if (named === 'minimax') return false;
+  // Unset: whichever can do the most. A deployment that has configured the
+  // reference-capable one plainly wants it.
+  return apimartReady();
+};
+
 function costOf(kind: string): Cost {
   if (kind === 'typing') return 'free';
   return DELIVERS.has(kind) ? 'send' : 'tool';
@@ -1507,7 +1527,41 @@ export class Outbox extends EventEmitter {
           );
           return;
         }
-        const image = await generateImage(action.prompt);
+        // Which provider, and why it can be decided here rather than configured.
+        //
+        // References are the whole point of the second one: MiniMax takes a
+        // prompt and nothing else, so a request that works from a photo can
+        // only go to APIMart. With no references either will do, and the
+        // operator's preference is an environment variable like every other
+        // provider choice in this file.
+        const named = action.refs ?? [];
+        const { paths: refs, refused } = named.length === 0
+          ? { paths: [] as string[], refused: 0 }
+          : referencePaths(MEDIA_ROOT, turn.chatKey, named);
+        if (refused > 0) {
+          log('outbox.imageRefsRefused', { chatKey: turn.chatKey, refused, named: named.length });
+        }
+        if (named.length > 0 && refs.length === 0) {
+          await this.sayText(
+            dest.key, dest.jid,
+            'I could not find those pictures in this conversation, so I have not made anything.',
+            'image references refused',
+          );
+          return;
+        }
+
+        const useApimart = refs.length > 0 || preferApimart();
+        if (refs.length > 0 && !apimartReady()) {
+          await this.sayText(
+            dest.key, dest.jid,
+            'I can only work from a picture when the image service that accepts one is configured, and it is not.',
+            'no reference-capable image provider',
+          );
+          return;
+        }
+        const image = useApimart
+          ? await apimartImage(action.prompt, refs)
+          : await generateImage(action.prompt);
         if (!image.ok) {
           log('outbox.imageFailed', { reason: image.error });
           feed.event('image.failed', image.error);
