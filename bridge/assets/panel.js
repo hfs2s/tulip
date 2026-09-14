@@ -180,6 +180,7 @@ var ICONS = {
   overview: '<path d="M3.5 18a8.5 8.5 0 1 1 17 0"/><path d="M12 18l4.4-5.6"/>',
   messages: '<path d="M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1z"/>',
   trash: '<path d="M4.8 7.2h14.4"/><path d="M9.6 7.2V5.4a1.2 1.2 0 0 1 1.2-1.2h2.4a1.2 1.2 0 0 1 1.2 1.2v1.8"/><path d="M17.4 7.2v11.4a1.2 1.2 0 0 1-1.2 1.2H7.8a1.2 1.2 0 0 1-1.2-1.2V7.2"/><path d="M10.5 11v5"/><path d="M13.5 11v5"/>',
+  pencil: '<path d="M4.8 19.2h4.2l9-9a2.1 2.1 0 0 0-3-3l-9 9v3z"/><path d="M14.4 5.4l3 3"/>',
   smile: '<circle cx="12" cy="12" r="8.2"/><path d="M8.9 14.2a3.9 3.9 0 0 0 6.2 0"/><path d="M9.4 9.8h.01"/><path d="M14.6 9.8h.01"/>',
   groups: '<path d="M9.4 11.6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M16.4 12a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8z"/><path d="M3.6 19.4c0-2.9 2.6-4.6 5.8-4.6s5.8 1.7 5.8 4.6"/><path d="M17 14.9c2.1.3 3.4 1.6 3.4 3.4"/>',
   chats: '<path d="M16.2 12.5H18a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H7.6a1 1 0 0 0-1 1v1.4"/><path d="M13 7.8H4.6a1 1 0 0 0-1 1v6.6a1 1 0 0 0 1 1H6v3.1l3.9-3.1H13a1 1 0 0 0 1-1V8.8a1 1 0 0 0-1-1z"/>',
@@ -1753,13 +1754,28 @@ function msgActions(item, said, chatKey) {
   var acts = node('div', 'acts');
   var left = editLeft(item.ts);
 
+  // An icon, like its neighbour. Two controls on one row, one a word and one a
+  // glyph, read as two different kinds of thing — and the word was the part
+  // that collapsed when the column got narrow. The accessible name and the
+  // tooltip carry the meaning; the glyph only has to be recognisable.
+  //
+  // Shown even once the window has closed, disabled. Omitting it was the first
+  // version and it was wrong in a way that is easy to miss: a row with only a
+  // trash icon reads as a feature that does not exist, where a greyed pencil
+  // reads as one that has expired — which is what actually happened.
+  var fix = node('button', null);
+  fix.type = 'button';
+  fix.appendChild(icon('pencil'));
   if (left > 0) {
-    var fix = node('button', null, 'Edit');
-    fix.type = 'button';
+    fix.title = 'Edit this message';
     fix.setAttribute('aria-label', 'Edit this message');
     fix.addEventListener('click', function () { openFix(item, said, chatKey); });
-    acts.appendChild(fix);
+  } else {
+    fix.disabled = true;
+    fix.title = 'WhatsApp stops allowing edits about fifteen minutes after a message is sent. Deleting stays possible for longer.';
+    fix.setAttribute('aria-label', 'Editing is no longer possible — WhatsApp allows it for about fifteen minutes');
   }
+  acts.appendChild(fix);
 
   var gone = node('button', 'gone');
   gone.type = 'button';

@@ -143,11 +143,15 @@
     padding:3px 6px;font:inherit;font-size:11.5px;color:var(--faint);cursor:pointer;
     border-radius:var(--r-pill);display:inline-flex;align-items:center;gap:5px;
     white-space:nowrap;flex:0 0 auto}
-  .said .acts button:hover,.msg .acts button:hover{color:var(--ink);background:var(--raise)}
+  .said .acts button:hover:not(:disabled),.msg .acts button:hover:not(:disabled){
+    color:var(--ink);background:var(--raise)}
+  /* A closed window, not a missing control: it stays legible enough to read as
+     a pencil, and does not light up under the cursor. */
+  .said .acts button:disabled,.msg .acts button:disabled{opacity:.38;cursor:default}
   .said .acts button:focus-visible,.msg .acts button:focus-visible{
     outline:2px solid var(--accent);outline-offset:1px;color:var(--ink)}
   /* Destructive, and the only control here that turns red. */
-  .said .acts button.gone:hover{color:var(--bad)}
+  .said .acts button.gone:hover:not(:disabled){color:var(--bad)}
   .said .acts svg,.msg .acts svg{width:14px;height:14px;flex:0 0 14px}
 
   /* Retracted, and kept on screen. The words are gone from every phone in the
