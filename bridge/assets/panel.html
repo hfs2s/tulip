@@ -122,7 +122,15 @@
      conversation. They appear on hover, on focus, and whenever the row is
      being edited; on a touch screen, where hover is not a thing, they are
      simply always visible rather than unreachable. */
+  /* `overflow-wrap:anywhere` on `.said` is there for a pasted URL with no
+     spaces in it, and it inherits. On this row that is a bug rather than a
+     nicety: unlike `break-word`, `anywhere` lets a flex item's min-content
+     shrink to a single character, so in a narrow column the controls stopped
+     being words — "Edit" came out as three stacked letters beside a trash
+     icon. The row wraps as whole controls instead, and the text inside each
+     one stays on its line. */
   .said .acts,.msg .acts{display:flex;align-items:center;gap:2px;margin-top:3px;
+    flex-wrap:wrap;overflow-wrap:normal;word-break:normal;
     opacity:0;transition:opacity .12s ease}
   .said:hover .acts,.said:focus-within .acts,.said.editing .acts,
   .msg:hover .acts,.msg:focus-within .acts{opacity:1}
@@ -133,7 +141,8 @@
 
   .said .acts button,.msg .acts button{appearance:none;background:none;border:0;
     padding:3px 6px;font:inherit;font-size:11.5px;color:var(--faint);cursor:pointer;
-    border-radius:var(--r-pill);display:inline-flex;align-items:center;gap:5px}
+    border-radius:var(--r-pill);display:inline-flex;align-items:center;gap:5px;
+    white-space:nowrap;flex:0 0 auto}
   .said .acts button:hover,.msg .acts button:hover{color:var(--ink);background:var(--raise)}
   .said .acts button:focus-visible,.msg .acts button:focus-visible{
     outline:2px solid var(--accent);outline-offset:1px;color:var(--ink)}
@@ -184,7 +193,7 @@
   /* How long is left, in the same breath as the actions rather than as a
      separate badge — it is the reason they are here at all. */
   .said .left{font-size:11px;color:var(--faint);align-self:center;margin-left:4px;
-    font-variant-numeric:tabular-nums}
+    font-variant-numeric:tabular-nums;white-space:nowrap;flex:0 0 auto}
   .said .left.soon{color:var(--warn)}
 
   /* Editing in place, so the words being changed stay next to their context. */
@@ -1476,6 +1485,10 @@
          border-bottom:1px solid var(--line-soft)}
   .entry:last-child{border-bottom:0}
   .entry .value{flex:1}
+  /* An address is the one thing in a row that may be broken mid-word, so it
+     needs the space rather than the leftovers — without a basis it collapses
+     to its min-content, which with `overflow-wrap:anywhere` is one letter. */
+  .entry .pageurl{flex:1;min-width:0}
   .adder{display:flex;gap:10px;margin-top:14px}
   .adder input{flex:1}
   .summary{display:flex;align-items:center;gap:12px}
