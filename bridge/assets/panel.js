@@ -1793,21 +1793,6 @@ function msgActions(item, said, chatKey) {
   });
   acts.appendChild(gone);
 
-  // Why the Edit button is or is not there. Silence was the first version of
-  // this and it was wrong: a row showing only a delete icon reads as a missing
-  // feature, not as a closed window. Both states live in `.acts`, which is
-  // revealed on hover, so neither costs anything until somebody looks.
-  if (left > 0) {
-    var mins = Math.max(1, Math.round(left / 60000));
-    var clock = node('span', 'left' + (mins <= 3 ? ' soon' : ''), mins + 'm to edit');
-    clock.title = 'WhatsApp stops allowing edits about fifteen minutes after a message is sent. Deleting stays possible for longer.';
-    acts.appendChild(clock);
-  } else {
-    var shut = node('span', 'left', 'too old to edit');
-    shut.title = 'WhatsApp only allows edits for about fifteen minutes. It can still be deleted for everyone.';
-    acts.appendChild(shut);
-  }
-
   said.appendChild(acts);
 }
 
