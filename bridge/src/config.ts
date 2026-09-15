@@ -37,7 +37,20 @@ const PhoneNumber = z
  */
 const LinkedId = z
   .string()
-  .regex(/^[0-9]{5,25}(@lid)?$/, 'must be a linked id, digits with an optional @lid suffix');
+  .regex(
+    /^(?:[0-9]{5,25}(@lid)?|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
+    'must be a linked id — digits with an optional @lid suffix — or a Teams object id',
+  );
+
+/**
+ * On Teams the same list holds a person's Entra object id, the GUID Teams
+ * sends as `from.aadObjectId`. It is the *only* Teams identifier that may be
+ * listed, and the regex above is what enforces that: Teams' other id for a
+ * person is `29:<opaque>`, and `matchesList` reduces both sides to the part
+ * before the first `:` — so an entry of that shape would become `29` and match
+ * every Teams user at once. The object id has no colon and no `@`, survives
+ * the reduction intact, and is what an administrator can look up.
+ */
 
 const Audience = z
   .object({
@@ -750,6 +763,70 @@ export type Config = z.infer<typeof ConfigSchema>;
  * point. A typo in a security-relevant key must not leave the restrictive
  * default silently in force while the operator believes they changed it.
  */
+/**
+ * Which platform this instance talks on, from the environment.
+ *
+ * In `.env` rather than config.json, on the line README draws: a transport is
+ * part of what a deployment *is* — it comes with credentials, a listener and a
+ * different identity — and switching it is a restart, not a setting an
+ * operator tunes live. Read like every other variable here: `${VAR:-}` in the
+ * compose file sets an absent value to the empty string, so empty is absent.
+ *
+ * The secret is read here and handed to the transport, and appears in no log
+ * line: `log.ts` masks the Entra client-secret shape as it does every other
+ * credential, and nothing below prints it.
+ */
+export interface TeamsEnv {
+  readonly appId: string;
+  readonly appSecret: string;
+  /** Single-tenant apps mint tokens against their own tenant; multi-tenant against `botframework.com`. */
+  readonly tenantId: string | null;
+  /** Where the listener binds *inside* the container; the compose publish line is the real control. */
+  readonly bind: string;
+  readonly port: number;
+}
+
+export type TransportEnv =
+  | { readonly transport: 'whatsapp' }
+  | { readonly transport: 'teams'; readonly teams: TeamsEnv };
+
+export function transportEnv(env: NodeJS.ProcessEnv = process.env): TransportEnv {
+  const read = (name: string): string | null => {
+    const value = env[name]?.trim();
+    return value ? value : null;
+  };
+  const named = (read('TULIP_TRANSPORT') ?? 'whatsapp').toLowerCase();
+  if (named === 'whatsapp') return { transport: 'whatsapp' };
+  if (named !== 'teams') {
+    throw new Error(`TULIP_TRANSPORT is "${named}"; it must be "whatsapp" or "teams"`);
+  }
+  const appId = read('TULIP_TEAMS_APP_ID');
+  const appSecret = read('TULIP_TEAMS_APP_SECRET');
+  if (appId === null || appSecret === null) {
+    throw new Error('TULIP_TRANSPORT=teams needs TULIP_TEAMS_APP_ID and TULIP_TEAMS_APP_SECRET');
+  }
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId)) {
+    throw new Error('TULIP_TEAMS_APP_ID must be the bot registration\'s application (client) id, a GUID');
+  }
+  const port = Number(read('TULIP_TEAMS_PORT') ?? '8792');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('TULIP_TEAMS_PORT must be a port number');
+  }
+  return {
+    transport: 'teams',
+    teams: {
+      appId,
+      appSecret,
+      tenantId: read('TULIP_TEAMS_TENANT_ID'),
+      // 0.0.0.0 inside the container for the reason `panel.host` gives: Docker
+      // forwards a published port to the container's ethernet address, never
+      // its loopback. The address that limits exposure is the publish line.
+      bind: read('TULIP_TEAMS_BIND') ?? '0.0.0.0',
+      port,
+    },
+  };
+}
+
 function stripComments(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripComments);
   if (typeof value !== 'object' || value === null) return value;

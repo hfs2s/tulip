@@ -43,6 +43,10 @@ const SECRET_PATTERNS = [
   [/\bAIza[0-9A-Za-z_-]{35}\b/, 'Google API key'],
   [/-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----/, 'private key'],
   [/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/, 'Slack token'],
+  // The Teams bot's password: Entra issues client secrets as three characters,
+  // `8Q~` (older ones `7Q~`) and thirty-odd more. Read from TULIP_TEAMS_APP_SECRET
+  // and nowhere else; it must never sit in a tracked file.
+  [/[A-Za-z0-9~._-]{3}[78]Q~[A-Za-z0-9~._-]{30,}/, 'Microsoft Entra client secret'],
 ];
 
 /**

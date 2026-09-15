@@ -197,6 +197,16 @@ services:
       # Exa, unset to use Exa alone exactly as before. The bridge never dials the
       # URL either way; see bridge/src/browse.ts.
       TULIP_BROWSER: ${TULIP_BROWSER:-}
+      # Which platform this instance is on, and the Teams bot's credentials
+      # when it is Teams. The secret stays on this side like every other one;
+      # the agent container is not handed it and could not use it if it were.
+      # The bind and port are NOT passed through: inside the container the
+      # Teams listener is 0.0.0.0:8792 for the reason `panel.host` gives, and
+      # the two variables are the host-side publish line below.
+      TULIP_TRANSPORT: ${TULIP_TRANSPORT:-whatsapp}
+      TULIP_TEAMS_APP_ID: ${TULIP_TEAMS_APP_ID:-}
+      TULIP_TEAMS_APP_SECRET: ${TULIP_TEAMS_APP_SECRET:-}
+      TULIP_TEAMS_TENANT_ID: ${TULIP_TEAMS_TENANT_ID:-}
     volumes:
       - state:/state
       - handoff-in:/handoff/in
@@ -258,6 +268,14 @@ services:
       # — and put an authenticating proxy in front when you do. Never 0.0.0.0:
       # that publishes an operator console to every network the host is on.
       - "${TULIP_PANEL_BIND:-127.0.0.1}:${TULIP_PANEL_PORT:-8791}:8791"
+      # The Teams endpoint, on its own listener and its own publish line. It
+      # is deliberately not the panel's: the panel sits behind Cloudflare
+      # Access and Microsoft's bot service cannot sign in to that, so this one
+      # is routed with no Access policy and the request's signed token is its
+      # authentication. Published unconditionally — on a WhatsApp instance
+      # nothing listens inside, and a loopback port with nothing behind it is
+      # harmless — so that switching transports is one variable, not two.
+      - "${TULIP_TEAMS_BIND:-127.0.0.1}:${TULIP_TEAMS_PORT:-8792}:8792"
     mem_limit: 768m
     pids_limit: 256
     healthcheck:

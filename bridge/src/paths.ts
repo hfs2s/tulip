@@ -72,6 +72,14 @@ export const paths = {
   panelToken: join(STATE_DIR, 'panel-token'),
 
   /**
+   * Where each Teams conversation lives — service URL, conversation id, our
+   * own id there — so a proactive send has an address. The Teams counterpart
+   * of `chats.json`, kept here for the same reason: it turns the agent's
+   * opaque keys back into real destinations, and the agent has no mount.
+   */
+  teamsReferences: join(STATE_DIR, 'teams-references.json'),
+
+  /**
    * Messages promised to somebody for later, and the rules that repeat them.
    *
    * On *this* volume, which the agent has no mount for at all — not even the

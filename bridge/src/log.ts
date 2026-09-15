@@ -18,14 +18,28 @@ import { paths } from './paths.js';
 export type LogValue = string | number | boolean | null | undefined | readonly string[];
 export type LogFields = Record<string, LogValue>;
 
-/** Anything shaped like a credential, wherever it appears in a logged string. */
-const CREDENTIAL = /\b(sk-ant-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|Bearer\s+[A-Za-z0-9._-]{8,})/g;
+/**
+ * Anything shaped like a credential, wherever it appears in a logged string.
+ *
+ * The last alternative is an Entra client secret — the Teams bot's password —
+ * which Microsoft issues as three characters, `8Q~` (older ones `7Q~`), and
+ * thirty-odd more. It is matched by that shape rather than by entropy so a
+ * hex chat key can never trip it.
+ */
+const CREDENTIAL =
+  /\b(sk-ant-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|Bearer\s+[A-Za-z0-9._-]{8,}|[A-Za-z0-9~._-]{3}[78]Q~[A-Za-z0-9~._-]{30,})/g;
 
 /**
  * Reduce a phone number to something that identifies a conversation in a log
  * without writing down someone's number: country prefix, then the last two.
+ *
+ * Only a number is a number. A Teams identifier — an object id GUID, or the
+ * opaque `29:` form — is not personal data in the way a phone number is, and
+ * reducing it to its digits would leave nothing an operator could copy into an
+ * allowlist, which is the one reason denials record identifiers at all.
  */
 export function redactNumber(value: string): string {
+  if (!/^\+?[0-9]+(?::[0-9]+)?(?:@[a-z.]+)?$/i.test(value)) return value;
   const digits = value.replace(/[^\d]/g, '');
   if (digits.length < 7) return '***';
   return `${digits.slice(0, 3)}…${digits.slice(-2)}`;

@@ -111,6 +111,16 @@ export function gate(input: GateInput, config: Config): GateVerdict {
 
     // Everything reaches the agent, which then decides whether to speak. See
     // the note on `replyTo` in config.ts for what this costs.
+    //
+    // On Teams "everything" is only what the platform delivers. A bot in a
+    // channel or group chat receives nothing but the posts that @-mention it,
+    // unless the app's manifest carries the resource-specific consent
+    // permission `ChannelMessage.Read.Group` (and `ChatMessage.Read.Chat` for
+    // group chats) and an administrator has granted it — see docs/TEAMS.md.
+    // Without that grant this mode behaves exactly like `mention`, and there
+    // is nothing the bridge can do about it from here: the gate decides what
+    // to answer, not what arrives. `mentionsMe` is right either way, since the
+    // Teams parser reads it from the mention entities rather than assuming.
     if (mode === 'observe') return ACCEPT;
 
     // A real @mention or a reply to us is unambiguous consent to be addressed,

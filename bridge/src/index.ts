@@ -12,7 +12,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ChatRegistry } from './chats.js';
-import { loadConfig, type Config } from './config.js';
+import { loadConfig, transportEnv, type Config } from './config.js';
 import { handleControl } from './control.js';
 import { Dispatcher } from './dispatcher.js';
 import { feed } from './feed.js';
@@ -26,6 +26,8 @@ import { paths } from './paths.js';
 import { publishPersona } from './persona.js';
 import { Limiter } from './ratelimit.js';
 import { Scheduler } from './schedule.js';
+import { Teams } from './teams/teams.js';
+import { transportLabel, type Transport } from './transport.js';
 import { TurnRegistry } from './turns.js';
 import { WhatsApp } from './whatsapp.js';
 
@@ -36,6 +38,7 @@ const WATCHDOG_MS = 30_000;
 function banner(config: Config): void {
   log('tulip.start', {
     pid: process.pid,
+    transport: transportEnv().transport,
     audience: config.audience.everyone ? 'EVERYONE' : `${config.audience.numbers.length} listed number(s)`,
     groups: config.groups.enabled,
     operators: config.operators.numbers.length,
@@ -102,7 +105,12 @@ async function main(): Promise<void> {
       });
     }
   }
-  const wa = new WhatsApp();
+  // Which platform this instance talks on. One or the other, never both: a
+  // second transport in the same process would be a second identity answering
+  // the same session, which is the two-Juans confusion `sharedGeneration`
+  // exists to prevent, arriving from the other side.
+  const env = transportEnv();
+  const wa: Transport = env.transport === 'teams' ? new Teams(env.teams) : new WhatsApp();
 
   // `dispatcher` is referenced by things constructed before it, so it is passed
   // as a thunk rather than a value. The alternative is a mutable global.
@@ -144,26 +152,31 @@ async function main(): Promise<void> {
   });
 
   wa.on('ready', () => {
-    feed.event('whatsapp.connected');
+    feed.event(`${wa.kind}.connected`);
     void currentDispatcher().pump();
   });
 
+  // Pairing is WhatsApp's alone: Teams authenticates with an app secret and
+  // has no QR code, so nothing below runs or is shown on that transport.
+  //
   // WhatsApp reissues a pairing code every twenty seconds or so. Recording each
   // one buries everything else in the feed under identical lines, which makes
   // the panel useless at exactly the moment someone is setting Tulip up.
-  let qrNoted = false;
-  wa.on('qr', () => {
-    if (qrNoted) return;
-    qrNoted = true;
-    feed.event('whatsapp.qr', 'not paired — scan the code in the bridge logs');
-  });
-  wa.on('ready', () => {
-    qrNoted = false;
-  });
+  if (wa instanceof WhatsApp) {
+    let qrNoted = false;
+    wa.on('qr', () => {
+      if (qrNoted) return;
+      qrNoted = true;
+      feed.event('whatsapp.qr', 'not paired — scan the code in the bridge logs');
+    });
+    wa.on('ready', () => {
+      qrNoted = false;
+    });
+  }
 
   wa.on('fatal', (err: Error) => {
     log('tulip.fatal', { err: err.message });
-    feed.event('whatsapp.fatal', err.message);
+    feed.event(`${wa.kind}.fatal`, err.message);
     // systemd or Docker restarts us; a logged-out socket cannot recover in
     // place, and pretending otherwise produces a process that looks healthy.
     process.exit(1);
@@ -302,10 +315,17 @@ async function main(): Promise<void> {
 }
 
 /** Tell operators directly — never through the agent, which may be the fault. */
-async function alertOperators(wa: WhatsApp, config: Config, text: string): Promise<void> {
+async function alertOperators(wa: Transport, config: Config, text: string): Promise<void> {
   for (const number of config.operators.numbers.slice(0, 3)) {
+    // A platform where a person is not a number has nowhere to send this. The
+    // feed already carries the event; the log says why nobody was messaged.
+    const chatId = wa.directChatId(number);
+    if (chatId === null) {
+      log('watchdog.alertUnavailable', { note: `${transportLabel(wa.kind)} has no direct chat for a phone number` });
+      return;
+    }
     try {
-      await wa.sendText(`${number}@s.whatsapp.net`, text);
+      await wa.sendText(chatId, text);
     } catch (err) {
       log('watchdog.alertFailed', { err: String((err as Error).message) });
     }

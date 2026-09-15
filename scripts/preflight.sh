@@ -98,6 +98,34 @@ if [ -f .env ]; then
     ok "ANTHROPIC_API_KEY is set"
   fi
 
+  # The transport. A Teams instance needs its bot credentials; the secret's
+  # value is never printed, only whether it is there and looks real.
+  TRANSPORT=$(grep -E '^TULIP_TRANSPORT=' .env | cut -d= -f2- | tr -d '"'"'"' ' | tr '[:upper:]' '[:lower:]')
+  if [ "${TRANSPORT:-whatsapp}" = "teams" ]; then
+    APP_ID=$(grep -E '^TULIP_TEAMS_APP_ID=' .env | cut -d= -f2- | tr -d '"'"'"' ')
+    SECRET=$(grep -E '^TULIP_TEAMS_APP_SECRET=' .env | cut -d= -f2- | tr -d '"'"'"' ')
+    if printf '%s' "${APP_ID:-}" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+      ok "TULIP_TRANSPORT=teams with an app id"
+    else
+      bad "TULIP_TRANSPORT=teams but TULIP_TEAMS_APP_ID is not an application (client) id"
+    fi
+    if [ -z "${SECRET:-}" ]; then
+      bad "TULIP_TEAMS_APP_SECRET is empty — the bridge cannot send anything to Teams"
+    elif [ "${#SECRET}" -lt 30 ] || printf '%s' "$SECRET" | grep -qi 'placeholder\|replace-me'; then
+      warning "TULIP_TEAMS_APP_SECRET looks like a placeholder"
+    else
+      ok "TULIP_TEAMS_APP_SECRET is set"
+    fi
+    unset SECRET
+    TEAMS_BIND=$(grep -E '^TULIP_TEAMS_BIND=' .env | cut -d= -f2- | tr -d '"'"'"' ')
+    case "${TEAMS_BIND:-127.0.0.1}" in
+      0.0.0.0|::|'') warning "the Teams endpoint is published on ALL interfaces; bind it to loopback or one private address and route a tunnel to it" ;;
+      *) ok "Teams endpoint is published on ${TEAMS_BIND:-127.0.0.1}" ;;
+    esac
+  elif [ "${TRANSPORT:-whatsapp}" != "whatsapp" ]; then
+    bad "TULIP_TRANSPORT is '${TRANSPORT}'; it must be whatsapp or teams"
+  fi
+
   PERMS=$(stat -c '%a' .env 2>/dev/null || stat -f '%Lp' .env 2>/dev/null)
   if [ "$PERMS" = "600" ]; then ok ".env is mode 600"; else warning ".env is mode $PERMS; 600 is better"; fi
 else
