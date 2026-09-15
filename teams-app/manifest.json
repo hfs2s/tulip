@@ -1,0 +1,46 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.30",
+  "version": "${TULIP_TEAMS_PACKAGE_VERSION}",
+  "id": "${TULIP_TEAMS_APP_ID}",
+  "developer": {
+    "name": "${TULIP_TEAMS_PACKAGE_DEVELOPER}",
+    "websiteUrl": "${TULIP_TEAMS_PACKAGE_WEBSITE}",
+    "privacyUrl": "${TULIP_TEAMS_PACKAGE_PRIVACY}",
+    "termsOfUseUrl": "${TULIP_TEAMS_PACKAGE_TERMS}"
+  },
+  "name": {
+    "short": "${TULIP_AGENT_NAME}",
+    "full": "${TULIP_AGENT_NAME} — a 2lp agent"
+  },
+  "description": {
+    "short": "${TULIP_AGENT_NAME}: a 2lp agent you can talk to in Teams.",
+    "full": "${TULIP_AGENT_NAME} is a 2lp agent — a real Claude Code session, contained so that nothing it can be talked into reaches anything worth having. Message it directly, add it to a group chat, or add it to a team and @mention it in a channel. With the channel and chat message permissions granted at install it can also follow a conversation without being mentioned, and decide for itself when to speak. Voice notes, file attachments and reactions are not supported on Teams in this version."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#1F5F52",
+  "bots": [
+    {
+      "botId": "${TULIP_TEAMS_APP_ID}",
+      "scopes": ["personal", "team", "groupChat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false
+    }
+  ],
+  "validDomains": [],
+  "webApplicationInfo": {
+    "id": "${TULIP_TEAMS_APP_ID}",
+    "resource": "${TULIP_TEAMS_PACKAGE_WEBSITE}"
+  },
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": [
+        { "name": "ChannelMessage.Read.Group", "type": "Application" },
+        { "name": "ChatMessage.Read.Chat", "type": "Application" }
+      ]
+    }
+  }
+}
