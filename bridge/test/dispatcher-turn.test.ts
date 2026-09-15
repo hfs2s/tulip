@@ -35,10 +35,24 @@ vi.mock('../src/handoff.js', () => ({
 }));
 
 const { Dispatcher } = await import('../src/dispatcher.js');
+const { inboundOf } = await import('../src/whatsapp.js');
 const { TurnRegistry } = await import('../src/turns.js');
 const { Limiter } = await import('../src/ratelimit.js');
 const { ChatRegistry } = await import('../src/chats.js');
 const { parseConfig } = await import('../src/config.js');
+
+/**
+ * The socket `toEnvelope` reads. The dispatcher used to take a raw message and
+ * reach for `wa.live` itself; it now takes the transport's `Inbound` handle,
+ * and for WhatsApp that handle is `inboundOf(message, () => socket)`. The stub
+ * carries the identity a real socket does, which is what lets a mention test
+ * mean anything.
+ */
+const SOCKET = {
+  user: { id: '15551234567@s.whatsapp.net', lid: '111111111111111:1@lid' },
+  groupMetadata: async () => ({ subject: null }),
+} as never;
+const inbound = (message: unknown) => inboundOf(message as never, () => SOCKET);
 
 function envelope(id: string, chatJid = '15551234567@s.whatsapp.net') {
   return {
@@ -60,17 +74,10 @@ function build(overrides: Record<string, unknown> = {}) {
   const chats = new ChatRegistry(join(dir, 'salt'), join(dir, 'chats.json'));
   const dispatcher = new Dispatcher({
     wa: {
+      kind: 'whatsapp',
       sendText: async () => {},
       typing: async () => {},
       readReceipt: async () => {},
-      // `live` is what the dispatcher hands to `toEnvelope`. It used to pass the
-      // wrapper itself with `as never`, so `user` was undefined and no mention
-      // could ever match; the stub now carries the identity a real socket does,
-      // which is what lets a mention test mean anything.
-      live: {
-        user: { id: '15551234567@s.whatsapp.net', lid: '111111111111111:1@lid' },
-        groupMetadata: async () => ({ subject: null }),
-      },
     } as never,
     chats,
     limiter: new Limiter(
@@ -169,7 +176,7 @@ describe('whether a turn was addressed to us', () => {
       message: { conversation: 'are you here, Maria?' },
     };
     mutate(message);
-    await dispatcher.handle(message);
+    await dispatcher.handle(inbound(message));
     void dispatcher.pump();
     return started;
   }
@@ -212,12 +219,12 @@ describe('a contact that an operator named by hand', () => {
     const chatKey = chats.keyFor('15551234567@s.whatsapp.net', false, Date.now());
     expect(chats.get(chatKey)?.name).toBe('Mum');
 
-    await dispatcher.handle({
+    await dispatcher.handle(inbound({
       key: { remoteJid: '15551234567@s.whatsapp.net', fromMe: false, id: 'm1' },
       messageTimestamp: Math.floor(Date.now() / 1000),
       pushName: 'Definitely Not Mum',
       message: { conversation: 'hello' },
-    } as never);
+    }));
 
     expect(chats.get(chatKey)?.name).toBe('Mum');
     // Still counted: only the name is protected.
@@ -228,12 +235,12 @@ describe('a contact that an operator named by hand', () => {
     const { dispatcher, chats } = build();
     const chatKey = chats.keyFor('15559998888@s.whatsapp.net', false, Date.now());
 
-    await dispatcher.handle({
+    await dispatcher.handle(inbound({
       key: { remoteJid: '15559998888@s.whatsapp.net', fromMe: false, id: 'm1' },
       messageTimestamp: Math.floor(Date.now() / 1000),
       pushName: 'Someone New',
       message: { conversation: 'hello' },
-    } as never);
+    }));
 
     expect(chats.get(chatKey)?.name).toBe('Someone New');
   });
@@ -256,12 +263,12 @@ describe('how long anybody has been waiting', () => {
     expect(dispatcher.snapshot().waitingSince).toBeNull();
 
     const before = Date.now();
-    await dispatcher.handle({
+    await dispatcher.handle(inbound({
       key: { remoteJid: '15551234567@s.whatsapp.net', fromMe: false, id: 'm1' },
       messageTimestamp: Math.floor(before / 1000),
       pushName: 'Someone',
       message: { conversation: 'hello' },
-    } as never);
+    }));
 
     const waiting = dispatcher.snapshot().waitingSince;
     expect(waiting).not.toBeNull();
@@ -270,12 +277,12 @@ describe('how long anybody has been waiting', () => {
 
   it('starts it for a backlog restored from disk, which no arrival was seen for', async () => {
     const first = build();
-    await first.dispatcher.handle({
+    await first.dispatcher.handle(inbound({
       key: { remoteJid: '15551234567@s.whatsapp.net', fromMe: false, id: 'm1' },
       messageTimestamp: Math.floor(Date.now() / 1000),
       pushName: 'Someone',
       message: { conversation: 'hello' },
-    } as never);
+    }));
 
     // A restart: a fresh dispatcher over the same durable queue. Nothing told
     // it when that message arrived, and the alert this feeds is exactly the one

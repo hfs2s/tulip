@@ -376,7 +376,10 @@ function verdict(s) {
     document.title = '2LP · ' + AGENT;
     document.querySelectorAll('.brand-name').forEach(function (b) { b.textContent = '2LP · ' + AGENT; });
   }
-  el('whoami').textContent = s.whatsapp.name || 'not paired';
+  // Which platform, and who we are on it. "not paired" is a WhatsApp state —
+  // a QR code nobody has scanned — and means nothing on Teams, where the bot
+  // is registered rather than paired.
+  el('whoami').textContent = s.transport.name || (s.transport.kind === 'teams' ? 'Teams' : 'not paired');
   agentStatus(s);
   var badge = el('navChats');
   if (badge) badge.textContent = String(s.chats.length);
@@ -402,7 +405,7 @@ function agentStatus(s) {
   if (!dot || !label) return;
 
   var state;
-  if (!s.whatsapp.connected) state = ['down', 'WhatsApp disconnected'];
+  if (!s.transport.connected) state = ['down', (s.transport.label || 'WhatsApp') + ' disconnected'];
   else if (s.agent.fatal) state = ['down', 'needs you'];
   else if (!s.agent.reporting) state = ['down', 'offline'];
   else if (s.hold.active) state = ['busy', 'holding'];
@@ -830,8 +833,12 @@ function renderGroups(s) {
     td.appendChild(open);
 
     // Asks WhatsApp itself, so the answer does not depend on anything this panel
-    // recorded. Changes nothing; the reply arrives as a toast.
-    if (isOwner()) {
+    // recorded. Changes nothing; the reply arrives as a toast. Not offered on
+    // Teams: a bot there has no member list to ask, and no way to leave a
+    // room — somebody in it removes the app — so both buttons would be
+    // controls that can only ever fail.
+    var canAskPlatform = !(s.transport && s.transport.kind === 'teams');
+    if (isOwner() && canAskPlatform) {
       var check = node('button', 'sm', 'Still in?');
       check.type = 'button';
       check.title = 'Ask WhatsApp whether ' + AGENT + ' is a member of this group. Changes nothing.';
@@ -842,7 +849,7 @@ function renderGroups(s) {
     // Leaving is the operator's too, and harder to undo than a stop: somebody in
     // the room has to add him back. Two clicks, like the panel's other
     // irreversible buttons, and no confirm dialog.
-    if (isOwner() && !c.leftAt) {
+    if (isOwner() && canAskPlatform && !c.leftAt) {
       var leave = node('button', 'sm', 'Leave group');
       leave.type = 'button';
       leave.setAttribute('aria-label', 'Make ' + AGENT + ' leave ' + (c.name || c.chatKey));
@@ -5695,9 +5702,17 @@ async function renderSettings() {
     function (next, revert) { saveSettings({ audience: { numbers: next } }, revert); },
     null, { reload: function () { return freshSettings(function (f) { return f.audience.numbers; }); } });
 
-  listField(audience, 'Allowed linked ids', 'For people WhatsApp hands over without a phone number. Add one only when a number alone is not working.',
-    s.audience.jids, 'e.g. 111111111111111@lid',
-    'Newer WhatsApp accounts often arrive as a “linked id” — something like 111111111111111@lid — with no phone number attached, and a list of numbers can never match one. If somebody on your allowed numbers is still being turned away, this is almost always why. Open the Log page, find the gate.deny line from when they tried, and copy the identifier it recorded. It is a copy, not a guess.',
+  // The same list on both platforms, described for the one this instance is
+  // on. On Teams a person is their Entra object id — the GUID the gate.deny
+  // line records — and the phone-number list above cannot match anyone.
+  var onTeams = !!(state && state.transport && state.transport.kind === 'teams');
+  listField(audience, onTeams ? 'Allowed Teams users' : 'Allowed linked ids',
+    onTeams ? 'The Entra object id of each person who may write in. Only used when “Open to anyone” is off.'
+      : 'For people WhatsApp hands over without a phone number. Add one only when a number alone is not working.',
+    s.audience.jids, onTeams ? 'e.g. eddfa9d4-346e-4cce-a18f-fa6261ad776b' : 'e.g. 111111111111111@lid',
+    onTeams
+      ? 'On Teams nobody has a phone number here. A person is identified by their Entra object id, which the Log page records on the gate.deny line from when they tried — copy it from there, or look it up in Entra under the user’s profile. It is a copy, not a guess.'
+      : 'Newer WhatsApp accounts often arrive as a “linked id” — something like 111111111111111@lid — with no phone number attached, and a list of numbers can never match one. If somebody on your allowed numbers is still being turned away, this is almost always why. Open the Log page, find the gate.deny line from when they tried, and copy the identifier it recorded. It is a copy, not a guess.',
     function (next, revert) { saveSettings({ audience: { jids: next } }, revert); },
     null, { reload: function () { return freshSettings(function (f) { return f.audience.jids; }); } });
   p.appendChild(audience);
@@ -5728,9 +5743,13 @@ async function renderSettings() {
       reload: function () { return freshSettings(function (f) { return f.operators.numbers; }); },
     });
 
-  listField(ops, 'Operator linked ids', 'The same people, in the form WhatsApp may actually deliver them as.',
-    s.operators.jids, 'digits or @lid',
-    'Same story as allowed linked ids, and it matters more here: an operator whose commands are silently ignored has no way into their own system. If a ! command does nothing, check the Log for the identifier your message actually arrived with and add it.',
+  listField(ops, onTeams ? 'Operator Teams users' : 'Operator linked ids',
+    onTeams ? 'The Entra object id of each operator. On Teams this list is the only one that can match.'
+      : 'The same people, in the form WhatsApp may actually deliver them as.',
+    s.operators.jids, onTeams ? 'an Entra object id' : 'digits or @lid',
+    onTeams
+      ? 'Operator numbers cannot match anyone on Teams, so this is where operators go. If a ! command does nothing, check the Log for the identifier your message actually arrived with and add it. Watchdog alerts are not delivered on Teams — read the Overview instead.'
+      : 'Same story as allowed linked ids, and it matters more here: an operator whose commands are silently ignored has no way into their own system. If a ! command does nothing, check the Log for the identifier your message actually arrived with and add it.',
     function (next, revert) { saveSettings({ operators: { jids: next } }, revert); },
     null, {
       confirmLast: lastOperator,

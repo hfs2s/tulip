@@ -20,13 +20,13 @@ import { log } from './log.js';
 import { startChat, stopChat } from './panel-api.js';
 import type { Limiter } from './ratelimit.js';
 import { state } from './state.js';
-import type { WhatsApp } from './whatsapp.js';
+import type { Transport } from './transport.js';
 
 // Rendered from the shared catalogue, which the panel's Verbs page also reads.
 const HELP = controlHelpText();
 
 export interface ControlDeps {
-  readonly wa: WhatsApp;
+  readonly wa: Transport;
   readonly chats: ChatRegistry;
   readonly limiter: Limiter;
   readonly dispatcher: () => Dispatcher;
@@ -170,7 +170,7 @@ export async function handleControl(deps: ControlDeps, envelope: Envelope, chatK
       const sessions = status?.sessions.length ?? 0;
       return say(
         `*Tulip*${hold}\n` +
-          `whatsapp ${deps.wa.connected ? 'connected' : '*disconnected*'}\n` +
+          `${deps.wa.kind} ${deps.wa.connected ? 'connected' : '*disconnected*'}\n` +
           `agent ${status === null ? '*not reporting*' : status.fatal ? `*${status.fatal}*` : 'ok'}\n` +
           `${sessions} chat session(s) live · ${deps.chats.size} chats known\n` +
           `queue: ${snapshot.queued} waiting, ${snapshot.ready} chat(s) ready` +
@@ -214,6 +214,12 @@ export async function handleControl(deps: ControlDeps, envelope: Envelope, chatK
       // indistinguishable from the command having done nothing — the same
       // reason `wrongRoom` answers at all.
       const participant = envelope.senderIds[0];
+      // A platform with no reactions gets the one line instead — the same
+      // fallback as a reaction that fails, for the same reason.
+      if (deps.wa.react === undefined) {
+        log('control.noReactions', { chatKey, transport: deps.wa.kind });
+        return say('Stopped.');
+      }
       try {
         await deps.wa.react(envelope.chatJid, envelope.id, '✋', participant);
       } catch (err) {
@@ -238,6 +244,7 @@ export async function handleControl(deps: ControlDeps, envelope: Envelope, chatK
         : '';
 
       if (!envelope.isGroup) return say('Answering here again.' + held);
+      if (deps.wa.react === undefined) return say('Answering here again.' + held);
       try {
         await deps.wa.react(envelope.chatJid, envelope.id, '✅', envelope.senderIds[0]);
         if (held) await say('Answering here again.' + held);

@@ -56,11 +56,11 @@ import { state } from './state.js';
 // Code transcript and has nothing to do with `transcriptFor` above, which is a
 // voice note's sidecar — see the header of `transcript.ts`.
 import { mergeTimeline, sessionTranscript, type SaidItem } from './transcript.js';
-import type { WhatsApp } from './whatsapp.js';
+import { transportLabel, type Transport } from './transport.js';
 
 export interface ApiDeps {
   readonly config: Config;
-  readonly wa: WhatsApp;
+  readonly wa: Transport;
   readonly chats: ChatRegistry;
   readonly limiter: Limiter;
   readonly dispatcher: () => Dispatcher;
@@ -98,7 +98,15 @@ export function snapshot(deps: ApiDeps): Json {
     // host the panels are otherwise identical, and acting on the wrong one —
     // stopping Juan when Maria is the one misbehaving — is an easy mistake.
     instance: { name: INSTANCE, agentName: AGENT_NAME },
-    whatsapp: { connected: deps.wa.connected, name: deps.wa.me?.name ?? null },
+    // Which platform this instance talks on. The panel hides what makes no
+    // sense on the other one — pairing, linked ids, group membership — from
+    // this rather than from a guess.
+    transport: {
+      kind: deps.wa.kind,
+      label: transportLabel(deps.wa.kind),
+      connected: deps.wa.connected,
+      name: deps.wa.me?.name ?? null,
+    },
     agent: {
       reporting: status !== null,
       busyTurn: status?.busyTurn ?? null,
@@ -279,12 +287,16 @@ export async function chatEdit(
   if (record === null) return { ok: false, message: 'No such chat.' };
   const words = text.trim();
   if (words.length === 0) return { ok: false, message: 'An edit needs words. To take it back, delete it instead.' };
-  if (words.length > 4000) return { ok: false, message: 'That is longer than WhatsApp will take.' };
+  const platform = transportLabel(deps.wa.kind);
+  if (words.length > 4000) return { ok: false, message: `That is longer than ${platform} will take.` };
 
   const target = sent.nth(chatKey, nth);
   if (target === null) return { ok: false, message: 'That message is no longer correctable.' };
   if (target.kind !== 'text') {
-    return { ok: false, message: `That one was a ${target.kind}, and WhatsApp only edits text. Delete it instead.` };
+    return { ok: false, message: `That one was a ${target.kind}, and ${platform} only edits text. Delete it instead.` };
+  }
+  if (deps.wa.editText === undefined) {
+    return { ok: false, message: `${platform} does not let a bot edit what it has sent.` };
   }
   try {
     await deps.wa.editText(record.jid, target.id, words);
@@ -295,7 +307,7 @@ export async function chatEdit(
     return {
       ok: false,
       message:
-        'WhatsApp refused the edit — usually because the message is more than about fifteen minutes old. '
+        `${platform} refused the edit — usually because the message is more than about fifteen minutes old. `
         + `Say what you meant in a new message instead. (${String((err as Error).message)})`,
     };
   }
@@ -314,13 +326,16 @@ export async function chatUnsend(
   if (record === null) return { ok: false, message: 'No such chat.' };
   const target = sent.nth(chatKey, nth);
   if (target === null) return { ok: false, message: 'That message is no longer retractable.' };
+  if (deps.wa.unsend === undefined) {
+    return { ok: false, message: `${transportLabel(deps.wa.kind)} does not let a bot take back what it has sent.` };
+  }
   try {
     await deps.wa.unsend(record.jid, target.id);
   } catch (err) {
     return {
       ok: false,
       message:
-        'WhatsApp refused to delete it — usually because it is more than a couple of days old. '
+        `${transportLabel(deps.wa.kind)} refused to delete it — usually because it is more than a couple of days old. `
         + `(${String((err as Error).message)})`,
     };
   }
@@ -381,10 +396,13 @@ export async function chatReact(
     return { ok: false, message: 'Nothing to react to here yet.' };
   }
 
+  if (deps.wa.react === undefined) {
+    return { ok: false, message: `${transportLabel(deps.wa.kind)} gives a bot no way to react to a message.` };
+  }
   try {
     await deps.wa.react(record.jid, target.id, glyph, target.participant);
   } catch (err) {
-    return { ok: false, message: `WhatsApp refused the reaction. (${String((err as Error).message)})` };
+    return { ok: false, message: `${transportLabel(deps.wa.kind)} refused the reaction. (${String((err as Error).message)})` };
   }
   feed.outbound(chatKey, 'react', glyph);
   log('chat.reacted', { chatKey, by: 'operator', targeted: messageId !== undefined && messageId !== '' });
@@ -575,6 +593,9 @@ export async function sayAsJuan(
         sent.record(chatKey, pictured, 'image', null, feed.outbound(chatKey, 'image', '[image]').uid);
       } else {
         const mimetype = ext === 'pdf' ? 'application/pdf' : 'text/plain';
+        if (deps.wa.sendFile === undefined) {
+          return { ok: false, message: `${transportLabel(deps.wa.kind)} does not take files from a bot; send a picture or words.` };
+        }
         const filed = await deps.wa.sendFile(jid, bytes, mimetype, basename(rel), null);
         sent.record(chatKey, filed, 'file', basename(rel), feed.outbound(chatKey, mimetype, basename(rel)).uid);
       }
@@ -587,7 +608,7 @@ export async function sayAsJuan(
     }
   } catch (err) {
     log('operator.sayFailed', { chatKey, err: String((err as Error).message) });
-    return { ok: false, message: 'WhatsApp would not take it: ' + String((err as Error).message) };
+    return { ok: false, message: `${transportLabel(deps.wa.kind)} would not take it: ` + String((err as Error).message) };
   }
 
   log('operator.said', { chatKey, chars: text.length, attached: attached.length });
@@ -650,10 +671,13 @@ export async function correctMessage(
   // Null text means retract. An empty string would be an edit to nothing, which
   // WhatsApp has no way to render, so it is refused rather than guessed at.
   if (text === null) {
+    if (deps.wa.unsend === undefined) {
+      return { ok: false, message: `${transportLabel(deps.wa.kind)} does not let a bot take back what it has sent.` };
+    }
     try {
       await deps.wa.unsend(jid, target.id);
     } catch (err) {
-      return { ok: false, message: 'WhatsApp refused it, usually because it is too old to retract.' + ` (${String((err as Error).message)})` };
+      return { ok: false, message: `${transportLabel(deps.wa.kind)} refused it, usually because it is too old to retract.` + ` (${String((err as Error).message)})` };
     }
     sent.retracted(chatKey, target.id);
     feed.unsent(chatKey, target.text, 'operator');
@@ -666,12 +690,15 @@ export async function correctMessage(
   if (words.length === 0) return { ok: false, message: 'Nothing to say. To take it back instead, unsend it.' };
   if (words.length > 4000) return { ok: false, message: 'That is longer than 4000 characters.' };
   if (target.kind !== 'text') {
-    return { ok: false, message: `That was a ${target.kind}. WhatsApp only edits text — unsend it instead.` };
+    return { ok: false, message: `That was a ${target.kind}. ${transportLabel(deps.wa.kind)} only edits text — unsend it instead.` };
+  }
+  if (deps.wa.editText === undefined) {
+    return { ok: false, message: `${transportLabel(deps.wa.kind)} does not let a bot edit what it has sent.` };
   }
   try {
     await deps.wa.editText(jid, target.id, words);
   } catch (err) {
-    return { ok: false, message: 'WhatsApp refused the edit, usually because it is over fifteen minutes old.' + ` (${String((err as Error).message)})` };
+    return { ok: false, message: `${transportLabel(deps.wa.kind)} refused the edit, usually because it is over fifteen minutes old.` + ` (${String((err as Error).message)})` };
   }
   sent.edited(chatKey, target.id, words);
   feed.edited(chatKey, target.text, words, 'operator');
@@ -1231,20 +1258,24 @@ export async function groupMembership(
   const jid = deps.chats.jidFor(chatKey);
   if (jid === null) return { ok: false, message: 'That group has no address on record.' };
   const name = record.name ?? 'that group';
-  let answer: Awaited<ReturnType<WhatsApp['groupMembership']>>;
+  const platform = transportLabel(deps.wa.kind);
+  if (deps.wa.groupMembership === undefined) {
+    return { ok: false, message: `${platform} cannot be asked that; the room's own member list is the only record.` };
+  }
+  let answer: Awaited<ReturnType<NonNullable<Transport['groupMembership']>>>;
   try {
     answer = await deps.wa.groupMembership(jid);
   } catch (err) {
-    return { ok: false, message: `Could not ask WhatsApp: ${String((err as Error).message).slice(0, 120)}` };
+    return { ok: false, message: `Could not ask ${platform}: ${String((err as Error).message).slice(0, 120)}` };
   }
   log('group.membership', { chatKey, state: answer.state, members: answer.members });
   const recorded = record.leftAt !== null;
   const count = answer.members === null ? '' : ` (${String(answer.members)} members)`;
   const message = answer.state === 'member'
-    ? `WhatsApp says he is still in ${name}${count}${recorded ? ' — though the panel has it as left.' : '.'}`
+    ? `${platform} says he is still in ${name}${count}${recorded ? ' — though the panel has it as left.' : '.'}`
     : answer.state === 'not-member'
-      ? `WhatsApp says he is not in ${name}.${recorded ? '' : ' The panel had not recorded that yet.'}`
-      : `WhatsApp did not give a clear answer about ${name}${answer.detail === null ? '' : ` (${answer.detail})`}.`;
+      ? `${platform} says he is not in ${name}.${recorded ? '' : ' The panel had not recorded that yet.'}`
+      : `${platform} did not give a clear answer about ${name}${answer.detail === null ? '' : ` (${answer.detail})`}.`;
   return { ok: true, message, state: answer.state, members: answer.members };
 }
 
@@ -1264,6 +1295,9 @@ export async function groupLeave(deps: ApiDeps, chatKey: string): Promise<{ ok: 
   if (record.leftAt !== null) return { ok: true, message: `He already left ${record.name ?? 'that group'}.` };
   const jid = deps.chats.jidFor(chatKey);
   if (jid === null) return { ok: false, message: 'That group has no address on record.' };
+  if (deps.wa.leaveGroup === undefined) {
+    return { ok: false, message: `${transportLabel(deps.wa.kind)} gives a bot no way to leave; somebody in the room removes it.` };
+  }
   try {
     await deps.wa.leaveGroup(jid);
   } catch (err) {
@@ -1271,13 +1305,13 @@ export async function groupLeave(deps: ApiDeps, chatKey: string): Promise<{ ok: 
     // Refused because he is not in it any more — a leave from before this was
     // recorded, or somebody removed him. Say so and mark it, rather than
     // offering a button that can never succeed.
-    if (!(await deps.wa.isInGroup(jid))) {
+    if (deps.wa.isInGroup !== undefined && !(await deps.wa.isInGroup(jid))) {
       deps.chats.setLeft(chatKey, Date.now());
       deps.chats.flush();
       return { ok: true, message: `He is no longer in ${record.name ?? 'that group'} — marked as left.` };
     }
     log('group.leaveFailed', { chatKey, by: 'panel', err: why });
-    return { ok: false, message: `WhatsApp would not let him leave: ${why}` };
+    return { ok: false, message: `${transportLabel(deps.wa.kind)} would not let him leave: ${why}` };
   }
   feed.event('group.left', `${record.name ?? chatKey} — left by the operator from the panel`);
   log('group.left', { chatKey, by: 'panel' });
@@ -1822,7 +1856,9 @@ export async function voicePreview(deps: ApiDeps, body: unknown, now = Date.now(
  * See docs/THREAT-MODEL.md §T7.
  */
 const PhoneNumber = z.string().regex(/^[1-9][0-9]{6,15}$/, 'bare international digits, no + or spaces');
-const LinkedId = z.string().regex(/^[0-9]{5,25}(@lid)?$/, 'digits, optionally @lid');
+// The same shape config.ts accepts: a WhatsApp linked id, or a Teams user's
+// Entra object id, which is the one Teams identifier that is safe to list.
+const LinkedId = z.string().regex(/^(?:[0-9]{5,25}(@lid)?|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i, 'digits, optionally @lid, or a Teams object id');
 
 const SettingsPatch = z
   .object({

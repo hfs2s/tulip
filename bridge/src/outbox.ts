@@ -81,7 +81,7 @@ import type { Limiter } from './ratelimit.js';
 import type { Cost, Turn, TurnRegistry } from './turns.js';
 import type { Config } from './config.js';
 import type { ChatRegistry } from './chats.js';
-import type { WhatsApp } from './whatsapp.js';
+import { transportLabel, type Transport } from './transport.js';
 
 /** Attempts before an action is abandoned. */
 const MAX_ATTEMPTS = 4;
@@ -280,7 +280,7 @@ function describeFd(fd: number): string | null {
 }
 
 export interface OutboxDeps {
-  readonly wa: WhatsApp;
+  readonly wa: Transport;
   /** Live config: cross-chat sending is a switch an operator can flip. */
   readonly config: Config;
   readonly chats: ChatRegistry;
@@ -697,6 +697,10 @@ export class Outbox extends EventEmitter {
       this.deps.turns.countTool(action.turnId);
     }
 
+    // What to call the platform in a refusal the agent will read back to
+    // somebody. "WhatsApp refused the edit" is wrong on Teams.
+    const platform = transportLabel(this.deps.wa.kind);
+
     switch (action.kind) {
       case 'text': {
         // Talking back to another agent, where the exchange is shaped by the
@@ -727,6 +731,20 @@ export class Outbox extends EventEmitter {
           log('outbox.fileRefused', { id: action.id, name: action.file, reason: file.reason });
           feed.event('outbox.fileRefused', `${action.file}: ${file.reason}`);
           return;
+        }
+        // A platform that takes no files from a bot gets the caption and an
+        // honest line instead of nothing. Said, logged and recorded — the
+        // silent version is indistinguishable from the send having worked.
+        if (this.deps.wa.sendFile === undefined) {
+          log('outbox.fileUnsupported', { id: action.id, name: action.file, transport: this.deps.wa.kind });
+          feed.event('outbox.fileUnsupported', `${action.file}: ${transportLabel(this.deps.wa.kind)} does not take files from me`);
+          await this.sayText(
+            dest.key, dest.jid,
+            (action.caption === null ? '' : `${action.caption}\n\n`)
+              + `(I had a file to send — ${basename(action.file)} — but I cannot deliver files on ${transportLabel(this.deps.wa.kind)} yet.)`,
+          );
+          rmSync(file.unlinkPath, { force: true });
+          break;
         }
         const filed = await this.deps.wa.sendFile(dest.jid, file.data, file.mimetype, action.file, action.caption);
         retainOutbound(dest.key, 'file', file.data, file.mimetype);
@@ -1351,6 +1369,14 @@ export class Outbox extends EventEmitter {
           }
         }
 
+        if (this.deps.wa.leaveGroup === undefined) {
+          log('outbox.leaveUnsupported', { chatKey: record.chatKey, transport: this.deps.wa.kind });
+          await this.answer(action.id, 'leaveGroup', {
+            ok: false,
+            error: `I cannot leave a room myself on ${transportLabel(this.deps.wa.kind)}; somebody there has to remove me.`,
+          });
+          break;
+        }
         try {
           await this.deps.wa.leaveGroup(jid);
         } catch (err) {
@@ -1360,7 +1386,7 @@ export class Outbox extends EventEmitter {
           await this.answer(action.id, 'leaveGroup', {
             ok: false,
             error:
-              `WhatsApp would not let me leave ${name} (${why}), so I am still in it.` +
+              `${transportLabel(this.deps.wa.kind)} would not let me leave ${name} (${why}), so I am still in it.` +
               (action.goodbye === null ? '' : ' The goodbye had already gone out.'),
           });
           break;
@@ -1598,6 +1624,15 @@ export class Outbox extends EventEmitter {
         // is worse than no bench.
         const chosen = resolveVoice(this.deps.config, action.language);
 
+        // A platform with no voice notes gets the script as a message. The
+        // same fallback a synthesis failure takes, checked first so nothing is
+        // synthesised — or billed — for audio that has nowhere to go.
+        if (this.deps.wa.sendVoice === undefined) {
+          log('outbox.voiceFallback', { reason: `no voice notes on ${this.deps.wa.kind}`, note: 'sent as text' });
+          await this.sayText(dest.key, dest.jid, action.text);
+          break;
+        }
+
         // Some languages the provider will *pronounce* and cannot *speak*.
         // Swedish has a boost and not one voice, so a Swedish voice note was a
         // Spanish mouth sounding out Swedish words — an impression rather than
@@ -1655,6 +1690,12 @@ export class Outbox extends EventEmitter {
           log('outbox.noReactTarget', { chatKey: turn.chatKey });
           return;
         }
+        // No bot API for reactions on this platform: logged and skipped. Not
+        // said in the chat — a line saying "I would have reacted" is noise.
+        if (this.deps.wa.react === undefined) {
+          log('outbox.noReactions', { chatKey: turn.chatKey, transport: this.deps.wa.kind, emoji: action.emoji });
+          return;
+        }
         await this.deps.wa.react(turn.chatJid, target.id, action.emoji, target.participant);
         feed.outbound(turn.chatKey, 'react', action.emoji);
         break;
@@ -1681,7 +1722,14 @@ export class Outbox extends EventEmitter {
           // WhatsApp edits text. A picture cannot become a different picture.
           await this.answer(action.id, 'edit', {
             ok: false,
-            error: `that one was a ${target.kind}, and WhatsApp only edits text. \`tulip-wa unsend\` can take it back.`,
+            error: `that one was a ${target.kind}, and ${platform} only edits text. \`tulip-wa unsend\` can take it back.`,
+          });
+          break;
+        }
+        if (this.deps.wa.editText === undefined) {
+          await this.answer(action.id, 'edit', {
+            ok: false,
+            error: `${platform} does not let me edit a message once it is sent. Say what you meant in a new one.`,
           });
           break;
         }
@@ -1693,7 +1741,7 @@ export class Outbox extends EventEmitter {
           await this.answer(action.id, 'edit', {
             ok: false,
             error:
-              'WhatsApp refused the edit — usually because it is more than about fifteen minutes old. '
+              `${platform} refused the edit — usually because it is more than about fifteen minutes old. `
               + `Say what you meant in a new message instead. (${String((err as Error).message)})`,
           });
           break;
@@ -1713,13 +1761,20 @@ export class Outbox extends EventEmitter {
           });
           break;
         }
+        if (this.deps.wa.unsend === undefined) {
+          await this.answer(action.id, 'unsend', {
+            ok: false,
+            error: `${platform} does not let me take a message back once it is sent.`,
+          });
+          break;
+        }
         try {
           await this.deps.wa.unsend(turn.chatJid, target.id);
         } catch (err) {
           await this.answer(action.id, 'unsend', {
             ok: false,
             error:
-              'WhatsApp refused the deletion — usually because it is too old to retract. '
+              `${platform} refused the deletion — usually because it is too old to retract. `
               + `(${String((err as Error).message)})`,
           });
           break;

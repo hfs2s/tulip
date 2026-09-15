@@ -51,7 +51,7 @@ import { feed } from './feed.js';
 import { log } from './log.js';
 import type { ChatRecord, ChatRegistry } from './chats.js';
 import type { Config, PluginSettings } from './config.js';
-import type { WhatsApp } from './whatsapp.js';
+import type { Transport } from './transport.js';
 
 export const PLUGINS_DIR = process.env['TULIP_PLUGINS_DIR'] ?? '/plugins';
 
@@ -225,7 +225,7 @@ interface Stats {
 }
 
 export interface PluginHostDeps {
-  readonly wa: Pick<WhatsApp, 'connected' | 'sendText' | 'sendImage'>;
+  readonly wa: Pick<Transport, 'connected' | 'sendText' | 'sendImage'>;
   readonly config: Pick<Config, 'plugins'>;
   readonly chats: Pick<ChatRegistry, 'all' | 'isBlocked'>;
   readonly dir?: string;

@@ -27,8 +27,10 @@ import makeWASocket, {
   type WASocket,
 } from 'baileys';
 import qrcode from 'qrcode-terminal';
+import { senderPnOf, toEnvelope, type Envelope, type ParseContext } from './envelope.js';
 import { log } from './log.js';
 import { paths } from './paths.js';
+import type { Inbound, SentKey, Transport, TransportKind } from './transport.js';
 
 const LOCK_FILE = join(paths.root, 'bridge.lock');
 
@@ -88,15 +90,7 @@ function acquireLock(): void {
   process.on('exit', release);
 }
 
-/**
- * The id of a message we just sent, when WhatsApp told us one.
- *
- * Null is a real and ordinary answer, not an error case to assert away: a send
- * can succeed while the acknowledgement carrying the key is absent. Callers
- * treat null as "delivered, not correctable".
- */
-export type SentKey = string | null;
-
+/** The id of a message we just sent, when WhatsApp told us one. See `SentKey`. */
 function keyOf(sent: { key?: { id?: string | null } | null } | undefined): SentKey {
   const id = sent?.key?.id;
   return typeof id === 'string' && id.length > 0 ? id : null;
@@ -104,12 +98,41 @@ function keyOf(sent: { key?: { id?: string | null } | null } | undefined): SentK
 
 export type WhatsAppEvents = {
   ready: [{ id: string | undefined; name: string | undefined }];
-  message: [WAMessage];
+  message: [Inbound];
   qr: [string];
   fatal: [Error];
 };
 
-export class WhatsApp extends EventEmitter {
+/**
+ * One raw Baileys message as the dispatcher's `Inbound` handle.
+ *
+ * The cheap half is read here, exactly as the dispatcher used to read it
+ * before parsing: the chat is the `remoteJid` with any device suffix cut off,
+ * a group is anything under `@g.us`, and the alternate id is the sender's
+ * phone-number form when they arrived as a linked id. The expensive half —
+ * `toEnvelope`, which downloads media and asks for group metadata — waits for
+ * a chat key, and needs the live socket at that moment rather than the one
+ * that existed when the message arrived. `socket` is therefore a getter: null
+ * means "reconnecting", and the parse says so instead of guessing.
+ *
+ * Exported for the tests that drive the dispatcher with a hand-built message
+ * and a stubbed socket; the class below is the only production caller.
+ */
+export function inboundOf(message: WAMessage, socket: () => WASocket | null): Inbound {
+  const chatJid = message.key.remoteJid ?? '';
+  return {
+    chatId: chatJid.split(':')[0] ?? chatJid,
+    isGroup: chatJid.endsWith('@g.us'),
+    altChatId: senderPnOf(message),
+    parse: async (ctx: ParseContext): Promise<Envelope | null> => {
+      const live = socket();
+      return live === null ? null : toEnvelope(message, live, ctx);
+    },
+  };
+}
+
+export class WhatsApp extends EventEmitter implements Transport {
+  readonly kind: TransportKind = 'whatsapp';
   private socket: WASocket | null = null;
   private attempt = 0;
   private generation = 0;
@@ -119,12 +142,17 @@ export class WhatsApp extends EventEmitter {
 
   connected = false;
 
+  /** A number's direct chat. WhatsApp is the platform where a person *is* a number. */
+  directChatId(number: string): string {
+    return `${number}@s.whatsapp.net`;
+  }
+
   async start(): Promise<void> {
     acquireLock();
     await this.connect();
   }
 
-  get me(): WASocket['user'] | null {
+  get me(): NonNullable<WASocket['user']> | null {
     return this.socket?.user ?? null;
   }
 
@@ -273,7 +301,7 @@ export class WhatsApp extends EventEmitter {
         this.seen.add(id);
         if (this.seen.size > 4000) this.seen.clear();
 
-        this.emit('message', message);
+        this.emit('message', inboundOf(message, () => this.socket));
       }
     });
   }

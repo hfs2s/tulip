@@ -22,7 +22,12 @@ import { paths } from './paths.js';
 const ChatRecord = z
   .object({
     chatKey: z.string().regex(/^[0-9a-f]{16}$/),
-    jid: z.string().min(3).max(128),
+    /**
+     * The transport's id for the chat. A WhatsApp jid, or a Teams conversation
+     * id — which in a channel carries the thread as `;messageid=<root>` and
+     * runs to about eighty characters, hence the room above the old 128.
+     */
+    jid: z.string().min(3).max(256),
     isGroup: z.boolean(),
     /** Display name, from WhatsApp. Attacker-controlled; used for the panel only. */
     name: z.string().max(128).nullable().default(null),
@@ -55,7 +60,7 @@ const ChatRecord = z
      * record is keyed on the phone-number form wherever it is known, and this
      * remembers the linked id so the next message under it lands here.
      */
-    altJid: z.string().min(3).max(128).nullable().default(null),
+    altJid: z.string().min(3).max(256).nullable().default(null),
     /**
      * Set on a record that turned out to be the same person as another one.
      *

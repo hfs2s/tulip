@@ -17,7 +17,6 @@
 import { EventEmitter } from 'node:events';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { WAMessage } from 'baileys';
 import { inPaths, transcriptFor } from '@2lp/shared';
 import type { InboundMedia, InboundMessage } from '@2lp/shared';
 import type { ChatRegistry } from './chats.js';
@@ -30,14 +29,14 @@ import { banner, noteAnswerTurn, noteAsk, peerOf, peers, readMark, type Peer } f
 import { publishTurn, readStatus, retireBatch } from './handoff.js';
 import { roomContext } from './history.js';
 import { log, redactNumber } from './log.js';
-import { hasContent, senderPnOf, toEnvelope, type Envelope } from './envelope.js';
+import { hasContent, type Envelope } from './envelope.js';
 import { canTranscribe, transcribe } from './transcribe.js';
 import { claim } from './spend.js';
 import type { Limiter } from './ratelimit.js';
 import { Queue, type QueuedMessage } from './queue.js';
 import { state } from './state.js';
+import type { Inbound, Transport } from './transport.js';
 import type { TurnRegistry } from './turns.js';
-import type { WhatsApp } from './whatsapp.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -87,7 +86,7 @@ const TURN_START_TIMEOUT_MS = 30_000;
 const POLL_MS = 1000;
 
 export interface DispatcherDeps {
-  readonly wa: WhatsApp;
+  readonly wa: Transport;
   readonly chats: ChatRegistry;
   readonly limiter: Limiter;
   readonly turns: TurnRegistry;
@@ -211,32 +210,32 @@ export class Dispatcher extends EventEmitter {
     setTimeout(() => void this.pump(), 2000);
   }
 
-  /** Handle one raw WhatsApp message. Never throws into the socket. */
-  async handle(message: WAMessage): Promise<void> {
+  /** Handle one inbound message from the transport. Never throws into it. */
+  async handle(inbound: Inbound): Promise<void> {
     const now = Date.now();
     const { chats, config, limiter, wa } = this.deps;
 
-    const chatJid = message.key.remoteJid ?? '';
-    const isGroupChat = chatJid.endsWith('@g.us');
-    // Read from the raw message rather than the envelope, which does not exist
+    const isGroupChat = inbound.isGroup;
+    // Read from the handle rather than the envelope, which does not exist
     // yet: parsing needs the chat key in order to file attachments under it.
-    const chatKey = chats.keyFor(chatJid.split(':')[0] ?? chatJid, isGroupChat, now, senderPnOf(message));
+    const chatKey = chats.keyFor(inbound.chatId, isGroupChat, now, inbound.altChatId);
 
-    // The live socket, not the wrapper. Passing the wrapper — which was done
-    // with `as never` — left `socket.user` undefined and `socket.groupMetadata`
-    // absent, so mentions never matched and group names were always null.
-    const socket = wa.live;
-    if (socket === null) {
-      log('dispatch.noSocket', { chatKey, note: 'reconnecting; this message is recorded and will be handled on the next pass' });
-      return;
-    }
-    const envelope = await toEnvelope(message, socket, {
+    // The transport parses against whatever it holds *now*. For WhatsApp that
+    // is the live socket — passing the wrapper instead, with `as never`, once
+    // left `socket.user` undefined and `socket.groupMetadata` absent, so
+    // mentions never matched and group names were always null. Null means it
+    // has nothing to parse with at this moment.
+    const envelope = await inbound.parse({
       chatKey,
       mediaRoot: inPaths.media,
       maxMediaBytes: config.limits.maxMediaBytes,
       maxMediaPerMessage: config.limits.maxMediaPerMessage,
       maxInboundChars: config.limits.maxInboundChars,
     });
+    if (envelope === null) {
+      log('dispatch.noSocket', { chatKey, note: 'reconnecting; this message is recorded and will be handled on the next pass' });
+      return;
+    }
 
     if (!hasContent(envelope)) {
       log('msg.empty', { chatKey, note: 'nothing a person sent — protocol traffic' });

@@ -56,7 +56,7 @@ import { paths } from './paths.js';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import type { Limiter } from './ratelimit.js';
-import type { WhatsApp } from './whatsapp.js';
+import type { Transport } from './transport.js';
 
 /**
  * What an entry is doing, in one word an operator can scan a column of.
@@ -393,7 +393,7 @@ export function cancelSchedule(id: string, chatKey?: string): Cancelled {
 // ─── The ticker ──────────────────────────────────────────────────────────────
 
 export interface SchedulerDeps {
-  readonly wa: WhatsApp;
+  readonly wa: Transport;
   /** Live, so an operator switching `agent.schedule` off is felt on the next tick. */
   readonly config: Config;
   readonly chats: ChatRegistry;
