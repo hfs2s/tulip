@@ -310,7 +310,7 @@ knowing before you need them:
 
 | Path | What it is |
 |---|---|
-| `bridge/` | The trusted half. WhatsApp socket, gate, rate limits, outbox, panel. |
+| `bridge/` | The trusted half. WhatsApp socket or Teams endpoint, gate, rate limits, outbox, panel. |
 | `agent/` | The untrusted half. Session pool, tmux driver, the `tulip-wa` CLI, hooks. |
 | `egress/` | The deny-by-default CONNECT proxy. |
 | `shared/` | Types and schemas describing the handoff contract, used by both halves. |
@@ -415,6 +415,17 @@ files, HTTP requests — is parsed with Zod at the boundary and is a typed value
 afterwards. There is no `any` in the trust-relevant path.
 
 ---
+
+## Transports
+
+WhatsApp is the default and what every deployment described here runs. The
+bridge also speaks Microsoft Teams: `TULIP_TRANSPORT=teams` in an instance's
+`.env` swaps the Baileys socket for a Bot Framework endpoint — the same gate,
+outbox, panel and agent behind it, with the platform's gaps handled in the open
+(a voice note arrives as its words, a file as its caption and one honest line).
+The contract both implement is `bridge/src/transport.ts`; the Teams side is
+`bridge/src/teams/`. Registering the bot, granting it a tenant and routing its
+endpoint are in [`docs/TEAMS.md`](docs/TEAMS.md).
 
 ## Several agents
 

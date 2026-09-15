@@ -67,6 +67,12 @@ In its `.env`:
 | `TULIP_HOST_CONFIG` | `./config` | config.json and the persona |
 | `TULIP_HOST_PLUGINS` | `./plugins` | Plugin drop-boxes — see [PLUGINS.md](PLUGINS.md) |
 | `TULIP_HOST_RUN` | `/run/tulip` | The ttyd socket for the Terminal page |
+| `TULIP_TRANSPORT` | `whatsapp` | Which platform the instance talks on: `whatsapp` or `teams` |
+| `TULIP_TEAMS_APP_ID` | *(unset)* | Teams only: the bot registration's application (client) id |
+| `TULIP_TEAMS_APP_SECRET` | *(unset)* | Teams only: a client secret from that registration. Read by the bridge, never printed |
+| `TULIP_TEAMS_TENANT_ID` | *(unset)* | Teams only, optional: the tenant, for a single-tenant registration |
+| `TULIP_TEAMS_BIND` | `127.0.0.1` | Host address the Teams endpoint is published on, like `TULIP_PANEL_BIND` |
+| `TULIP_TEAMS_PORT` | `8792` | Host port for it. Must differ per instance, like the panel's |
 
 And, not inherited from anywhere: the model credentials, the MiniMax/OpenAI/Exa
 keys, `TULIP_PAGES_HOST` and the Access pair. A value left out of an instance's
@@ -77,6 +83,16 @@ make impossible.
 
 `TULIP_PAGES_HOST` must be the instance's own, and must not be its panel's
 hostname. `TULIP_ACCESS_AUD` is the AUD of *that instance's* Access application.
+
+**A Teams instance has no WhatsApp number.** `TULIP_TRANSPORT=teams` replaces
+the Baileys socket with a listener Microsoft's bot service posts to; there is
+no pairing code in its logs, no `session/` directory worth copying, and the
+panel shows the bot's name where a WhatsApp instance shows the paired number.
+The Teams endpoint is published on its own port — it is not the panel, and
+cannot sit behind the panel's Cloudflare Access policy, because the bot service
+cannot sign in — so each Teams instance needs its own `TULIP_TEAMS_PORT` and its
+own tunnel route with no Access in front. Operators and the audience are listed
+by Entra object id rather than by number. See [TEAMS.md](TEAMS.md).
 
 ## Adding one
 
