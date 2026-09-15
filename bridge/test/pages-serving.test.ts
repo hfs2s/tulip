@@ -156,7 +156,7 @@ describe('a page’s database, as a script', () => {
 
   it('refuses one larger than a whole page may be', async () => {
     const dir = build('inventory', { 'index.html': 'x', 'data.sqlite': database(64) });
-    truncateSync(join(dir, 'data.sqlite'), 9 * 1024 * 1024);
+    truncateSync(join(dir, 'data.sqlite'), 257 * 1024 * 1024); // sparse: one byte over the 256 MB cap costs no disk
     expect((await get('/inventory/data.sqlite.js')).status).toBe(413);
   });
 

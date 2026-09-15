@@ -69,7 +69,13 @@ const SQLITE_HEADER = Buffer.from('SQLite format 3\0', 'latin1');
 /** A Pi with one disk, and pages nobody is watching the size of. */
 const MAX_PAGES = 40;
 const MAX_FILES_PER_PAGE = 40;
-const MAX_PAGE_BYTES = 8 * 1024 * 1024;
+// 256 MB rather than the original 8 MB: a page that carries a podcast episode
+// (40-50 MB each as an m4a) or the PDF it was written from needs the room, and
+// at 40 pages the worst case is 10 GB on a 58 GB disk with 27 GB free. Files are
+// streamed to the browser, so the cap is disk, not memory — except index.html
+// and a database, which are read whole up to this size by readPageFile.
+const MAX_PAGE_BYTES = 256 * 1024 * 1024;
+const MAX_PAGE_LABEL = `${String(MAX_PAGE_BYTES / (1024 * 1024))} MB`;
 
 export interface PageSummary {
   readonly slug: string;
@@ -460,7 +466,7 @@ export function publishPage(slug: string): Published {
   if (stat.files > MAX_FILES_PER_PAGE) {
     return { ok: false, error: `a page may have at most ${String(MAX_FILES_PER_PAGE)} files` };
   }
-  if (stat.bytes > MAX_PAGE_BYTES) return { ok: false, error: 'that page is larger than 8 MB' };
+  if (stat.bytes > MAX_PAGE_BYTES) return { ok: false, error: `that page is larger than ${MAX_PAGE_LABEL}` };
 
   const existing = listPages();
   if (existing.length > MAX_PAGES && !existing.some((p) => p.slug === slug)) {
@@ -825,8 +831,8 @@ export function servePage(
  *
  * Built from the database every time and never read from a file of that name,
  * so what the kit is handed is always the database and never something the
- * agent wrote to look like one. Streamed, so an 8 MB database is never an
- * 11 MB string in the bridge's memory.
+ * agent wrote to look like one. Streamed, so a database at the page cap is never
+ * held whole as a string in the bridge's memory.
  */
 function serveDatabase(res: ServerResponse, slug: string, name: string, headers: Record<string, string>): void {
   const file = openPageFile(slug, name);
