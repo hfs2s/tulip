@@ -26,7 +26,7 @@ process.env['TULIP_IN_DIR'] = join(root, 'in');
 process.env['TULIP_OUT_DIR'] = join(root, 'out');
 process.env['TULIP_PAGES_HOST'] = 'pages.example.com';
 
-const { servePage, hashPagePassword, databaseNotes } = await import('../src/pages.js');
+const { servePage, hashPagePassword, databaseNotes, parseRange } = await import('../src/pages.js');
 const { outPaths } = await import('@2lp/shared');
 
 /** Stands in for the WhatsApp session, which lives beside the pages' volume. */
@@ -53,7 +53,7 @@ interface Reply {
 
 async function get(
   path: string,
-  init: { auth?: string; passwords?: Record<string, { salt: string; hash: string }> } = {},
+  init: { auth?: string; range?: string; passwords?: Record<string, { salt: string; hash: string }> } = {},
 ): Promise<Reply> {
   const server = createServer((req, res) => {
     servePage(res, new URL(req.url ?? '/', 'http://pages.example.com'), req, init.passwords ?? {});
@@ -62,7 +62,10 @@ async function get(
   try {
     const { port } = server.address() as AddressInfo;
     const res = await fetch(`http://127.0.0.1:${String(port)}${path}`, {
-      headers: init.auth === undefined ? {} : { authorization: init.auth },
+      headers: {
+        ...(init.auth === undefined ? {} : { authorization: init.auth }),
+        ...(init.range === undefined ? {} : { range: init.range }),
+      },
     });
     return { status: res.status, headers: res.headers, body: Buffer.from(await res.arrayBuffer()) };
   } finally {
@@ -287,5 +290,53 @@ describe('what publishing says about a page’s databases', () => {
     const dir = build('linked', { 'index.html': loads });
     symlinkSync(join(root, 'state', 'session', 'creds.json'), join(dir, 'data.sqlite'));
     expect(databaseNotes('linked').join()).toContain('not a link');
+  });
+});
+
+describe('documents and media a page carries whole', () => {
+  it('serves a PDF and an m4a with their own types, and says ranges are accepted', async () => {
+    build('digest', { 'index.html': 'x', 'briefing.pdf': Buffer.from('%PDF-1.4 fake'), 'episode.m4a': Buffer.alloc(100, 7) });
+    const pdf = await get('/digest/briefing.pdf');
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers.get('content-type')).toBe('application/pdf');
+    expect(pdf.headers.get('accept-ranges')).toBe('bytes');
+    const audio = await get('/digest/episode.m4a');
+    expect(audio.status).toBe(200);
+    expect(audio.headers.get('content-type')).toBe('audio/mp4');
+    expect(audio.body.length).toBe(100);
+  });
+
+  it('answers one byte range with 206 and exactly those bytes', async () => {
+    const bytes = Buffer.from(Array.from({ length: 50 }, (_, i) => i));
+    build('digest', { 'index.html': 'x', 'episode.m4a': bytes });
+    const part = await get('/digest/episode.m4a', { range: 'bytes=10-19' });
+    expect(part.status).toBe(206);
+    expect(part.headers.get('content-range')).toBe('bytes 10-19/50');
+    expect(part.headers.get('content-length')).toBe('10');
+    expect([...part.body]).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+    const tail = await get('/digest/episode.m4a', { range: 'bytes=45-' });
+    expect(tail.status).toBe(206);
+    expect([...tail.body]).toEqual([45, 46, 47, 48, 49]);
+  });
+
+  it('refuses a range that starts past the end, and serves whole what it does not understand', async () => {
+    build('digest', { 'index.html': 'x', 'episode.m4a': Buffer.alloc(20, 1) });
+    const past = await get('/digest/episode.m4a', { range: 'bytes=20-30' });
+    expect(past.status).toBe(416);
+    expect(past.headers.get('content-range')).toBe('bytes */20');
+    const odd = await get('/digest/episode.m4a', { range: 'bytes=0-5,10-15' });
+    expect(odd.status).toBe(200);
+    expect(odd.body.length).toBe(20);
+  });
+
+  it('parses ranges the way browsers send them', () => {
+    expect(parseRange(undefined, 100)).toBeNull();
+    expect(parseRange('bytes=0-', 100)).toEqual({ start: 0, end: 99 });
+    expect(parseRange('bytes=0-999', 100)).toEqual({ start: 0, end: 99 });
+    expect(parseRange('bytes=-10', 100)).toEqual({ start: 90, end: 99 });
+    expect(parseRange('bytes=-0', 100)).toBe('unsatisfiable');
+    expect(parseRange('bytes=100-', 100)).toBe('unsatisfiable');
+    expect(parseRange('bytes=5-3', 100)).toBe('unsatisfiable');
+    expect(parseRange('bytes=0-', 0)).toBeNull();
   });
 });

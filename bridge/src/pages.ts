@@ -55,6 +55,16 @@ const TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
+  // Documents and media a page carries whole: the PDF a digest was written
+  // from, the podcast episode it is about. Served with byte ranges (below) so
+  // a browser can seek in an hour of audio and a PDF viewer can page.
+  '.pdf': 'application/pdf',
+  '.m4a': 'audio/mp4',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
   // A database, for a page that offers it as a download. Pages themselves read
   // it as `<name>.js` — see `serveDatabase`.
   '.sqlite': 'application/vnd.sqlite3',
@@ -808,15 +818,59 @@ export function servePage(
     return;
   }
 
-  res.writeHead(200, { ...common, 'content-type': type, 'content-length': file.size });
+  // One byte range, for media seeking and PDF viewers. Anything the parser
+  // does not understand is answered whole, as before; a range that lies
+  // outside the file is refused with 416, which is what the browser expects.
+  const range = parseRange(req?.headers?.range, file.size);
+  if (range === 'unsatisfiable') {
+    closeSync(file.fd);
+    res.writeHead(416, { ...common, 'content-range': `bytes */${String(file.size)}` }).end();
+    return;
+  }
+  const start = range?.start ?? 0;
+  const end = range?.end ?? file.size - 1;
+  res.writeHead(range ? 206 : 200, {
+    ...common,
+    'content-type': type,
+    'accept-ranges': 'bytes',
+    'content-length': file.size === 0 ? 0 : end - start + 1,
+    ...(range ? { 'content-range': `bytes ${String(start)}-${String(end)}/${String(file.size)}` } : {}),
+  });
   if (file.size === 0) {
     closeSync(file.fd);
     res.end();
     return;
   }
-  pipeline(createReadStream('', { fd: file.fd, start: 0, end: file.size - 1 }), res, (err) => {
+  pipeline(createReadStream('', { fd: file.fd, start, end }), res, (err) => {
     if (err) res.destroy();
   });
+}
+
+/**
+ * A single `bytes=start-end` range against a file of `size` bytes, or null to
+ * serve the whole file, or 'unsatisfiable' when the range starts past the end.
+ * Multi-range requests are served whole rather than as multipart; no browser
+ * needs them for playback or paging.
+ */
+export function parseRange(
+  header: string | string[] | undefined,
+  size: number,
+): { start: number; end: number } | null | 'unsatisfiable' {
+  if (typeof header !== 'string' || size === 0) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (m === null) return null;
+  const [, a, b] = m;
+  if (a === '' && b === '') return null;
+  if (a === '') {
+    // Suffix range: the last N bytes.
+    const n = Math.min(Number(b), size);
+    return n === 0 ? 'unsatisfiable' : { start: size - n, end: size - 1 };
+  }
+  const start = Number(a);
+  if (!Number.isSafeInteger(start) || start >= size) return 'unsatisfiable';
+  const end = b === '' ? size - 1 : Math.min(Number(b), size - 1);
+  if (end < start) return 'unsatisfiable';
+  return { start, end };
 }
 
 /**
