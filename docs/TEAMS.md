@@ -762,3 +762,5 @@ Every Microsoft page relied on above, checked 2026-09-15.
 ~15-second response budget is from Microsoft Q&A threads
 (<https://learn.microsoft.com/en-us/answers/questions/5488609/microsoft-teams-azure-bot-not-sending-events-to-me>),
 not a reference page.
+
+> **`supportsChannelFeatures: tier1` is mandatory.** The admin center refuses any manifest 1.25 or newer that lists the `team` scope without it ("must include the 'supportsChannelFeatures' property"). `tier1` declares basic readiness for shared and private channels; the template sets it.

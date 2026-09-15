@@ -22,6 +22,7 @@
     "outline": "outline.png"
   },
   "accentColor": "#1F5F52",
+  "supportsChannelFeatures": "tier1",
   "bots": [
     {
       "botId": "${TULIP_TEAMS_APP_ID}",
