@@ -238,8 +238,29 @@ async function fetchMedia(
 export function senderPnOf(message: WAMessage): string | null {
   const chatJid = bare(message.key.remoteJid) ?? 'unknown@s.whatsapp.net';
   if (isGroup(chatJid)) return null;
-  const raw = (message.key as { senderPn?: unknown }).senderPn;
-  return typeof raw === 'string' ? bare(raw) : null;
+  return phoneBesideLid(message.key, false);
+}
+
+/**
+ * The phone-number jid WhatsApp supplied beside a sender's `@lid`, or null.
+ *
+ * Which field carries it depends on the Baileys version, and reading the
+ * wrong one fails silently: the sender simply never matches a number in any
+ * allowlist and gets a second chat record. Baileys 7 sets `remoteJidAlt` on
+ * a direct chat and `participantAlt` in a group (`decode-wa-message.js`,
+ * from the addressing context); Baileys 6 set `senderPn` for both. All three
+ * are read, newest first, because none is declared on the key type this
+ * package ships and a build against either version has to keep working —
+ * fourteen of Juan's twenty-four direct chats arrived as a bare lid while
+ * only `senderPn` was read, and every one of them was a person WhatsApp had
+ * actually named the number of.
+ */
+function phoneBesideLid(key: WAMessage['key'], group: boolean): string | null {
+  const k = key as { remoteJidAlt?: unknown; participantAlt?: unknown; senderPn?: unknown };
+  for (const raw of [group ? k.participantAlt : k.remoteJidAlt, k.senderPn]) {
+    if (typeof raw === 'string' && raw.length > 0) return bare(raw);
+  }
+  return null;
 }
 
 /**
@@ -273,13 +294,10 @@ export async function toEnvelope(
   const chatJid = bare(message.key.remoteJid) ?? 'unknown@s.whatsapp.net';
   const group = isGroup(chatJid);
   const senderJid = bare(group ? (message.key.participant ?? message.participant) : message.key.remoteJid);
-  // `senderPn` is present on the wire but absent from this Baileys version's
-  // key type. It carries the phone-number identity for a sender WhatsApp
-  // delivered as a bare @lid, which is the difference between an allowlist
-  // entry matching and silently not matching — so it is read defensively
-  // rather than dropped for want of a declaration.
-  const senderPnRaw = (message.key as { senderPn?: unknown }).senderPn;
-  const senderPn = typeof senderPnRaw === 'string' ? bare(senderPnRaw) : null;
+  // The phone-number identity for a sender WhatsApp delivered as a bare @lid,
+  // which is the difference between an allowlist entry matching and silently
+  // not matching. See `phoneBesideLid` for which key field carries it.
+  const senderPn = phoneBesideLid(message.key, group);
   const content = unwrap(message.message);
   const ts = (Number(message.messageTimestamp) || Math.floor(Date.now() / 1000)) * 1000;
   const id = message.key.id ?? `${ts}`;
