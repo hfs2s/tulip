@@ -178,6 +178,20 @@ describe('chatTranscript — a voice note as an item', () => {
     expect(item).toMatchObject({ media: [{ kind: 'audio', bytes: 93535, seconds: null, voice: false, transcript: null, playable: false }] });
   });
 
+  it('recovers a note recorded before names were kept, from the message id the row carries', () => {
+    // The dispatcher names a file from the message id — alphanumerics only,
+    // first twelve — and the old rows carry that id. This is how the notes
+    // already on disk become playable without rewriting the feed.
+    keep(CHAT, '0000000009-3AB69CCFBB78.ogg', 'the older one');
+    feed.inbound({
+      chatKey: CHAT, chatName: 'Cor', isGroup: false, from: 'Cor', text: '',
+      media: [{ kind: 'audio', bytes: 93535 }], accepted: true, reason: null,
+      waId: '3AB69CCFBB78EACDC0FA',
+    });
+    const [item] = items(CHAT);
+    expect(item).toMatchObject({ media: [{ transcript: 'the older one', playable: true }] });
+  });
+
   it('reports a note whose file was deleted as no longer playable, with no words', () => {
     const file = keep(CHAT, NOTE, 'gone soon');
     voiceRow(CHAT);
@@ -245,6 +259,34 @@ describe('chatMediaPath — which file a row id names', () => {
     const absolute = voiceRow(CHAT, paths.salt);
     expect(chatMediaPath(CHAT, climbing)).toBeNull();
     expect(chatMediaPath(CHAT, absolute)).toBeNull();
+  });
+
+  it('finds the file for a row with no name by the message id, and only among what is there', () => {
+    const file = keep(CHAT, '0000000009-3AB69CCFBB78.ogg', 'words');
+    const legacy = (waId: string): string =>
+      feed.inbound({
+        chatKey: CHAT, chatName: 'Cor', isGroup: false, from: 'Cor', text: '',
+        media: [{ kind: 'audio', bytes: 93535 }], accepted: true, reason: null, waId,
+      }).uid;
+    expect(chatMediaPath(CHAT, legacy('3AB69CCFBB78EACDC0FA'))).toBe(file);
+    // The sidecar and a view copy carry the same id and are not the recording.
+    expect(chatMediaPath(CHAT, legacy('3AB69CCFBB78EACDC0FA'))).not.toMatch(/\.txt$/);
+    // An id nothing on disk was named from finds nothing.
+    expect(chatMediaPath(CHAT, legacy('3EB0000000000000'))).toBeNull();
+    // An id shaped to climb is reduced to alphanumerics and then merely fails to match.
+    expect(chatMediaPath(CHAT, legacy('../../state/salt'))).toBeNull();
+    // Nothing to match on at all.
+    expect(chatMediaPath(CHAT, legacy(''))).toBeNull();
+  });
+
+  it('does not go looking for a download the row says failed, even if a file with that id exists', () => {
+    keep(CHAT, '0000000009-3AB69CCFBB78.ogg');
+    const failed = feed.inbound({
+      chatKey: CHAT, chatName: 'Cor', isGroup: false, from: 'Cor', text: '',
+      media: [{ kind: 'audio', bytes: null, name: null }], accepted: true, reason: null,
+      waId: '3AB69CCFBB78EACDC0FA',
+    }).uid;
+    expect(chatMediaPath(CHAT, failed)).toBeNull();
   });
 
   it('refuses an outbound row, which never names an inbound file', () => {

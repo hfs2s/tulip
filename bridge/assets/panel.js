@@ -1650,7 +1650,7 @@ function clipNode(item, m) {
 
   if (m.transcript) clip.appendChild(node('div', 'clip-words', m.transcript));
   else clip.appendChild(node('div', 'clip-words none',
-    m.playable ? 'No transcript.' : 'No transcript, and the recording is no longer kept.'));
+    m.playable ? 'No transcript.' : 'No transcript. If the recording was kept, it is on the Media page.'));
 
   if (m.playable && item.uid && chatOpen) {
     var player = chatPlayers[item.uid];

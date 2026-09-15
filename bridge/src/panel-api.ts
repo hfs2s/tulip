@@ -242,7 +242,7 @@ export function chatTranscript(deps: ApiDeps, chatKey: string, limit: number): J
         // the handle nor an empty list, so the panel's "has attachments" test
         // is the presence of the field and nothing subtler.
         ...(e.kind === 'in' && Array.isArray(e.media) && e.media.length > 0
-          ? { uid: e.uid, media: e.media.map((m) => saidMedia(chatKey, m)) }
+          ? { uid: e.uid, media: e.media.map((m) => saidMedia(chatKey, e, m)) }
           : {}),
       };
     });
@@ -1036,8 +1036,44 @@ export function chatMediaPath(chatKey: string, uid: string): string | null {
   // show is a message it can play, and one it has scrolled off is neither.
   const row = feed.recent(4000).find((e) => e.uid === uid && e.kind === 'in' && e.chatKey === chatKey);
   const first = row?.media?.[0];
-  if (first === undefined || typeof first.name !== 'string' || first.name.length === 0) return null;
-  return resolveMedia(chatKey, first.name, 'in');
+  if (row === undefined || first === undefined) return null;
+  const name = storedName(chatKey, row, first);
+  return name === null ? null : resolveMedia(chatKey, name, 'in');
+}
+
+/**
+ * The file an attachment was kept as.
+ *
+ * Off the row where the row says. Rows written before names were recorded
+ * say nothing, and there are a few dozen of those with recordings still on
+ * disk; for them the name is *recovered* rather than trusted. Both parsers
+ * name a file `<stamp>-<message id, alphanumerics only, first twelve>.<ext>`,
+ * and the row carries the message id, so the chat's own directory is read and
+ * the one entry with that id is the file. Only a real directory entry can be
+ * returned — the id is used to *choose* among what is there, never to build
+ * a path — and the result goes through `resolveMedia` like any other name.
+ *
+ * `name: null` is different from no name at all: it is the record of a
+ * download that failed, and nothing is looked for.
+ */
+function storedName(chatKey: string, row: FeedEntry, m: FeedMedia): string | null {
+  if (typeof m.name === 'string') return m.name.length > 0 ? m.name : null;
+  if (m.name === null) return null;
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return null;
+  const id = typeof row.waId === 'string' ? row.waId.replace(/[^A-Za-z0-9]/g, '').slice(0, 12) : '';
+  if (id.length === 0) return null;
+  let entries: string[];
+  try {
+    entries = readdirSync(join(inPaths.media, chatKey));
+  } catch {
+    return null;
+  }
+  const suffix = `-${id}.`;
+  return (
+    entries.find(
+      (entry) => entry.includes(suffix) && !isTranscript(entry) && !entry.endsWith(VIEW_SUFFIX) && /^\d+-[A-Za-z0-9]+\.[a-z0-9]+$/.test(entry),
+    ) ?? null
+  );
 }
 
 /**
@@ -1071,8 +1107,9 @@ export function chatMediaFile(res: ServerResponse, headers: Record<string, strin
  * recording deleted from the Media page must not leave a player behind that
  * 404s when pressed.
  */
-function saidMedia(chatKey: string, m: FeedMedia): SaidMedia {
-  const file = typeof m.name === 'string' && m.name.length > 0 ? resolveMedia(chatKey, m.name, 'in') : null;
+function saidMedia(chatKey: string, row: FeedEntry, m: FeedMedia): SaidMedia {
+  const name = storedName(chatKey, row, m);
+  const file = name === null ? null : resolveMedia(chatKey, name, 'in');
   let transcript: string | null = null;
   if (file !== null) {
     try {
