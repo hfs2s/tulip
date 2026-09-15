@@ -68,6 +68,7 @@ import {
   deleteMedia,
   logTail,
   mediaFile,
+  chatMediaFile,
   mediaList,
   runAction,
   send,
@@ -664,6 +665,14 @@ export function startPanel(deps: ApiDeps): Server | null {
               : [],
           );
           return send(res, headers, result.ok ? 200 : 400, result);
+        }
+        // A message's own attachment, for the Chat page's inline player. Named
+        // by chat key and feed row id — never by file name — and resolved from
+        // the bridge's record; see `chatMediaPath`. Behind the same gate as
+        // everything above, and the privacy check on `key` has already run.
+        if (url.pathname === '/api/chat/media' && req.method === 'GET') {
+          chatMediaFile(res, headers, url.searchParams.get('key') ?? '', url.searchParams.get('id') ?? '');
+          return;
         }
         if (url.pathname === '/api/media/list') {
           // `{ total, items }`, not a bare array — this filtered the wrapper as

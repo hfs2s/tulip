@@ -45,7 +45,7 @@ import { personaView, revertPersonaPart, savePersonaPart } from './persona.js';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import type { Dispatcher } from './dispatcher.js';
-import { feed, type FeedEntry } from './feed.js';
+import { feed, type FeedEntry, type FeedMedia } from './feed.js';
 import { readStatus, readUsage } from './handoff.js';
 import { log } from './log.js';
 import { sent } from './sent.js';
@@ -55,7 +55,7 @@ import { state } from './state.js';
 // The masked chat's other half. `sessionTranscript` is the agent's own Claude
 // Code transcript and has nothing to do with `transcriptFor` above, which is a
 // voice note's sidecar — see the header of `transcript.ts`.
-import { mergeTimeline, sessionTranscript, type SaidItem } from './transcript.js';
+import { mergeTimeline, sessionTranscript, type SaidItem, type SaidMedia } from './transcript.js';
 import { transportLabel, type Transport } from './transport.js';
 
 export interface ApiDeps {
@@ -238,6 +238,12 @@ export function chatTranscript(deps: ApiDeps, chatKey: string, limit: number): J
         ...(retracted.has(e.uid) ? { unsent: true as const } : {}),
         ...(e.kind === 'in' && typeof e.waId === 'string' ? { waId: e.waId } : {}),
         ...(e.kind === 'in' && typeof e.participant === 'string' ? { participant: e.participant } : {}),
+        // Only where there is something to fetch. A text-only row gets neither
+        // the handle nor an empty list, so the panel's "has attachments" test
+        // is the presence of the field and nothing subtler.
+        ...(e.kind === 'in' && Array.isArray(e.media) && e.media.length > 0
+          ? { uid: e.uid, media: e.media.map((m) => saidMedia(chatKey, m)) }
+          : {}),
       };
     });
 
@@ -976,11 +982,16 @@ export function mediaFile(
     res.writeHead(400, { ...headers, 'content-type': 'text/plain' }).end('bad request\n');
     return;
   }
+  streamMedia(res, headers, candidate);
+}
+
+/** The bytes of a resolved attachment, or a 404 if it has gone since it was named. */
+function streamMedia(res: ServerResponse, headers: Record<string, string>, candidate: string): void {
   if (!existsSync(candidate)) {
     res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
     return;
   }
-  const mime = VIEWABLE[extname(name).toLowerCase()] ?? 'application/octet-stream';
+  const mime = VIEWABLE[extname(candidate).toLowerCase()] ?? 'application/octet-stream';
   res.writeHead(200, {
     ...headers,
     'content-type': mime,
@@ -989,6 +1000,95 @@ export function mediaFile(
     'cache-control': 'private, max-age=300',
   });
   createReadStream(candidate).pipe(res);
+}
+
+// ─── A message's attachment, by the message ──────────────────────────────────
+
+/**
+ * The inbound file a feed row points at, by chat key and row id.
+ *
+ * This is how the Chat page reaches a recording, and it is deliberately a
+ * different handle from the Media page's: that one names a file, this one
+ * names a *message*. The browser holds the row's uid — a UUID the bridge
+ * minted when the line was appended — and nothing else, so there is no file
+ * name in the page to mistype, forge, or point somewhere else. The name comes
+ * off the bridge's own record, and is then passed through `resolveMedia`
+ * exactly as if the browser had sent it, so a row that somehow carried a
+ * climbing name would be refused there rather than trusted here.
+ *
+ * Both halves must match. A uid alone would find the row wherever it was; the
+ * chat key pins it to the conversation the caller was cleared to read, which is
+ * the check the privacy gate already made on `key` before this ran.
+ *
+ * The first attachment on the row. A WhatsApp message carries at most one and
+ * the envelope parser records at most one, so an index parameter would be
+ * ceremony; if that ever changes, add `i` here rather than serving a list.
+ *
+ * Null for every way this can fail — a malformed id, a row that is not there,
+ * one from another chat, one written before names were recorded, a download
+ * that failed — because to the caller they are all the same answer: nothing to
+ * play.
+ */
+export function chatMediaPath(chatKey: string, uid: string): string | null {
+  if (!/^[0-9a-f]{16}$/.test(chatKey)) return null;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uid)) return null;
+  // The same window the transcript is built from, so a message the panel can
+  // show is a message it can play, and one it has scrolled off is neither.
+  const row = feed.recent(4000).find((e) => e.uid === uid && e.kind === 'in' && e.chatKey === chatKey);
+  const first = row?.media?.[0];
+  if (first === undefined || typeof first.name !== 'string' || first.name.length === 0) return null;
+  return resolveMedia(chatKey, first.name, 'in');
+}
+
+/**
+ * Serve the attachment on one message.
+ *
+ * 404 for everything that is not a file this chat's feed names, including a
+ * malformed id. `mediaFile` answers 400 to a bad name because the Media page
+ * built it and a bad one is a bug there; here the id is opaque to the page and
+ * "there is nothing at that address" is the whole truth.
+ */
+export function chatMediaFile(res: ServerResponse, headers: Record<string, string>, chatKey: string, uid: string): void {
+  const candidate = chatMediaPath(chatKey, uid);
+  if (candidate === null) {
+    res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
+    return;
+  }
+  streamMedia(res, headers, candidate);
+}
+
+/**
+ * One attachment as the Chat page needs it: labelled, and with its words.
+ *
+ * The transcript is read from the sidecar beside the file rather than from the
+ * row, and that is not laziness. Transcription runs *after* the row is written
+ * — after the gate, so a refused note is never paid for — and the row is
+ * append-only, so the words could never have been on it. The sidecar is where
+ * they land, seconds later, and reading it here means the bubble fills in on
+ * the next poll rather than never.
+ *
+ * `playable` is the file's presence now, not at the time of writing: a
+ * recording deleted from the Media page must not leave a player behind that
+ * 404s when pressed.
+ */
+function saidMedia(chatKey: string, m: FeedMedia): SaidMedia {
+  const file = typeof m.name === 'string' && m.name.length > 0 ? resolveMedia(chatKey, m.name, 'in') : null;
+  let transcript: string | null = null;
+  if (file !== null) {
+    try {
+      transcript = readFileSync(transcriptFor(file), 'utf8').slice(0, 4000).trim() || null;
+    } catch {
+      /* not transcribed: no key, over the allowance, or it failed — the row says which, if anything */
+    }
+  }
+  return {
+    kind: m.kind,
+    bytes: m.bytes,
+    seconds: typeof m.seconds === 'number' && Number.isFinite(m.seconds) ? m.seconds : null,
+    voice: m.voice === true,
+    transcript,
+    playable: file !== null && existsSync(file),
+  };
 }
 
 /**

@@ -18,6 +18,34 @@ import { paths } from './paths.js';
 /** Rotate once the file passes this, keeping the newer half. */
 const MAX_BYTES = 8 * 1024 * 1024;
 
+/**
+ * One attachment on an inbound row, as the panel needs to see it.
+ *
+ * `kind` and `bytes` were all a row ever carried, which was enough for a feed
+ * page to say "audio, 42 kB" and not enough for a chat to *play* it: nothing on
+ * the row named the file that had been kept beside it. So a voice note drew as
+ * an empty bubble — the text was blank and the attachment was invisible — in
+ * exactly the conversation an operator was reading to find out what was said.
+ *
+ * `name` is the file's basename under the chat's inbound media directory. It
+ * is chosen by the bridge from a timestamp and the message id, never from the
+ * sender, and the panel route that serves it re-checks it against the same
+ * pattern the Media page uses. Every field but the first two is optional so a
+ * row written before they existed still parses; a reader treats absence as
+ * "not recorded", not as "no attachment".
+ */
+export interface FeedMedia {
+  kind: string;
+  bytes: number | null;
+  /** Basename of the stored file, or null when the download was refused or failed. */
+  name?: string | null;
+  mime?: string | null;
+  /** Duration, when the transport declared one. */
+  seconds?: number | null;
+  /** A held-to-record voice note, as opposed to an audio file that was attached. */
+  voice?: boolean;
+}
+
 export interface FeedEntry {
   ts: number;
   uid: string;
@@ -48,7 +76,7 @@ export interface FeedEntry {
   waId?: string | null;
   /** Whose message it was, in a group. WhatsApp needs it to place a reaction. */
   participant?: string | null;
-  media?: Array<{ kind: string; bytes: number | null }>;
+  media?: FeedMedia[];
   count?: number;
   event?: string;
   detail?: string | null;
@@ -100,7 +128,7 @@ class Feed extends EventEmitter {
     isGroup: boolean;
     from: string | null;
     text: string;
-    media: Array<{ kind: string; bytes: number | null }>;
+    media: FeedMedia[];
     accepted: boolean;
     reason: string | null;
     waId?: string | null;

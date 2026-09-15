@@ -16,13 +16,14 @@
  */
 import { EventEmitter } from 'node:events';
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { inPaths, transcriptFor } from '@2lp/shared';
 import type { InboundMedia, InboundMessage } from '@2lp/shared';
 import type { ChatRegistry } from './chats.js';
 import type { Config } from './config.js';
 import { controlDisposition, WRONG_ROOM } from './control.js';
-import { feed } from './feed.js';
+import { feed, type FeedMedia } from './feed.js';
+import { VIEW_SUFFIX } from './images.js';
 import { gate, groupModeFor, isOperator } from './gate.js';
 import { matchesList } from './jid.js';
 import { banner, noteAnswerTurn, noteAsk, peerOf, peers, readMark, type Peer } from './peers.js';
@@ -55,6 +56,22 @@ const CONTEXT_LINES = 20;
  * sent a voice note and it could not be read" is something the agent can answer
  * honestly, and silence is not.
  */
+/**
+ * An attachment as the feed records it: enough for the panel to find the file.
+ *
+ * `path` is where the *agent* is pointed, which for a large picture is the
+ * downscaled copy made for its reader rather than the original. The feed wants
+ * the original — that is the operator's file, and the one the Media page
+ * already serves — so the view suffix is stripped back off. Only the basename
+ * is kept: the directory is the chat's, and the panel rebuilds it from the chat
+ * key rather than trusting a path from a log line.
+ */
+export function feedMedia(m: InboundMedia): FeedMedia {
+  const stored = m.path === null ? null : basename(m.path);
+  const name = stored !== null && stored.endsWith(VIEW_SUFFIX) ? stored.slice(0, -VIEW_SUFFIX.length) : stored;
+  return { kind: m.kind, bytes: m.bytes, name, mime: m.mimetype, seconds: m.seconds, voice: m.isVoiceNote };
+}
+
 async function transcribeIfSpeech(media: InboundMedia, perDay: number): Promise<InboundMedia> {
   if (media.kind !== 'audio' || media.path === null || !canTranscribe()) return media;
   // The day's allowance, claimed before the upload. Refused rather than
@@ -249,7 +266,7 @@ export class Dispatcher extends EventEmitter {
       isGroup: envelope.isGroup,
       from: envelope.pushName,
       text: envelope.text,
-      media: envelope.media.map((m) => ({ kind: m.kind, bytes: m.bytes })),
+      media: envelope.media.map(feedMedia),
       // Carried on every row, accepted or refused, because an operator may want
       // to react to something the gate turned away — a message in a room he was
       // never addressed in is still a message somebody sent.

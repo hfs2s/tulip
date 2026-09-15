@@ -975,6 +975,16 @@ var chatMissed = false;
  * paint is gated on this instead.
  */
 var chatSig = null;
+/**
+ * The <audio> elements on screen, by the row they play.
+ *
+ * A repaint rebuilds the thread from scratch, and a recording that was
+ * playing would stop at the moment a new message arrived — which in a live
+ * conversation is the moment you are most likely to be listening. So a player
+ * is made once per row and moved into the new thread rather than recreated;
+ * a media element re-inserted in the same task keeps playing.
+ */
+var chatPlayers = {};
 
 function stopChatPoll() {
   if (chatTimer !== null) { clearTimeout(chatTimer); chatTimer = null; }
@@ -1002,6 +1012,7 @@ function renderChat() {
   chatView = null;
   chatSig = null;
   chatMissed = false;
+  chatPlayers = {};
 
   var app = node('div', 'chatapp');
   app.id = 'chatApp';
@@ -1114,7 +1125,11 @@ function previewFor(c) {
     var e = chatFeed[i];
     if (e.chatKey !== c.chatKey) continue;
     if (e.kind === 'out') return AGENT + ': ' + (e.text || '');
-    if (e.kind === 'in') return e.text || (e.detail ? '(' + e.detail + ')' : '');
+    if (e.kind === 'in') {
+      if (e.text) return e.text;
+      if (e.media && e.media.length) return e.media.map(clipLabel).join(', ');
+      return e.detail ? '(' + e.detail + ')' : '';
+    }
   }
   return plural(c.messages, 'message');
 }
@@ -1266,6 +1281,9 @@ function signature(view) {
     view.items.length,
     last ? last.ts : 0,
     last ? String(last.text || '').length : 0,
+    // A voice note's words arrive seconds after the row does. Without this the
+    // bubble would stay wordless until something else changed.
+    last && last.media ? last.media.map(function (m) { return (m.transcript || '').length + (m.playable ? 'p' : ''); }).join(',') : '',
     view.live ? 1 : 0,
     view.reporting ? 1 : 0,
     (state && state.queue && state.queue.inFlight === chatOpen) ? 1 : 0,
@@ -1587,10 +1605,78 @@ function dayLabel(ts) {
  * he is answering in a filled bubble, and an operator's typed line unfilled,
  * because that one was never received by anybody.
  */
+/** A duration as a clock reads it: 0:07, 1:12, 12:05. */
+function clock(seconds) {
+  var s = Math.max(0, Math.round(seconds));
+  var m = Math.floor(s / 60);
+  var r = s % 60;
+  return m + ':' + (r < 10 ? '0' : '') + r;
+}
+
+/**
+ * What an attachment is, in the words the bubble leads with.
+ *
+ * "Voice note" and "Audio" are different things to the person who sent them —
+ * one was spoken into the phone, the other was a file they had — and the
+ * bridge records which. Duration where the transport declared one, size where
+ * it did not, so the label always says *something* about how much there is.
+ */
+function clipLabel(m) {
+  var what = m.kind === 'audio' ? (m.voice ? 'Voice note' : 'Audio')
+    : m.kind === 'image' ? 'Photo'
+    : m.kind === 'video' ? 'Video'
+    : m.kind === 'sticker' ? 'Sticker'
+    : m.kind === 'document' ? 'File'
+    : (m.kind || 'Attachment');
+  var how = typeof m.seconds === 'number' && m.seconds > 0 ? clock(m.seconds)
+    : typeof m.bytes === 'number' && m.bytes > 0 ? bytes(m.bytes) : '';
+  return how ? what + ' \u00b7 ' + how : what;
+}
+
+/**
+ * One attachment, inside the bubble it arrived in.
+ *
+ * Audio gets a player, and the words if any were made out — the transcript is
+ * the recording in the form you can read, so it comes first and the player
+ * under it, the same order the Media page settled on. The player is the row's
+ * own, kept across repaints (see `chatPlayers`), and its address names the
+ * row rather than a file: the bridge looks the file up from its own record.
+ * Anything else gets the label alone; the Media page is where pictures are.
+ */
+function clipNode(item, m) {
+  var clip = node('div', 'clip ' + (m.kind || 'file'));
+  clip.appendChild(node('span', 'clip-label', clipLabel(m)));
+  if (m.kind !== 'audio') return clip;
+
+  if (m.transcript) clip.appendChild(node('div', 'clip-words', m.transcript));
+  else clip.appendChild(node('div', 'clip-words none',
+    m.playable ? 'No transcript.' : 'No transcript, and the recording is no longer kept.'));
+
+  if (m.playable && item.uid && chatOpen) {
+    var player = chatPlayers[item.uid];
+    if (!player) {
+      player = document.createElement('audio');
+      player.src = '/api/chat/media?key=' + encodeURIComponent(chatOpen) + '&id=' + encodeURIComponent(item.uid);
+      player.controls = true;
+      player.preload = 'metadata';
+      player.setAttribute('aria-label', clipLabel(m) + ' from ' + (item.who || 'them'));
+      chatPlayers[item.uid] = player;
+    }
+    clip.appendChild(player);
+  }
+  return clip;
+}
+
 function msgNode(item, side, run) {
   if (side !== 'juan') {
     var msg = node('div', 'msg ' + side + (run ? ' run' : ''));
-    msg.appendChild(node('div', 'body', item.text));
+    if (item.media && item.media.length) {
+      msg.classList.add('has-clip');
+      item.media.forEach(function (m) { msg.appendChild(clipNode(item, m)); });
+    }
+    // A voice note has no typed text, and an empty body under the player is a
+    // blank line the eye reads as something missing.
+    if (item.text || !(item.media && item.media.length)) msg.appendChild(node('div', 'body', item.text));
     msg.appendChild(node('span', 'at', hhmm(item.ts)));
     // Only what somebody actually sent, and only where an id was recorded. An
     // operator's own typed line has no WhatsApp message behind it.
@@ -2367,6 +2453,14 @@ function sessionRow(item) {
   if (item.kind === 'said') {
     verb = item.direction === 'out' ? 'Said to them' : 'They said';
     detail = String(item.text || '');
+    // An attachment is still something they said. A voice note reads here as
+    // its label and then its words, so the row is not blank for the one kind
+    // of message that carried the most.
+    if (item.media && item.media.length) {
+      detail = item.media.map(function (m) {
+        return '[' + clipLabel(m) + ']' + (m.transcript ? ' ' + m.transcript : '');
+      }).join(' ') + (detail ? ' ' + detail : '');
+    }
   } else if (item.kind === 'prompt') {
     verb = 'Was prompted';
     detail = String(item.text || '');

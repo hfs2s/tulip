@@ -911,6 +911,23 @@
   .msg.op{align-self:flex-end;border-bottom-right-radius:5px;
           background:transparent;border-style:dashed;border-color:rgba(240,180,41,.45)}
   .msg.op .at{color:var(--warn)}
+  /* An attachment inside the bubble it arrived in. The label says what it is
+     before anything is pressed; the words come next, because a transcript is
+     the recording in the form you can read; the player last, because it is
+     what you reach for when the words are not enough — or there are none. A
+     bubble with a player needs room for the browser's transport bar, which
+     is the one width in this column that is not ours to set. */
+  .msg.has-clip{min-width:min(300px,84%)}
+  .clip{display:block;margin:0 0 6px}
+  .clip + .clip{margin-top:8px}
+  .clip-label{display:block;font:400 11.5px/1.3 var(--display);letter-spacing:.01em;
+              color:var(--dim);text-transform:uppercase}
+  .msg.them .clip-label{color:var(--accent)}
+  .clip-words{margin:5px 0 0;padding:0 0 0 10px;border-left:2px solid rgba(33,210,237,.35);
+              white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px;line-height:1.55}
+  .clip-words.none{color:var(--faint);font-size:12.5px;border-left-style:dotted}
+  .clip audio{display:block;width:100%;height:34px;margin-top:8px}
+  .clip audio:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   /* ── Juan ──────────────────────────────────────────────────────────────────
      The left lane, and no bubble. A bubble on both sides reads as two machines
