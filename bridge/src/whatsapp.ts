@@ -15,8 +15,7 @@
  */
 import { classifyLookupError, isParticipant, type Membership } from './membership.js';
 import { EventEmitter } from 'node:events';
-import { existsSync, readFileSync, readFileSync as read, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
@@ -28,11 +27,10 @@ import makeWASocket, {
 } from 'baileys';
 import qrcode from 'qrcode-terminal';
 import { senderPnOf, toEnvelope, type Envelope, type ParseContext } from './envelope.js';
+import { acquireBridgeLock } from './lock.js';
 import { log } from './log.js';
 import { paths } from './paths.js';
 import type { Inbound, SentKey, Transport, TransportKind } from './transport.js';
-
-const LOCK_FILE = join(paths.root, 'bridge.lock');
 
 /**
  * How far back a message may be and still be answered.
@@ -60,35 +58,6 @@ function silentLogger(): Record<string, unknown> {
   return logger;
 }
 
-function acquireLock(): void {
-  if (existsSync(LOCK_FILE)) {
-    const pid = Number(read(LOCK_FILE, 'utf8').trim());
-    let alive = false;
-    try {
-      process.kill(pid, 0);
-      alive = true;
-    } catch {
-      alive = false;
-    }
-    if (alive) {
-      throw new Error(
-        `another bridge (pid ${pid}) holds ${paths.session}. Refusing to start: two Baileys ` +
-          `clients on one auth store will log the device out and force a QR re-scan.`,
-      );
-    }
-    log('lock.stale', { pid });
-  }
-  writeFileSync(LOCK_FILE, String(process.pid), { mode: 0o600 });
-
-  const release = (): void => {
-    try {
-      if (readFileSync(LOCK_FILE, 'utf8').trim() === String(process.pid)) unlinkSync(LOCK_FILE);
-    } catch {
-      /* already released */
-    }
-  };
-  process.on('exit', release);
-}
 
 /** The id of a message we just sent, when WhatsApp told us one. See `SentKey`. */
 function keyOf(sent: { key?: { id?: string | null } | null } | undefined): SentKey {
@@ -148,7 +117,9 @@ export class WhatsApp extends EventEmitter implements Transport {
   }
 
   async start(): Promise<void> {
-    acquireLock();
+    acquireBridgeLock(
+      `${paths.session} — two Baileys clients on one auth store will log the device out and force a QR re-scan`,
+    );
     await this.connect();
   }
 

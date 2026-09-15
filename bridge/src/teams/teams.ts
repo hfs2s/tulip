@@ -35,6 +35,7 @@ import { feed } from '../feed.js';
 import type { TeamsEnv } from '../config.js';
 import type { Envelope, ParseContext } from '../envelope.js';
 import { AGENT_NAME } from '../instance.js';
+import { acquireBridgeLock } from '../lock.js';
 import { log } from '../log.js';
 import type { Inbound, SentKey, Transport, TransportKind } from '../transport.js';
 import { botWasAdded, isRoom, parseActivity, roomName, tenantOf, toEnvelope, validServiceUrl, type Activity } from './activity.js';
@@ -88,6 +89,7 @@ export class Teams extends EventEmitter implements Transport {
   }
 
   async start(): Promise<void> {
+    acquireBridgeLock(`the state volume and port ${this.env.port}`);
     const server = createServer((req, res) => {
       void this.handle(req, res).catch((err: unknown) => {
         log('teams.requestFailed', { err: String((err as Error).message) });
