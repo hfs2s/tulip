@@ -167,7 +167,13 @@
      occasional action. Out of flow it costs nothing until it is open, and the
      thread keeps the height it had before any of this existed. */
   .said .acts,.msg .acts{position:relative}
+  /* The one fixed width left on the panel, and the only one a narrow screen
+     cannot talk down. It is anchored to whichever edge its bubble is near, so
+     262px clears a phone — but it clears it by 60px, and a smaller phone or a
+     deeper indent would put the far edge past the window with no scroll to
+     reach it. The cap costs nothing on any screen wide enough not to need it. */
   .reactpop{position:absolute;z-index:40;bottom:calc(100% + 6px);left:0;width:262px;
+    max-width:calc(100vw - 24px);
     padding:7px;background:var(--panel);border:1px solid var(--line);
     box-shadow:0 12px 34px rgba(0,0,0,.6)}
   /* Flipped for the oldest message on screen, which has nothing above it. */
@@ -270,7 +276,14 @@
   main{flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto}
   /* flex:none — without it this shrinks as the page grows and clips the heading. */
 
-  .page-wrap{padding:40px 40px 64px;position:relative;flex:1;min-height:0}
+  /* `flex:1 0 auto`, and the `0` is the point. As `flex:1` this box shrank to
+     one screenful while its content ran past the bottom of it, so the 64px of
+     bottom padding sat at the fold — somewhere in the middle of a long page —
+     and the last card ended flush against the window. Refusing to shrink makes
+     the box as tall as what is in it, which is where the padding was meant to
+     be all along. The chatmode and bare variants set their own flexing: they
+     are panes that *should* be one screenful, with their own scrollers. */
+  .page-wrap{padding:40px 40px 64px;position:relative;flex:1 0 auto}
   h2{font:400 21px/1.2 var(--display);letter-spacing:-.02em;margin:0 0 4px}
   .sub{font-size:13.5px;color:var(--faint);margin:0 0 20px;max-width:64ch}
 
@@ -504,6 +517,12 @@
   button.sm{padding:5px 12px;font-size:12.5px;display:inline-flex;align-items:center;
             gap:7px;white-space:nowrap}
   button.sm svg{width:15px;height:15px;flex:0 0 15px}
+  /* Controls in a table row. Spacing set here rather than on each button,
+     because set per button it is always one button short: the first gets none
+     and sits against the second. Wrapping matters more than it looks — these
+     cells are the widest thing in the table, and on a phone the alternative to
+     a second line is a wider table to drag sideways. */
+  .rowacts{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
   button[disabled]{opacity:.42;cursor:not-allowed}
 
   input[type=text],input[type=search],select{font:inherit;color:var(--ink);

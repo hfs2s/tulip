@@ -697,13 +697,18 @@ function renderChats(s) {
     tr.appendChild(node('td', null, c.turnsToday));
     tr.appendChild(node('td', 'muted', ago(s.now - c.lastSeenAt)));
     var td = document.createElement('td');
+    // One row of controls, spaced by the row rather than by each button. The
+    // margins used to be set one at a time, so whichever button happened to be
+    // first had none and sat against its neighbour; and on a narrow screen
+    // they could only push the table wider. A group with a gap wraps instead.
+    var acts = node('div', 'rowacts');
     // Reading one conversation is the common thing to want from this table, and
     // blocking somebody is the rare one, so it leads.
     var open = node('button', 'sm', 'Open');
     open.type = 'button';
     open.setAttribute('aria-label', 'Open the conversation with ' + (c.name || c.chatKey));
     open.addEventListener('click', function () { go('chat/' + c.chatKey); });
-    td.appendChild(open);
+    acts.appendChild(open);
     // Owner only, and only once privacy is switched on — otherwise the button
     // would promise something the server is not enforcing.
     if (isOwner() && state && state.viewer && state.viewer.on) {
@@ -717,14 +722,14 @@ function renderChats(s) {
       lock.addEventListener('click', function () {
         act('privacy/chat', null, '?chat=' + encodeURIComponent(c.chatKey) + '&private=' + (priv ? '0' : '1'));
       });
-      td.appendChild(lock);
+      acts.appendChild(lock);
     }
 
     var b = node('button', 'sm' + (c.blocked ? '' : ' danger'), c.blocked ? 'Unblock' : 'Block');
     b.type = 'button';
-    b.style.marginLeft = '8px';
     b.addEventListener('click', function () { act(c.blocked ? 'unblock' : 'block', c.chatKey); });
-    td.appendChild(b);
+    acts.appendChild(b);
+    td.appendChild(acts);
     tr.appendChild(td);
     table.appendChild(tr);
   });
@@ -858,11 +863,16 @@ function renderGroups(s) {
     tr.appendChild(node('td', 'muted', ago(s.now - c.lastSeenAt)));
 
     var td = document.createElement('td');
+    // One row of controls, spaced by the row rather than by each button. The
+    // margins used to be set one at a time, so whichever button happened to be
+    // first had none and sat against its neighbour; and on a narrow screen
+    // they could only push the table wider. A group with a gap wraps instead.
+    var acts = node('div', 'rowacts');
     var open = node('button', 'sm', 'Open');
     open.type = 'button';
     open.setAttribute('aria-label', 'Open ' + (c.name || c.chatKey));
     open.addEventListener('click', function () { go('chat/' + c.chatKey); });
-    td.appendChild(open);
+    acts.appendChild(open);
 
     // Asks WhatsApp itself, so the answer does not depend on anything this panel
     // recorded. Changes nothing; the reply arrives as a toast. Not offered on
@@ -875,7 +885,7 @@ function renderGroups(s) {
       check.type = 'button';
       check.title = 'Ask WhatsApp whether ' + AGENT + ' is a member of this group. Changes nothing.';
       check.addEventListener('click', function () { act('groups/check', null, '?chat=' + encodeURIComponent(c.chatKey)); });
-      td.appendChild(check);
+      acts.appendChild(check);
     }
 
     // Leaving is the operator's too, and harder to undo than a stop: somebody in
@@ -896,7 +906,7 @@ function renderGroups(s) {
         leave.disabled = true;
         act('groups/leave', null, '?chat=' + encodeURIComponent(c.chatKey));
       });
-      td.appendChild(leave);
+      acts.appendChild(leave);
     }
 
     // Starting is the operator's alone, which is the whole safeguard behind
@@ -906,28 +916,26 @@ function renderGroups(s) {
       if (isOwner()) {
         var start = node('button', 'sm', 'Start here');
         start.type = 'button';
-        start.style.marginLeft = '8px';
         start.title = 'Answer this room again. ' + (stop.by || 'Someone') + ' stopped him in it.';
         start.addEventListener('click', function () { act('startchat', c.chatKey); });
-        td.appendChild(start);
+        acts.appendChild(start);
       }
     } else {
       var halt = node('button', 'sm danger', 'Stop here');
       halt.type = 'button';
-      halt.style.marginLeft = '8px';
       halt.title = 'Stop answering in this room. Messages keep arriving and are still recorded.';
       halt.addEventListener('click', function () { act('stopchat', c.chatKey); });
-      td.appendChild(halt);
+      acts.appendChild(halt);
     }
 
     var b = node('button', 'sm' + (c.blocked ? '' : ' danger'), c.blocked ? 'Unblock' : 'Block');
     b.type = 'button';
-    b.style.marginLeft = '8px';
     b.title = c.blocked
       ? 'Take this room off the blocklist.'
       : 'Stop recording this room at all — stronger than stopping him in it.';
     b.addEventListener('click', function () { act(c.blocked ? 'unblock' : 'block', c.chatKey); });
-    td.appendChild(b);
+    acts.appendChild(b);
+    td.appendChild(acts);
     tr.appendChild(td);
     table.appendChild(tr);
   });
