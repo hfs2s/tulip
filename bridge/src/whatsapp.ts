@@ -100,11 +100,28 @@ export function inboundOf(message: WAMessage, socket: () => WASocket | null): In
   };
 }
 
+/**
+ * The number to pair, digits only, or empty for the camera.
+ *
+ * Set it and the bridge asks WhatsApp for an eight-character code instead of
+ * relying on somebody photographing a terminal — see the note where it is used.
+ * It is the phone's own number, with country code and no `+`.
+ */
+const PAIR_NUMBER = (process.env['TULIP_PAIR_NUMBER'] ?? '').replace(/[^0-9]/g, '');
+
 export class WhatsApp extends EventEmitter implements Transport {
   readonly kind: TransportKind = 'whatsapp';
   private socket: WASocket | null = null;
   private attempt = 0;
   private generation = 0;
+  /**
+   * Whether a pairing code has been asked for on this socket.
+   *
+   * The QR event fires afresh every twenty seconds; asking again on each
+   * would invalidate the code already on the operator's screen, which is
+   * the exact failure this path exists to avoid.
+   */
+  private pairingAsked = false;
   private connecting = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private readonly seen = new Set<string>();
@@ -210,6 +227,7 @@ export class WhatsApp extends EventEmitter implements Transport {
       logger: logger as never,
     });
     this.socket = socket;
+    this.pairingAsked = false;
 
     socket.ev.on('creds.update', () => void saveCreds());
 
@@ -219,6 +237,42 @@ export class WhatsApp extends EventEmitter implements Transport {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
+        // Pairing by code instead of by camera, when the operator has said
+        // which number this is.
+        //
+        // The QR is the only path Baileys advertises loudly, and it is a bad
+        // one for a deployment that lives in a terminal: it is valid for about
+        // twenty seconds, and anybody pairing over ssh — or reading it out of
+        // a log through anything that redraws — is scanning something that
+        // expired before it finished arriving. A pairing code lasts minutes
+        // and is eight characters somebody can type.
+        //
+        // Asked for once per socket. The event fires every twenty seconds with
+        // a fresh QR, and requesting a code on each of those would invalidate
+        // the one already on the operator's screen.
+        if (PAIR_NUMBER.length > 0 && !this.pairingAsked) {
+          this.pairingAsked = true;
+          void socket
+            .requestPairingCode(PAIR_NUMBER)
+            .then((code) => {
+              const shown = code.match(/.{1,4}/g)?.join('-') ?? code;
+              log('wa.pairingCode', {
+                code: shown,
+                number: PAIR_NUMBER,
+                note: 'enter this in WhatsApp: Linked devices → Link with phone number',
+              });
+              // Printed as well as logged, beside where the QR would have been,
+              // so it is visible in `2lp <instance> logs` without a filter.
+              process.stdout.write(`\n  Pairing code for +${PAIR_NUMBER}:  ${shown}\n` +
+                '  WhatsApp → Linked devices → Link with phone number\n\n');
+            })
+            .catch((err: Error) => {
+              // Falls back to the QR below rather than failing the connection:
+              // a mistyped number must not leave the deployment unpairable.
+              this.pairingAsked = false;
+              log('wa.pairingFailed', { note: String(err.message).slice(0, 160) });
+            });
+        }
         log('wa.qr', { note: 'not authenticated — scan to pair this number' });
         this.emit('qr', qr);
         qrcode.generate(qr, { small: true });

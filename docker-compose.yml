@@ -204,6 +204,10 @@ services:
       # Teams listener is 0.0.0.0:8792 for the reason `panel.host` gives, and
       # the two variables are the host-side publish line below.
       TULIP_TRANSPORT: ${TULIP_TRANSPORT:-whatsapp}
+      # Pair by code rather than by camera. The phone's own number, digits only
+      # — a QR is valid for about twenty seconds, which is not long enough to
+      # relay to somebody on the other end of an ssh session.
+      TULIP_PAIR_NUMBER: ${TULIP_PAIR_NUMBER:-}
       TULIP_TEAMS_APP_ID: ${TULIP_TEAMS_APP_ID:-}
       TULIP_TEAMS_APP_SECRET: ${TULIP_TEAMS_APP_SECRET:-}
       TULIP_TEAMS_TENANT_ID: ${TULIP_TEAMS_TENANT_ID:-}
