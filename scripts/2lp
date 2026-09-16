@@ -108,13 +108,16 @@ inst = d.get("instance") or {}
 hold = d.get("hold") or {}
 agent = d.get("agent") or {}
 queue = d.get("queue") or {}
-wa = d.get("whatsapp") or {}
+tr = d.get("transport") or d.get("whatsapp") or {}
 print("agent:    %s (%s)" % (inst.get("agentName", "?"), inst.get("name", "?")))
 print("stopped:  %s%s" % (
     "YES" if hold.get("active") else "no",
     ("  (by %s, since %s)" % (hold.get("by"), hold.get("since"))) if hold.get("active") else "",
 ))
-print("whatsapp: %s" % ("connected as " + str(wa.get("name")) if wa.get("connected") else "DISCONNECTED"))
+print("%-9s %s" % (
+    (tr.get("label") or "chat").lower() + ":",
+    "connected as " + str(tr.get("name")) if tr.get("connected") else "DISCONNECTED",
+))
 print("session:  %s" % (agent.get("fatal") or ("reporting" if agent.get("reporting") else "NOT REPORTING")))
 print("in turn:  %s" % (queue.get("inFlight") or "idle"))
 print("queued:   %s waiting" % queue.get("queued", 0))'
