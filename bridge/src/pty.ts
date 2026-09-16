@@ -59,7 +59,7 @@ function upstreamPath(url: string): string {
 export function proxyRequest(req: IncomingMessage, res: ServerResponse, headers: Record<string, string>): void {
   if (!ptyAvailable()) {
     res
-      .writeHead(503, { ...headers, 'content-type': 'text/plain' })
+      .writeHead(503, { ...headers, 'content-type': 'text/plain; charset=utf-8' })
       .end('the terminal is not running on this host — see scripts/tulip-ttyd.service\n');
     return;
   }
@@ -87,7 +87,7 @@ export function proxyRequest(req: IncomingMessage, res: ServerResponse, headers:
   upstream.on('error', (err: Error) => {
     log('pty.upstreamFailed', { err: err.message });
     if (!res.headersSent) {
-      res.writeHead(502, { ...headers, 'content-type': 'text/plain' }).end('the terminal did not answer\n');
+      res.writeHead(502, { ...headers, 'content-type': 'text/plain; charset=utf-8' }).end('the terminal did not answer\n');
     } else {
       res.end();
     }

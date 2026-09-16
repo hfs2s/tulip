@@ -110,6 +110,16 @@ import {
 } from './panel-api.js';
 
 const COOKIE = 'tulip_token';
+
+/**
+ * Plain text, and which alphabet it is in.
+ *
+ * `nosniff` is set on every response here, which means a browser may not go
+ * looking when the charset is absent — it falls back to its own locale default,
+ * and an em dash written as UTF-8 arrives as `â€”`. Declaring it is the whole
+ * fix, and the declaration has to be on every one of these, not most.
+ */
+const TEXT = 'text/plain; charset=utf-8';
 /**
  * How often a connected terminal is polled for new pane bytes.
  *
@@ -382,14 +392,14 @@ export function startPanel(deps: ApiDeps): Server | null {
           try {
             body = await readUpload(req, 64_000);
           } catch {
-            res.writeHead(413, { 'content-type': 'text/plain' }).end('that change is too large\n');
+            res.writeHead(413, { 'content-type': TEXT }).end('that change is too large\n');
             return;
           }
           await servePageWrite(res, url, req, deps.config.pages.passwords, body.toString('utf8'));
           return;
         }
         if (req.method !== 'GET' && req.method !== 'HEAD') {
-          res.writeHead(405, { 'content-type': 'text/plain' }).end('pages are read-only\n');
+          res.writeHead(405, { 'content-type': TEXT }).end('pages are read-only\n');
           return;
         }
         servePage(res, url, req, deps.config.pages.passwords);
@@ -397,14 +407,14 @@ export function startPanel(deps: ApiDeps): Server | null {
       }
 
       if (throttled(address)) {
-        res.writeHead(429, { ...headers, 'content-type': 'text/plain' }).end('too many attempts\n');
+        res.writeHead(429, { ...headers, 'content-type': TEXT }).end('too many attempts\n');
         return;
       }
       const auth = await authenticate(req, url);
       if (!auth.ok) {
         noteFailure(address);
         res
-          .writeHead(401, { ...headers, 'content-type': 'text/plain' })
+          .writeHead(401, { ...headers, 'content-type': TEXT })
           .end(
             // Say what the way in *is*, not what the fallback is. Leading with
             // the token taught everyone to reach for a shared secret, which is
@@ -451,7 +461,7 @@ export function startPanel(deps: ApiDeps): Server | null {
       // hidden and the API refused while the writable shell behind them
       // answered 200 to anybody who typed the address.
       if (!unrestricted && (url.pathname === PTY_PREFIX || url.pathname.startsWith(`${PTY_PREFIX}/`))) {
-        res.writeHead(403, { ...headers, 'content-type': 'text/plain; charset=utf-8' })
+        res.writeHead(403, { ...headers, 'content-type': TEXT })
           .end('The terminal is available to the operator who owns this deployment.\n');
         return;
       }
@@ -504,7 +514,7 @@ export function startPanel(deps: ApiDeps): Server | null {
       try {
         if (url.pathname === '/') {
           if (!page) {
-            res.writeHead(500, { ...headers, 'content-type': 'text/plain' }).end('the panel was not built\n');
+            res.writeHead(500, { ...headers, 'content-type': TEXT }).end('the panel was not built\n');
             return;
           }
           res.writeHead(200, { ...headers, 'content-type': 'text/html; charset=utf-8' }).end(page);
@@ -520,7 +530,7 @@ export function startPanel(deps: ApiDeps): Server | null {
         }
         if (url.pathname === '/favicon.svg') {
           if (!favicon) {
-            res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
+            res.writeHead(404, { ...headers, 'content-type': TEXT }).end('not found\n');
             return;
           }
           serveAsset(res, req, headers, 'image/svg+xml', favicon);
@@ -532,7 +542,7 @@ export function startPanel(deps: ApiDeps): Server | null {
             // Absent in a development tree that has not run the asset build.
             // The Terminal page checks for the global and says so rather than
             // rendering an empty black rectangle.
-            res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not bundled\n');
+            res.writeHead(404, { ...headers, 'content-type': TEXT }).end('not bundled\n');
             return;
           }
           serveAsset(
@@ -557,7 +567,7 @@ export function startPanel(deps: ApiDeps): Server | null {
         if (/^\/fonts\/[A-Za-z0-9._-]+\.woff2$/.test(url.pathname)) {
           const file = asset(join('fonts', url.pathname.slice('/fonts/'.length)));
           if (!file) {
-            res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
+            res.writeHead(404, { ...headers, 'content-type': TEXT }).end('not found\n');
             return;
           }
           res
@@ -1114,10 +1124,10 @@ export function startPanel(deps: ApiDeps): Server | null {
           return;
         }
 
-        res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
+        res.writeHead(404, { ...headers, 'content-type': TEXT }).end('not found\n');
       } catch (err) {
         log('panel.error', { path: url.pathname, err: String((err as Error).message) });
-        res.writeHead(500, { ...headers, 'content-type': 'text/plain' }).end('internal error\n');
+        res.writeHead(500, { ...headers, 'content-type': TEXT }).end('internal error\n');
       }
     })();
   });

@@ -979,7 +979,7 @@ export function mediaFile(
 ): void {
   const candidate = resolveMedia(chatKey, name, direction);
   if (candidate === null) {
-    res.writeHead(400, { ...headers, 'content-type': 'text/plain' }).end('bad request\n');
+    res.writeHead(400, { ...headers, 'content-type': 'text/plain; charset=utf-8' }).end('bad request\n');
     return;
   }
   streamMedia(res, headers, candidate);
@@ -988,7 +988,7 @@ export function mediaFile(
 /** The bytes of a resolved attachment, or a 404 if it has gone since it was named. */
 function streamMedia(res: ServerResponse, headers: Record<string, string>, candidate: string): void {
   if (!existsSync(candidate)) {
-    res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
+    res.writeHead(404, { ...headers, 'content-type': 'text/plain; charset=utf-8' }).end('not found\n');
     return;
   }
   const mime = VIEWABLE[extname(candidate).toLowerCase()] ?? 'application/octet-stream';
@@ -1087,7 +1087,7 @@ function storedName(chatKey: string, row: FeedEntry, m: FeedMedia): string | nul
 export function chatMediaFile(res: ServerResponse, headers: Record<string, string>, chatKey: string, uid: string): void {
   const candidate = chatMediaPath(chatKey, uid);
   if (candidate === null) {
-    res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('not found\n');
+    res.writeHead(404, { ...headers, 'content-type': 'text/plain; charset=utf-8' }).end('not found\n');
     return;
   }
   streamMedia(res, headers, candidate);

@@ -731,12 +731,12 @@ export function servePage(
     const file = parts[1] ?? '';
     const type = Object.hasOwn(KIT_FILES, file) ? KIT_FILES[file] : undefined;
     if (type === undefined) {
-      res.writeHead(404, { ...common, 'content-type': 'text/plain' }).end('no such file\n');
+      res.writeHead(404, { ...common, 'content-type': 'text/plain; charset=utf-8' }).end('no such file\n');
       return;
     }
     const path = resolve(KIT_DIR, file);
     if (!existsSync(path)) {
-      res.writeHead(404, { ...common, 'content-type': 'text/plain' }).end('the kit was not built into this image\n');
+      res.writeHead(404, { ...common, 'content-type': 'text/plain; charset=utf-8' }).end('the kit was not built into this image\n');
       return;
     }
     res.writeHead(200, {
@@ -789,14 +789,14 @@ export function servePage(
   }
 
   if (!SLUG.test(slug)) {
-    res.writeHead(404, { 'content-type': 'text/plain' }).end('no such page\n');
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('no such page\n');
     return;
   }
 
   const rest = parts.slice(1);
   const name = rest.length === 0 ? 'index.html' : rest[rest.length - 1] ?? 'index.html';
   if (name !== basename(name) || name.startsWith('.')) {
-    res.writeHead(400, { 'content-type': 'text/plain' }).end('bad request\n');
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' }).end('bad request\n');
     return;
   }
   // A page's database, as the script that carries it. Before the extension
@@ -808,13 +808,13 @@ export function servePage(
 
   const type = TYPES[extname(name).toLowerCase()];
   if (type === undefined) {
-    res.writeHead(404, { 'content-type': 'text/plain' }).end('not a servable file\n');
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('not a servable file\n');
     return;
   }
 
   const file = openPageFile(slug, name);
   if (file === null) {
-    res.writeHead(404, { 'content-type': 'text/plain' }).end('no such page\n');
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('no such page\n');
     return;
   }
 
@@ -891,12 +891,12 @@ export function parseRange(
 function serveDatabase(res: ServerResponse, slug: string, name: string, headers: Record<string, string>): void {
   const file = openPageFile(slug, name);
   if (file === null) {
-    res.writeHead(404, { ...headers, 'content-type': 'text/plain' }).end('no such database\n');
+    res.writeHead(404, { ...headers, 'content-type': 'text/plain; charset=utf-8' }).end('no such database\n');
     return;
   }
   if (file.size > MAX_PAGE_BYTES) {
     closeSync(file.fd);
-    res.writeHead(413, { ...headers, 'content-type': 'text/plain' }).end('that database is larger than a page may hold\n');
+    res.writeHead(413, { ...headers, 'content-type': 'text/plain; charset=utf-8' }).end('that database is larger than a page may hold\n');
     return;
   }
 
