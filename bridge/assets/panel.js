@@ -5851,6 +5851,59 @@ async function renderSettings() {
     });
   p.appendChild(ops);
 
+  // ── Answers ───────────────────────────────────────────────────────────────
+  // Its own card rather than a row inside Groups. The dial there decides
+  // whether to speak in a room; this one decides how much to say in every
+  // chat there is, and filed under Groups it read as a group setting.
+  var answers = node('div', 'card');
+  answers.appendChild(node('h2', null, 'Answers'));
+  answers.appendChild(node('p', 'sub', 'How much ' + AGENT + ' says when it answers — in a direct message as much as in a room. It takes effect on the next message, with no restart, and the words below are the words ' + AGENT + ' is given rather than a paraphrase of them.'));
+
+  // How much it says, beside how readily it says it. A different complaint
+  // ("it says too much") from the dial in Groups ("it never says anything"),
+  // and in every chat rather than only a room — a direct message has no tone
+  // to set but it certainly has a length.
+  var lengths = (s.verbosityLevels || []);
+  var lenWrap = node('div');
+  var lenSaid = node('p', 'sub');
+  var lenSlider = document.createElement('input');
+  lenSlider.type = 'range';
+  lenSlider.min = '0';
+  lenSlider.max = String(Math.max(0, lengths.length - 1));
+  lenSlider.step = '1';
+  lenSlider.value = String(s.agent && s.agent.verbosity !== undefined ? s.agent.verbosity : 2);
+  lenSlider.className = 'slider';
+  lenSlider.setAttribute('aria-label', 'How much 2LP says when it answers');
+
+  function sayLength(v) {
+    var lv = lengths[v] || { name: '', description: '' };
+    clear(lenSaid);
+    lenSaid.appendChild(node('strong', null, v + ' · ' + lv.name + ' — '));
+    lenSaid.appendChild(document.createTextNode(lv.description));
+    lenSlider.setAttribute('aria-valuetext', v + ', ' + lv.name);
+  }
+  sayLength(Number(lenSlider.value));
+
+  lenSlider.addEventListener('input', function () { sayLength(Number(lenSlider.value)); });
+  lenSlider.addEventListener('change', function () {
+    var was = s.agent.verbosity;
+    var now = Number(lenSlider.value);
+    s.agent.verbosity = now;
+    saveSettings({ agent: { verbosity: now } }, function () {
+      s.agent.verbosity = was;
+      lenSlider.value = String(was);
+      sayLength(was);
+    });
+  });
+  lenWrap.appendChild(lenSlider);
+  lenWrap.appendChild(lenSaid);
+  // No hint: the card says it once above, and `field` leaves the row alone
+  // when there is nothing to add — two paragraphs of the same sentence is how
+  // a settings page stops being read at all.
+  field(answers, 'How much it says', '', lenWrap);
+
+  p.appendChild(answers);
+
   // ── Groups ────────────────────────────────────────────────────────────────
   var groups = node('div', 'card');
   groups.appendChild(node('h2', null, 'Groups'));
@@ -5957,46 +6010,6 @@ async function renderSettings() {
     },
     { reload: function () { return freshSettings(function (f) { return f.groups.triggers || []; }); } });
   p.appendChild(groups);
-
-  // How much it says, beside how readily it says it. A different complaint
-  // ("it says too much") from the dial in Groups ("it never says anything"),
-  // and in every chat rather than only a room — a direct message has no tone
-  // to set but it certainly has a length.
-  var lengths = (s.verbosityLevels || []);
-  var lenWrap = node('div');
-  var lenSaid = node('p', 'sub');
-  var lenSlider = document.createElement('input');
-  lenSlider.type = 'range';
-  lenSlider.min = '0';
-  lenSlider.max = String(Math.max(0, lengths.length - 1));
-  lenSlider.step = '1';
-  lenSlider.value = String(s.agent && s.agent.verbosity !== undefined ? s.agent.verbosity : 2);
-  lenSlider.className = 'slider';
-  lenSlider.setAttribute('aria-label', 'How much 2LP says when it answers');
-
-  function sayLength(v) {
-    var lv = lengths[v] || { name: '', description: '' };
-    clear(lenSaid);
-    lenSaid.appendChild(node('strong', null, v + ' · ' + lv.name + ' — '));
-    lenSaid.appendChild(document.createTextNode(lv.description));
-    lenSlider.setAttribute('aria-valuetext', v + ', ' + lv.name);
-  }
-  sayLength(Number(lenSlider.value));
-
-  lenSlider.addEventListener('input', function () { sayLength(Number(lenSlider.value)); });
-  lenSlider.addEventListener('change', function () {
-    var was = s.agent.verbosity;
-    var now = Number(lenSlider.value);
-    s.agent.verbosity = now;
-    saveSettings({ agent: { verbosity: now } }, function () {
-      s.agent.verbosity = was;
-      lenSlider.value = String(was);
-      sayLength(was);
-    });
-  });
-  lenWrap.appendChild(lenSlider);
-  lenWrap.appendChild(lenSaid);
-  field(groups, 'How much it says', 'How long an answer should be, everywhere — a direct message as much as a room. It takes effect on the next message, no restart, and the words below are the words ' + AGENT + ' is given rather than a paraphrase of them.', lenWrap);
 
   // ── Reach ─────────────────────────────────────────────────────────────────
   var reach = node('div', 'card');
