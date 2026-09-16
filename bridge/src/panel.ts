@@ -406,9 +406,22 @@ export function startPanel(deps: ApiDeps): Server | null {
         res
           .writeHead(401, { ...headers, 'content-type': 'text/plain' })
           .end(
+            // Say what the way in *is*, not what the fallback is. Leading with
+            // the token taught everyone to reach for a shared secret, which is
+            // the thing single sign-on exists to retire; and when sign-on is on
+            // and a request still lands here, naming the token answers the
+            // wrong question — the interesting fact is that this request never
+            // went through the sign-on at all.
             access === null
-              ? `add ?t=<token> — the token is in ${paths.panelToken} inside the bridge container\n`
-              : 'sign in through Cloudflare Access, or add ?t=<token> when reaching this over a tunnel\n',
+              ? 'single sign-on is off for this instance: TULIP_ACCESS_AUD is unset, so no ' +
+                'identity reaches this panel and it cannot tell one person from another.\n' +
+                `until it is set, the shared token is the only way in — ${paths.panelToken}, ` +
+                'inside the bridge container.\n'
+              : 'this panel is behind single sign-on, and this request carried no signed-in ' +
+                'identity.\n' +
+                'open it at its public hostname and sign in there. reaching it by tailnet ' +
+                'address or by IP goes around the sign-on entirely, and nothing on that path ' +
+                'can sign you in — only ?t=<token> works there.\n',
           );
         return;
       }
