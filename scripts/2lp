@@ -147,7 +147,7 @@ list() {
 }
 
 scaffold() {
-  local h=$1 dir n used subnet port
+  local h=$1 dir n used subnet port teams
   [[ "$h" =~ ^[a-z][a-z0-9-]{1,20}$ ]] || die "a handle is lowercase letters, digits and dashes"
   dir="$REPO/instances/$h"
   [ -e "$dir" ] && die "$dir already exists"
@@ -155,8 +155,16 @@ scaffold() {
   # 8791 are the default instance's.
   used=$(cat "$REPO/.env" "$REPO"/instances/*/.env 2>/dev/null | sed -n 's/^TULIP_LAN_SUBNET=172\.31\.\([0-9]*\)\..*/\1/p')
   for n in $(seq 241 254); do grep -qx "$n" <<<"$used" || { subnet=$n; break; }; done
-  used=$(cat "$REPO/.env" "$REPO"/instances/*/.env 2>/dev/null | sed -n 's/^TULIP_PANEL_PORT=//p')
+  # Every published port, not only the panel's. A Teams instance also binds
+  # TULIP_TEAMS_PORT on the host, and scanning one variable handed a new
+  # instance's panel a port another instance was already listening on — which
+  # surfaces as a container that will not start, hours later, on the machine.
+  used=$(cat "$REPO/.env" "$REPO"/instances/*/.env 2>/dev/null | sed -n 's/^TULIP_[A-Z]*_PORT=//p')
   for n in $(seq 8792 8899); do grep -qx "$n" <<<"$used" || { port=$n; break; }; done
+  # The Teams endpoint is published unconditionally, so a WhatsApp instance that
+  # leaves it unset takes the 8792 default — which is somebody's panel. Assign it
+  # here rather than let the collision surface as a container that will not start.
+  for n in $(seq $((port + 1)) 8899); do grep -qx "$n" <<<"$used" || { teams=$n; break; }; done
   mkdir -p "$dir/config" "$dir/plugins"
   cat > "$dir/.env" <<ENV
 # ─── Instance ─────────────────────────────────────────────────────────────────
@@ -168,6 +176,7 @@ TULIP_LAN_SUBNET=172.31.$subnet.0/24
 TULIP_EGRESS_IP=172.31.$subnet.10
 TULIP_PANEL_BIND=127.0.0.1
 TULIP_PANEL_PORT=$port
+TULIP_TEAMS_PORT=$teams
 TULIP_HOST_CONFIG=./instances/$h/config
 TULIP_HOST_PLUGINS=./instances/$h/plugins
 TULIP_HOST_RUN=/run/$h
@@ -179,7 +188,7 @@ TULIP_HOST_RUN=/run/$h
 ENV
   chmod 600 "$dir/.env"
   echo "created $dir"
-  echo "  subnet 172.31.$subnet.0/24, panel port $port"
+  echo "  subnet 172.31.$subnet.0/24, panel port $port, teams port $teams"
   echo "next: fill in $dir/.env, then  scripts/2lp deploy $h"
 }
 
