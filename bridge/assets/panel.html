@@ -233,12 +233,14 @@
   .nav[aria-current=page] svg{opacity:1}
   .nav .count{margin-left:auto;font-size:11.5px;color:var(--faint);
               background:var(--raise);border-radius:0;padding:1px 8px}
-  /* Quiet until wanted: signing out is rare, and a button competing with the
-     agent's own state is a button pressed by accident. */
-  .signout{display:block;width:100%;margin-top:10px;padding:7px 10px;
-    appearance:none;background:none;border:1px solid var(--line-soft);border-radius:0;
-    font:inherit;font-size:12px;color:var(--faint);cursor:pointer;text-align:left}
-  .signout:hover{color:var(--ink);border-color:var(--line);background:var(--raise)}
+  /* Quiet until wanted: signing out is rare, and a control that competes with
+     the agent's own state is a control pressed by accident. It sits across the
+     row from the name because the name is whose session it ends. */
+  .signout{flex:0 0 auto;margin-left:auto;display:grid;place-items:center;
+    width:26px;height:26px;padding:0;appearance:none;background:none;
+    border:1px solid transparent;border-radius:0;color:var(--faint);cursor:pointer}
+  .signout svg{width:15px;height:15px;display:block}
+  .signout:hover{color:var(--ink);border-color:var(--line-soft);background:var(--raise)}
   .signout:focus-visible{outline:2px solid var(--accent);outline-offset:1px;color:var(--ink)}
   .rail-foot{margin-top:auto;flex:none;padding:14px 10px 0;
              border-top:1px solid var(--line-soft);
@@ -1676,8 +1678,17 @@
           <b id="whoami">connecting</b>
           <small id="agentState">checking</small>
         </span>
+        <button class="signout" id="signout" type="button"
+                title="Sign out" aria-label="Sign out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true">
+            <path d="M9 4.5H5.5A1.5 1.5 0 0 0 4 6v12a1.5 1.5 0 0 0 1.5 1.5H9"/>
+            <path d="M15 8l4 4-4 4"/>
+            <path d="M19 12H9"/>
+          </svg>
+        </button>
       </div>
-      <button class="signout" id="signout" type="button">Sign out</button>
     </div>
   </aside>
 
