@@ -219,7 +219,15 @@ export class WhatsApp extends EventEmitter implements Transport {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger as never),
       },
-      browser: Browsers.ubuntu('Tulip'),
+      // Who we say we are, and why it changes when pairing by code.
+      //
+      // The QR flow accepts any product name and "Tulip" is the honest one —
+      // it is what shows in Linked devices. The pairing-code flow is checked
+      // more strictly on the phone, and an unrecognised client is refused with
+      // "couldn't link device" and no server-side error to read. So while
+      // pairing by code we present a browser WhatsApp knows; once linked, the
+      // name in Linked devices comes from the stored session either way.
+      browser: PAIR_NUMBER.length > 0 ? Browsers.ubuntu('Chrome') : Browsers.ubuntu('Tulip'),
       printQRInTerminal: false,
       syncFullHistory: false,
       markOnlineOnConnect: false,

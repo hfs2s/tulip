@@ -803,6 +803,39 @@ export function startPanel(deps: ApiDeps): Server | null {
           const result = scheduleCreate(deps, url.searchParams.get('key') ?? '', await readBody(req));
           return send(res, headers, result.ok ? 200 : 400, result);
         }
+        /**
+         * Sign out: forget the token, and say where the identity lives.
+         *
+         * The cookie is HttpOnly, so the page cannot clear it — only a
+         * `Set-Cookie` from here can, which is the whole reason this route
+         * exists rather than two lines of browser script.
+         *
+         * Clearing it is also what makes Access testable at all. The token is
+         * checked first and answers with no identity attached, so a browser
+         * holding one never reaches the Access path and the Terminal page
+         * stays shut with no explanation. Signing out of the token is how an
+         * operator gets asked who they are.
+         *
+         * The Access session is a separate thing on Cloudflare's side and
+         * cannot be ended from here, so the answer carries the URL that ends
+         * it and the page sends the operator there.
+         */
+        if (url.pathname === '/api/signout' && req.method === 'POST') {
+          const team = accessConfig()?.teamDomain ?? null;
+          return send(
+            res,
+            {
+              ...headers,
+              'set-cookie': `${COOKIE}=; Path=/; Max-Age=0; SameSite=Strict; HttpOnly`,
+            },
+            200,
+            {
+              ok: true,
+              message: 'Signed out.',
+              accessLogout: team === null ? null : `https://${team}/cdn-cgi/access/logout`,
+            },
+          );
+        }
         if (url.pathname === '/api/apps' && req.method === 'GET') {
           return send(res, headers, 200, await appsList(deps));
         }

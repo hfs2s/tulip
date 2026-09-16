@@ -286,6 +286,38 @@ function navIsOpen() {
   return !!toggle && toggle.getAttribute('aria-expanded') === 'true';
 }
 
+/**
+ * Sign out, which means two different sessions.
+ *
+ * The bearer token is a cookie the page cannot touch — it is HttpOnly — so the
+ * bridge clears it and answers with where the other session lives. That second
+ * one is Cloudflare Access, held by Cloudflare rather than by us, so the only
+ * way to end it is to send the operator to its own logout URL.
+ *
+ * Confirmed first, because on a deployment with no Access in front, signing out
+ * means needing the token again to get back in — and the token is not something
+ * anybody has in their head.
+ */
+function wireSignOut() {
+  var button = el('signout');
+  if (!button) return;
+  button.addEventListener('click', function () {
+    if (!window.confirm('Sign out of this panel?\n\nYou will need to sign in again — through your identity provider if one is configured, or with the panel link otherwise.')) return;
+    button.disabled = true;
+    void api('/api/signout', { method: 'POST' })
+      .then(function (body) {
+        // Cloudflare's session outlives ours, and leaving it standing means the
+        // next visit walks straight back in without being asked who it is —
+        // which looks like the sign-out did nothing.
+        window.location.href = body && body.accessLogout ? body.accessLogout : '/';
+      })
+      .catch(function (err) {
+        button.disabled = false;
+        toast(err.message, true);
+      });
+  });
+}
+
 function wireNavToggle() {
   var toggle = el('navToggle'), scrim = el('navScrim');
   if (!toggle) return;
@@ -6822,6 +6854,7 @@ function mountTopbarMark() {
 buildNav();
 mountTopbarMark();
 wireNavToggle();
+wireSignOut();
 mountFlow();
 void mountPaper();
 /**

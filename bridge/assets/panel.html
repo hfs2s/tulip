@@ -233,6 +233,13 @@
   .nav[aria-current=page] svg{opacity:1}
   .nav .count{margin-left:auto;font-size:11.5px;color:var(--faint);
               background:var(--raise);border-radius:0;padding:1px 8px}
+  /* Quiet until wanted: signing out is rare, and a button competing with the
+     agent's own state is a button pressed by accident. */
+  .signout{display:block;width:100%;margin-top:10px;padding:7px 10px;
+    appearance:none;background:none;border:1px solid var(--line-soft);border-radius:0;
+    font:inherit;font-size:12px;color:var(--faint);cursor:pointer;text-align:left}
+  .signout:hover{color:var(--ink);border-color:var(--line);background:var(--raise)}
+  .signout:focus-visible{outline:2px solid var(--accent);outline-offset:1px;color:var(--ink)}
   .rail-foot{margin-top:auto;flex:none;padding:14px 10px 0;
              border-top:1px solid var(--line-soft);
              font-size:11.5px;color:var(--faint);line-height:1.5}
@@ -1670,6 +1677,7 @@
           <small id="agentState">checking</small>
         </span>
       </div>
+      <button class="signout" id="signout" type="button">Sign out</button>
     </div>
   </aside>
 
