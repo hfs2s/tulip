@@ -189,6 +189,11 @@ services:
       TULIP_PAGES_ROOT_REDIRECT: ${TULIP_PAGES_ROOT_REDIRECT:-}
       TULIP_ACCESS_TEAM_DOMAIN: ${TULIP_ACCESS_TEAM_DOMAIN:-}
       TULIP_ACCESS_AUD: ${TULIP_ACCESS_AUD:-}
+      # Where this panel answers from the outside. Used for one thing: a
+      # refused panel reached over the tailnet can point at the address where
+      # signing in actually works. It cannot work that out for itself, because
+      # on that path Cloudflare — which is what would know — is not involved.
+      TULIP_PANEL_HOST: ${TULIP_PANEL_HOST:-}
       # Which deployment this is, for the panel and the operator commands. The
       # name is display-only: what the agent is told it is lives in the persona.
       TULIP_INSTANCE: ${TULIP_INSTANCE:-tulip}

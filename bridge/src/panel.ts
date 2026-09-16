@@ -52,6 +52,7 @@ import { fileURLToPath } from 'node:url';
 import { CONTROL_COMMANDS, CROSS_CHAT_VERBS, REACTIVITY, VERBOSITY, VERBS, VERB_GROUPS, writeFileAtomic } from '@2lp/shared';
 import { feed } from './feed.js';
 import { accessConfig, verifiedEmail } from './access.js';
+import { asPage, asText, hostname, refusal } from './signin.js';
 import { canSee, isOwner } from './privacy.js';
 import { PTY_PREFIX, proxyRequest, proxyUpgrade, ptyAvailable } from './pty.js';
 import { isPagesRequest, pagesHost, servePage, servePageWrite } from './pages.js';
@@ -120,6 +121,16 @@ const COOKIE = 'tulip_token';
  * fix, and the declaration has to be on every one of these, not most.
  */
 const TEXT = 'text/plain; charset=utf-8';
+
+/**
+ * Where this panel answers to the world, when it does.
+ *
+ * Only ever used to offer a link out of a refusal. A panel reached over the
+ * tailnet cannot work this out for itself — the address it was called at is the
+ * tailnet's, and Cloudflare, which is what would know, is not in that path. So
+ * it is told, or it says less.
+ */
+const PUBLIC_HOST = hostname(process.env['TULIP_PANEL_HOST']);
 /**
  * How often a connected terminal is polled for new pane bytes.
  *
@@ -406,6 +417,21 @@ export function startPanel(deps: ApiDeps): Server | null {
         return;
       }
 
+      // The typefaces, before anyone has signed in. They are two files with no
+      // content of their own, and the refusal screen is written in them; behind
+      // the gate they would only ever have loaded for people already past it.
+      if (/^\/fonts\/[A-Za-z0-9._-]+\.woff2$/.test(url.pathname)) {
+        const file = asset(join('fonts', url.pathname.slice('/fonts/'.length)));
+        if (!file) {
+          res.writeHead(404, { ...headers, 'content-type': TEXT }).end('not found\n');
+          return;
+        }
+        res
+          .writeHead(200, { ...headers, 'content-type': 'font/woff2', 'cache-control': 'private, max-age=604800, immutable' })
+          .end(file);
+        return;
+      }
+
       if (throttled(address)) {
         res.writeHead(429, { ...headers, 'content-type': TEXT }).end('too many attempts\n');
         return;
@@ -413,26 +439,23 @@ export function startPanel(deps: ApiDeps): Server | null {
       const auth = await authenticate(req, url);
       if (!auth.ok) {
         noteFailure(address);
+        // Say what the way in *is*, not what the fallback is. Leading with the
+        // token taught everyone to reach for a shared secret, which is the
+        // thing single sign-on exists to retire — and when sign-on is on and a
+        // request still lands here, naming the token answers the wrong
+        // question. `signin.ts` works out which of the three it is.
+        const state = refusal(
+          access,
+          { host: req.headers.host, ray: req.headers['cf-ray'] as string | undefined },
+          PUBLIC_HOST,
+        );
+        // A browser gets the screen; curl, a probe and a health check get the
+        // sentence. Negotiated rather than always-HTML, because the plain
+        // answer is the one that is legible in a terminal.
+        const wantsPage = (req.headers.accept ?? '').includes('text/html');
         res
-          .writeHead(401, { ...headers, 'content-type': TEXT })
-          .end(
-            // Say what the way in *is*, not what the fallback is. Leading with
-            // the token taught everyone to reach for a shared secret, which is
-            // the thing single sign-on exists to retire; and when sign-on is on
-            // and a request still lands here, naming the token answers the
-            // wrong question — the interesting fact is that this request never
-            // went through the sign-on at all.
-            access === null
-              ? 'single sign-on is off for this instance: TULIP_ACCESS_AUD is unset, so no ' +
-                'identity reaches this panel and it cannot tell one person from another.\n' +
-                `until it is set, the shared token is the only way in — ${paths.panelToken}, ` +
-                'inside the bridge container.\n'
-              : 'this panel is behind single sign-on, and this request carried no signed-in ' +
-                'identity.\n' +
-                'open it at its public hostname and sign in there. reaching it by tailnet ' +
-                'address or by IP goes around the sign-on entirely, and nothing on that path ' +
-                'can sign you in — only ?t=<token> works there.\n',
-          );
+          .writeHead(401, { ...headers, 'content-type': wantsPage ? 'text/html; charset=utf-8' : TEXT })
+          .end(wantsPage ? asPage(state) : asText(state));
         return;
       }
 
@@ -562,17 +585,6 @@ export function startPanel(deps: ApiDeps): Server | null {
             return;
           }
           serveAsset(res, req, headers, 'text/javascript', bundle);
-          return;
-        }
-        if (/^\/fonts\/[A-Za-z0-9._-]+\.woff2$/.test(url.pathname)) {
-          const file = asset(join('fonts', url.pathname.slice('/fonts/'.length)));
-          if (!file) {
-            res.writeHead(404, { ...headers, 'content-type': TEXT }).end('not found\n');
-            return;
-          }
-          res
-            .writeHead(200, { ...headers, 'content-type': 'font/woff2', 'cache-control': 'private, max-age=604800, immutable' })
-            .end(file);
           return;
         }
 
