@@ -49,7 +49,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONTROL_COMMANDS, CROSS_CHAT_VERBS, REACTIVITY, VERBS, VERB_GROUPS, writeFileAtomic } from '@2lp/shared';
+import { CONTROL_COMMANDS, CROSS_CHAT_VERBS, REACTIVITY, VERBOSITY, VERBS, VERB_GROUPS, writeFileAtomic } from '@2lp/shared';
 import { feed } from './feed.js';
 import { accessConfig, verifiedEmail } from './access.js';
 import { canSee, isOwner } from './privacy.js';
@@ -721,7 +721,13 @@ export function startPanel(deps: ApiDeps): Server | null {
           // The level table travels with the settings it describes, so the
           // panel cannot show a description that has drifted from the sentence
           // the agent is actually given.
-          return send(res, headers, 200, { ...(settingsView(deps) as object), reactivityLevels: REACTIVITY });
+          // Both dials ship their own words, so the panel shows the sentence
+          // the agent is actually given rather than a paraphrase of it.
+          return send(res, headers, 200, {
+            ...(settingsView(deps) as object),
+            reactivityLevels: REACTIVITY,
+            verbosityLevels: VERBOSITY,
+          });
         }
         // Method guard matters: without it this also swallows the POST and
         // silently returns the current values instead of applying the change.

@@ -2098,6 +2098,8 @@ const SettingsPatch = z
     }).strict().optional(),
     /** Cross-chat sending. Off by default; see THREAT-MODEL §T4. */
     agent: z.object({
+      /** How much to say when answering. See shared/src/verbosity.ts. */
+      verbosity: z.number().int().min(0).max(3).optional(),
       crossChat: z.boolean().optional(),
       recall: z.boolean().optional(),
       search: z.boolean().optional(),

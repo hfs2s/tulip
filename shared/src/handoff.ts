@@ -261,6 +261,15 @@ export const CurrentTurn = z
      * operator has to restart the agent to feel is a dial they will not use.
      */
     reactivity: z.number().int().min(0).max(4).nullable().default(null),
+    /**
+     * How much to say when answering, 0–3. See shared/src/verbosity.ts.
+     *
+     * Carried per turn for the same reason as the dial above, and unlike it,
+     * present for every chat: a direct message has no tone to set but it
+     * certainly has a length. Defaulted rather than required so a bridge that
+     * has it and an agent image that does not can still work together.
+     */
+    verbosity: z.number().int().min(0).max(3).default(2),
     startedAt: z.string().datetime(),
     /**
      * This chat's context generation, bumped by `!reset`.

@@ -8,4 +8,5 @@ export * from './atomic.js';
 export * from './schedule.js';
 export * from './verbs.js';
 export * from './reactivity.js';
+export * from './verbosity.js';
 export * from './browse.js';

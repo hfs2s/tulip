@@ -334,6 +334,19 @@ const Agent = z
      * it can carry the current one outward, not fetch someone else's inward.
      * See docs/THREAT-MODEL.md §T4.
      */
+    /**
+     * How much the agent says when it speaks, 0–3.
+     *
+     * Separate from `groups.reactivity`, which decides whether it speaks at
+     * all. The two are tuned for different complaints — "it never says
+     * anything" and "it says too much" — and folding them into one number
+     * would mean an operator quietening a chatty room also making its answers
+     * shorter, which is not what they asked for.
+     *
+     * See shared/src/verbosity.ts for the levels and the words behind them.
+     */
+    verbosity: z.number().int().min(0).max(3).default(2),
+
     crossChat: z.boolean().default(false),
 
     /**

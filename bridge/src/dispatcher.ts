@@ -654,7 +654,10 @@ export class Dispatcher extends EventEmitter {
     // the same reason as the reactivity dial — an operator changing it should
     // not have to restart a session — and read here rather than in the agent
     // because the agent's container runs UTC and has no way to know otherwise.
-    this.deps.config.timezone);
+    this.deps.config.timezone,
+    // How much to say, carried on the turn like the dial above so moving it is
+    // felt on the next message rather than the next session.
+    this.deps.config.agent.verbosity);
 
     this.inFlight = { turnId: turn.turnId, chatKey, startedAt: now };
     this.deps.limiter.spendTurn(chatKey, now);

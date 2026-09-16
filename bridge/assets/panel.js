@@ -5958,6 +5958,46 @@ async function renderSettings() {
     { reload: function () { return freshSettings(function (f) { return f.groups.triggers || []; }); } });
   p.appendChild(groups);
 
+  // How much it says, beside how readily it says it. A different complaint
+  // ("it says too much") from the dial in Groups ("it never says anything"),
+  // and in every chat rather than only a room — a direct message has no tone
+  // to set but it certainly has a length.
+  var lengths = (s.verbosityLevels || []);
+  var lenWrap = node('div');
+  var lenSaid = node('p', 'sub');
+  var lenSlider = document.createElement('input');
+  lenSlider.type = 'range';
+  lenSlider.min = '0';
+  lenSlider.max = String(Math.max(0, lengths.length - 1));
+  lenSlider.step = '1';
+  lenSlider.value = String(s.agent && s.agent.verbosity !== undefined ? s.agent.verbosity : 2);
+  lenSlider.className = 'slider';
+  lenSlider.setAttribute('aria-label', 'How much 2LP says when it answers');
+
+  function sayLength(v) {
+    var lv = lengths[v] || { name: '', description: '' };
+    clear(lenSaid);
+    lenSaid.appendChild(node('strong', null, v + ' · ' + lv.name + ' — '));
+    lenSaid.appendChild(document.createTextNode(lv.description));
+    lenSlider.setAttribute('aria-valuetext', v + ', ' + lv.name);
+  }
+  sayLength(Number(lenSlider.value));
+
+  lenSlider.addEventListener('input', function () { sayLength(Number(lenSlider.value)); });
+  lenSlider.addEventListener('change', function () {
+    var was = s.agent.verbosity;
+    var now = Number(lenSlider.value);
+    s.agent.verbosity = now;
+    saveSettings({ agent: { verbosity: now } }, function () {
+      s.agent.verbosity = was;
+      lenSlider.value = String(was);
+      sayLength(was);
+    });
+  });
+  lenWrap.appendChild(lenSlider);
+  lenWrap.appendChild(lenSaid);
+  field(groups, 'How much it says', 'How long an answer should be, everywhere — a direct message as much as a room. It takes effect on the next message, no restart, and the words below are the words ' + AGENT + ' is given rather than a paraphrase of them.', lenWrap);
+
   // ── Reach ─────────────────────────────────────────────────────────────────
   var reach = node('div', 'card');
   reach.appendChild(node('h2', null, 'Reach'));

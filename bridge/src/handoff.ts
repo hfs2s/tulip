@@ -49,6 +49,12 @@ export function publishTurn(
    * no config to read.
    */
   timezone = 'UTC',
+  /**
+   * How much to say, 0–3. Defaulted for the same reason as the clock above:
+   * a caller with no config to read has no opinion, and the middle level is
+   * the one the persona was written for.
+   */
+  verbosity = 2,
 ): void {
   const validated = InboxBatch.parse(batch);
   writeJsonAtomic(inPaths.batch(validated.turnId), validated, 0o644);
@@ -64,6 +70,9 @@ export function publishTurn(
     // Only for a group, and only in `observe` mode. A direct chat has no tone to
     // set — the agent answers the person who wrote to it.
     reactivity: validated.isGroup ? reactivity : null,
+    // Every chat, unlike the dial above: a direct message has no tone to set,
+    // but it certainly has a length.
+    verbosity,
     timezone,
     // Omitted rather than guessed when the caller does not say: every field
     // defaults to on, and the bridge refuses for real regardless.
