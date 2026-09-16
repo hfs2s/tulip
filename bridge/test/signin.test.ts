@@ -44,8 +44,16 @@ describe('what each refusal offers', () => {
     expect(text).toContain('https://taste-lab.cloudflareaccess.com/cdn-cgi/access/login/nando.2lp.chat');
   });
 
+  it('keeps the token to itself when the caller came off the internet', () => {
+    // maria.2lp.chat has no application in front of it, so this page is what a
+    // passer-by sees. They get the sentence and none of the housekeeping.
+    const stranger = asText(refusal(null, { host: 'maria.2lp.chat', ray: '8f2a-MAD' }, null));
+    expect(stranger).toContain("can't tell who you are");
+    expect(stranger).not.toContain('panel-token');
+  });
+
   it('names the token only where it is genuinely the only way in', () => {
-    expect(asText({ kind: 'off' })).toContain('/state/panel-token');
+    expect(asText({ kind: 'off', local: true })).toContain('/state/panel-token');
     expect(asText(refusal(ACCESS, { host: 'nando.2lp.chat', ray: '8f2a-MAD' }, null))).not.toContain('panel-token');
   });
 });
@@ -73,10 +81,10 @@ describe('the host it is handed', () => {
 
 describe('the screen', () => {
   it('is written in the panel\'s own typefaces, which it can only load unauthenticated', () => {
-    expect(asPage({ kind: 'off' })).toContain("url('/fonts/onest.woff2')");
+    expect(asPage({ kind: 'off', local: true })).toContain("url('/fonts/onest.woff2')");
   });
 
   it('carries no script, on a page shown to anyone who can reach the port', () => {
-    expect(asPage({ kind: 'off' })).not.toMatch(/<script/i);
+    expect(asPage({ kind: 'off', local: true })).not.toMatch(/<script/i);
   });
 });

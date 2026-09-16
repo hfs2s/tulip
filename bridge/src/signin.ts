@@ -17,7 +17,7 @@ import { paths } from './paths.js';
 /** Why this request was refused, which decides what there is to do about it. */
 export type Refusal =
   /** No Access application issues assertions for this instance. */
-  | { kind: 'off' }
+  | { kind: 'off'; local: boolean }
   /** Sign-on is on, but the request never passed through it. */
   | { kind: 'bypassed'; publicHost: string | null }
   /** Sign-on is on and was passed through, yet no identity arrived. */
@@ -51,7 +51,13 @@ export function refusal(
   headers: { host?: string | undefined; ray?: string | undefined },
   publicHost: string | null,
 ): Refusal {
-  if (access === null) return { kind: 'off' };
+  const local = (headers.ray ?? '').trim().length === 0;
+  // Where the token lives is not a secret, but it is not a stranger's business
+  // either, and an instance with sign-on off is an instance reachable by
+  // strangers. Cloudflare in the path means the caller came off the internet;
+  // its absence means the tailnet, which is the only place the answer is of any
+  // use anyway.
+  if (access === null) return { kind: 'off', local };
   if ((headers.ray ?? '').trim().length === 0) return { kind: 'bypassed', publicHost };
   return { kind: 'expired', teamDomain: access.teamDomain, host: hostname(headers.host) };
 }
@@ -78,7 +84,7 @@ function words(state: Refusal): Words {
         "Single sign-on isn't set up for this instance, so no identity reaches the panel " +
         'and it can\'t tell one person from another. Until it is, the shared token is the only way in.',
       action: null,
-      literal: paths.panelToken,
+      literal: state.local ? paths.panelToken : null,
     };
   }
   if (state.kind === 'bypassed') {
@@ -139,7 +145,7 @@ export function asPage(state: Refusal): string {
   @font-face{font-family:'InterVar';src:url('/fonts/inter.woff2') format('woff2');font-weight:100 900;font-display:swap}
   :root{
     --ground:#0d0d0f; --ink:#fafafa; --dim:rgba(250,250,250,.64); --faint:rgba(250,250,250,.42);
-    --line:rgba(255,255,255,.09); --raise:#141416; --accent:#21d2ed;
+    --line:rgba(255,255,255,.09); --accent:#21d2ed;
     --display:'Onest',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     --body:'InterVar',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -155,12 +161,12 @@ export function asPage(state: Refusal): string {
      text-wrap:balance;max-width:17ch}
   p{margin:18px 0 0;color:var(--dim);max-width:46ch}
   a.go{display:inline-block;margin-top:30px;padding:11px 18px;
-       border:1px solid var(--line);background:var(--raise);
+       border:1px solid var(--line);
        color:var(--ink);text-decoration:none;font-size:13.5px}
   a.go:hover{border-color:var(--accent);color:var(--accent)}
   a.go:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   code{display:block;margin-top:30px;font-family:var(--mono);font-size:12.5px;
-       color:var(--faint);word-break:break-all}
+       color:var(--dim);word-break:break-all}
 </style>
 </head><body>
 <main>
