@@ -477,10 +477,18 @@ const Agent = z
  *
  * The two shapes overlap (a sixteen-digit string is a valid chat key and a valid
  * number), which costs nothing: both are checked, and matching either is enough.
+ *
+ * A group's own jid (`<id>@g.us`) is the third form, and it names the room
+ * rather than anybody in it: a grant written that way reaches that group and
+ * no direct chat, exactly as its chat key would. A number or linked id never
+ * matches a group — see `matchesGrant` in grants.ts.
  */
 const GrantEntry = z
   .string()
-  .regex(/^[0-9a-f]{5,64}(@lid)?$/, 'must be a chat key, a phone number, or a linked id');
+  .regex(
+    /^(?:[0-9a-f]{5,64}(?:@lid)?|[0-9-]{10,40}@g\.us)$/,
+    'must be a chat key, a phone number, a linked id, or a group id',
+  );
 
 /** A page's slug, matching what `pages.ts` will accept as a directory name. */
 const PageSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{2,47}$/, 'must be a page slug');
@@ -733,6 +741,20 @@ export const PluginSettings = z
         operatorOnly: z.boolean().default(true),
         /** How long to wait for the plugin's answer before telling the agent it did not come. */
         timeoutMs: z.number().int().min(1000).max(PLUGIN_MAX_TIMEOUT_MS).default(60_000),
+        /**
+         * Conversations that may call this plugin even though `operatorOnly`
+         * is on — the same entries `apps.grants` takes, matched the same way.
+         *
+         * `operatorOnly: false` opens a plugin to everyone the agent answers;
+         * this opens it to a named few, which is the shape most plugins want:
+         * the client whose bookings these are, in their own group, and nobody
+         * else. An operator is never refused by it, and a group grant is a
+         * grant to its members — adding somebody to the room is adding them
+         * here. Config-only, like the rest of `callable`: the panel does not
+         * widen it. Ignored when `operatorOnly` is off, since there is nothing
+         * left to grant.
+         */
+        grants: z.array(GrantEntry).max(20).default([]),
       })
       .strict()
       .optional(),

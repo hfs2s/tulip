@@ -32,7 +32,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { writeJsonAtomic } from '@2lp/shared';
 import type { Config } from './config.js';
-import { identities, matchesList } from './jid.js';
+import { matchesGrant, type GrantChat } from './grants.js';
 import { log } from './log.js';
 import { paths } from './paths.js';
 import { askPluginText } from './pluginCalls.js';
@@ -276,7 +276,7 @@ export function mayUse(
   config: Config,
   id: string,
   chatKey: string,
-  chat: { readonly jid: string; readonly altJid: string | null; readonly isGroup: boolean } | null,
+  chat: GrantChat,
   fromOperator: boolean,
 ): boolean {
   if (fromOperator) return true;
@@ -284,13 +284,10 @@ export function mayUse(
   // Ungranted is nobody. Unlike a page, an app has no standing rule that could
   // say otherwise, so an absent grant and an empty one are the same answer.
   if (granted === undefined) return false;
-  if (granted.includes(chatKey)) return true;
-
-  // Granted by phone number or linked id — the only way to hand an app to
-  // somebody who has never written. Direct chats only: a group's jid is the
-  // group's, not a member's, so a number could otherwise authorise a room.
-  if (chat === null || chat.isGroup) return false;
-  return matchesList({ jids: granted }, identities(chat.jid, chat.altJid));
+  // By chat key, by phone number or linked id for somebody who has never
+  // written, or by a group's own jid. The rules are grants.ts's, shared with
+  // callable plugins so a grant means one thing.
+  return matchesGrant(granted, chatKey, chat);
 }
 
 /**

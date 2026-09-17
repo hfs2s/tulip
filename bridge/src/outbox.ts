@@ -1425,7 +1425,14 @@ export class Outbox extends EventEmitter {
        * the dispatcher decided from the envelope and a group never carries.
        */
       case 'pluginList': {
-        await this.answer(action.id, 'plugin', listCallable(this.deps.config, turn.fromOperator, this.deps.pluginsDir));
+        // The chat goes along with the authority: `callable.grants` can name
+        // this conversation, and the listing must agree with the call.
+        await this.answer(action.id, 'plugin', listCallable(
+          this.deps.config,
+          turn.fromOperator,
+          this.deps.pluginsDir,
+          { chatKey: turn.chatKey, chat: this.deps.chats.get(turn.chatKey) },
+        ));
         break;
       }
       case 'peerAsk': {
@@ -1534,6 +1541,8 @@ export class Outbox extends EventEmitter {
           action: action.action,
           args: action.args,
           fromOperator: turn.fromOperator,
+          chatKey: turn.chatKey,
+          chat: this.deps.chats.get(turn.chatKey),
           ...(this.deps.pluginsDir === undefined ? {} : { root: this.deps.pluginsDir }),
         }).then((outcome) => this.answer(action.id, 'plugin', outcome));
         break;

@@ -35,6 +35,8 @@ vi.mock('../src/mediaStore.js', () => ({ retainOutbound: vi.fn() }));
 
 const PHONE = '15551234567@s.whatsapp.net';
 const GROUP = '120363000000000001@g.us';
+/** Somebody WhatsApp only ever shows us as a linked id, with no number to grant. */
+const LID = '111111111111111@lid';
 
 const MANIFEST = {
   label: 'Bookings (manifest)',
@@ -61,7 +63,10 @@ interface Answer {
   items: Array<{ title: string; url: string; published: string | null; text: string }>;
 }
 
-async function harness(plugins: Record<string, unknown>) {
+/** The registry's keys for the three chats the harness opens, for a grant written by chat key. */
+interface Keys { direct: string; group: string; lid: string }
+
+async function harness(plugins: Record<string, unknown> | ((keys: Keys) => Record<string, unknown>)) {
   const root = mkdtempSync(join(tmpdir(), 'tulip-pcall-'));
   roots.push(root);
   const out = join(root, 'out');
@@ -86,8 +91,17 @@ async function harness(plugins: Record<string, unknown>) {
   const { outPaths, inPaths } = await import('@2lp/shared');
   const { feed } = await import('../src/feed.js');
 
-  const config = parseConfig({ operators: { numbers: ['15551110000'] }, plugins });
+  // The registry first: it salts its own keys, so a grant written by chat key
+  // cannot be spelled until the chats exist.
   const chats = new ChatRegistry(join(root, 'salt'), join(root, 'chats.json'));
+  const now = Date.now();
+  const direct = chats.keyFor(PHONE, false, now);
+  const group = chats.keyFor(GROUP, true, now);
+  const lid = chats.keyFor(LID, false, now);
+  const config = parseConfig({
+    operators: { numbers: ['15551110000'] },
+    plugins: typeof plugins === 'function' ? plugins({ direct, group, lid }) : plugins,
+  });
   const turns = new TurnRegistry(config.limits.turnTimeoutMs, config.limits.outboundPerTurn, config.limits.toolsPerTurn);
   const limiter = new Limiter({
     messagesPerHour: 1000, burst: 50, turnsPerDay: 1000, newSendersPerHour: 1000, outboundPerChatPerHour: 1000,
@@ -97,19 +111,25 @@ async function harness(plugins: Record<string, unknown>) {
     wa: wa as never, config, chats, turns, limiter, lastMessageIn: () => null, setPagePasswords: () => undefined, pluginsDir,
   });
 
-  const now = Date.now();
-  const direct = chats.keyFor(PHONE, false, now);
-  const group = chats.keyFor(GROUP, true, now);
-
   return {
     pluginsDir,
     outbox,
     wa,
-    /** Queue one action on a fresh turn, as the agent would, and drain. Returns the action id. */
-    async ask(action: Record<string, unknown>, opts: { operator?: boolean; inGroup?: boolean } = {}): Promise<string> {
+    /**
+     * Queue one action on a fresh turn, as the agent would, and drain. Returns the action id.
+     *
+     * The direct chat is the operator's unless said otherwise; the group and
+     * the linked-id chat never are, as the dispatcher would open them.
+     */
+    async ask(
+      action: Record<string, unknown>,
+      opts: { operator?: boolean; inGroup?: boolean; asLid?: boolean } = {},
+    ): Promise<string> {
       const turn = opts.inGroup === true
         ? turns.open(GROUP, group, Date.now(), opts.operator ?? false)
-        : turns.open(PHONE, direct, Date.now(), opts.operator ?? true);
+        : opts.asLid === true
+          ? turns.open(LID, lid, Date.now(), opts.operator ?? false)
+          : turns.open(PHONE, direct, Date.now(), opts.operator ?? true);
       const id = randomUUID();
       writeFileSync(outPaths.action(id), JSON.stringify({ id, turnId: turn.turnId, ...action }));
       await outbox.drain();
@@ -180,10 +200,20 @@ const OPERATOR_ONLY = { bookings: { label: 'Bookings', callable: { enabled: true
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 describe('the callable grant in config', () => {
-  it('is absent unless written, and defaults to off, operator-only and a minute', async () => {
+  it('is absent unless written, and defaults to off, operator-only, a minute and no grants', async () => {
     const { PluginSettings } = await import('../src/config.js');
     expect(PluginSettings.parse({}).callable).toBeUndefined();
-    expect(PluginSettings.parse({ callable: {} }).callable).toEqual({ enabled: false, operatorOnly: true, timeoutMs: 60_000 });
+    expect(PluginSettings.parse({ callable: {} }).callable).toEqual({
+      enabled: false, operatorOnly: true, timeoutMs: 60_000, grants: [],
+    });
+  });
+
+  it('takes a grant in the forms apps.grants takes, and no other', async () => {
+    const { PluginSettings } = await import('../src/config.js');
+    const forms = [GROUP, '15551234567', LID, 'abcdef0123456789'];
+    expect(PluginSettings.parse({ callable: { grants: forms } }).callable?.grants).toEqual(forms);
+    expect(PluginSettings.safeParse({ callable: { grants: ['juan@s.whatsapp.net'] } }).success).toBe(false);
+    expect(PluginSettings.safeParse({ callable: { grants: Array.from({ length: 21 }, () => GROUP) } }).success).toBe(false);
   });
 
   it('leaves the outbound fields exactly as they were', async () => {
@@ -522,5 +552,115 @@ describe('pluginList', () => {
     const id = await h.ask({ kind: 'pluginList' });
     await waitFor(() => h.answer(id));
     expect(h.wa.sendText).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Grants: operator-only, plus the chats named ─────────────────────────────
+
+/**
+ * `callable.grants` opens an operator-only plugin to named conversations and
+ * nobody else. The same property as every refusal above — refused *before*
+ * anything is written — plus the edges of the grant itself: an operator is
+ * never refused by it, a group is granted by its own jid and never by a
+ * member's number, and it means nothing once `operatorOnly` is off.
+ */
+describe('callable.grants', () => {
+  const granting = (...grants: string[]) => ({ bookings: { label: 'Bookings', callable: { enabled: true, grants } } });
+  /** A plugin that answers `today`, so an allowed call is an `ok` answer rather than a timeout. */
+  const answering = (dir: string) =>
+    fakePlugin(dir, (call, answers) =>
+      writeAtomically(join(answers, `${call.id}.json`), JSON.stringify({ id: call.id, ok: true, text: 'Three today.' })),
+    );
+
+  it('still refuses a chat that is not in the grants, and writes nothing', async () => {
+    const h = await harness(granting(GROUP));
+    const dir = install(h.pluginsDir, 'bookings');
+    const id = await h.ask({ kind: 'pluginCall', plugin: 'bookings', action: 'today' }, { operator: false });
+    const answer = await waitFor(() => h.answer(id));
+    expect(answer.error).toBe('Only an operator can use Bookings, in a direct message with me.');
+    expect(existsSync(join(dir, 'calls'))).toBe(false);
+  });
+
+  it('lets a group call it once its jid is granted', async () => {
+    const h = await harness(granting(GROUP));
+    const dir = install(h.pluginsDir, 'bookings');
+    answering(dir);
+    const id = await h.ask({ kind: 'pluginCall', plugin: 'bookings', action: 'today' }, { inGroup: true });
+    const answer = await waitFor(() => h.answer(id));
+    expect(answer.ok).toBe(true);
+    expect(answer.items[0]?.text.endsWith('Three today.')).toBe(true);
+    expect(h.feed().some((e) => e.event === 'plugin.callRefused')).toBe(false);
+  });
+
+  it('lets somebody known only by a linked id call it, in their direct chat', async () => {
+    const h = await harness(granting(LID));
+    const dir = install(h.pluginsDir, 'bookings');
+    answering(dir);
+    const id = await h.ask({ kind: 'pluginCall', plugin: 'bookings', action: 'today' }, { asLid: true });
+    expect((await waitFor(() => h.answer(id))).ok).toBe(true);
+  });
+
+  it('lets a chat granted by its key call it', async () => {
+    const h = await harness((keys) => granting(keys.direct));
+    const dir = install(h.pluginsDir, 'bookings');
+    answering(dir);
+    const id = await h.ask({ kind: 'pluginCall', plugin: 'bookings', action: 'today' }, { operator: false });
+    expect((await waitFor(() => h.answer(id))).ok).toBe(true);
+  });
+
+  it('never refuses an operator, whatever the grants say', async () => {
+    const h = await harness(granting(GROUP));
+    const dir = install(h.pluginsDir, 'bookings');
+    answering(dir);
+    const id = await h.ask({ kind: 'pluginCall', plugin: 'bookings', action: 'today' }, { operator: true });
+    expect((await waitFor(() => h.answer(id))).ok).toBe(true);
+  });
+
+  it('does not let a member’s number or linked id grant the room', async () => {
+    // The direct chat's number and the lid are both granted; the group they
+    // might sit in is not, and a group is only ever granted by its own jid.
+    const h = await harness(granting('15551234567', LID));
+    const dir = install(h.pluginsDir, 'bookings');
+    const id = await h.ask({ kind: 'pluginCall', plugin: 'bookings', action: 'today' }, { inGroup: true });
+    expect((await waitFor(() => h.answer(id))).error).toMatch(/Only an operator/);
+    expect(existsSync(join(dir, 'calls'))).toBe(false);
+  });
+
+  it('lists it as granted to this chat, and as operator only to the operator', async () => {
+    const plugins = {
+      ...granting(GROUP),
+      weather: { callable: { enabled: true, operatorOnly: false } },
+    };
+    const WEATHER = { label: 'Weather', description: 'Tomorrow’s forecast.', actions: [{ name: 'tomorrow', summary: 'The forecast.' }] };
+    const h = await harness(plugins);
+    install(h.pluginsDir, 'bookings');
+    install(h.pluginsDir, 'weather', WEATHER);
+
+    const inGroup = await h.ask({ kind: 'pluginList' }, { inGroup: true });
+    expect((await waitFor(() => h.answer(inGroup))).items.map((i) => [i.url, i.published])).toEqual([
+      ['bookings', 'granted to this chat'],
+      ['weather', null],
+    ]);
+
+    const asOperator = await h.ask({ kind: 'pluginList' }, { operator: true });
+    expect((await waitFor(() => h.answer(asOperator))).items.map((i) => [i.url, i.published])).toEqual([
+      ['bookings', 'operator only'],
+      ['weather', null],
+    ]);
+
+    // A direct chat that was not granted does not see it at all.
+    const stranger = await h.ask({ kind: 'pluginList' }, { operator: false });
+    expect((await waitFor(() => h.answer(stranger))).items.map((i) => i.url)).toEqual(['weather']);
+  });
+
+  it('means nothing once operatorOnly is off: still allowed, and not marked as granted', async () => {
+    const h = await harness({ weather: { callable: { enabled: true, operatorOnly: false, grants: [GROUP] } } });
+    const dir = install(h.pluginsDir, 'weather', { description: 'Tomorrow’s forecast.', actions: [{ name: 'tomorrow', summary: 'The forecast.' }] });
+    fakePlugin(dir, (call, answers) => writeAtomically(join(answers, `${call.id}.json`), JSON.stringify({ id: call.id, ok: true, text: 'Sunny.' })));
+    // A direct chat that is in nobody's grants.
+    const call = await h.ask({ kind: 'pluginCall', plugin: 'weather', action: 'tomorrow' }, { operator: false });
+    expect((await waitFor(() => h.answer(call))).ok).toBe(true);
+    const list = await h.ask({ kind: 'pluginList' }, { inGroup: true });
+    expect((await waitFor(() => h.answer(list))).items.map((i) => [i.url, i.published])).toEqual([['weather', null]]);
   });
 });

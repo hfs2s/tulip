@@ -29,7 +29,10 @@
  *   - **Operator-only by default.** A plugin sits in front of the operator's own
  *     systems. `callable.operatorOnly` defaults on, and an operator turn is never
  *     a group turn (`carriesOperatorAuthority`), so by default a plugin answers
- *     only the operator, in their direct message.
+ *     only the operator, in their direct message. `callable.grants` opens one
+ *     to named conversations — the client's own group, say — without opening
+ *     it to everyone; `mayCall` is the whole rule, and both the listing and
+ *     the call go through it.
  *
  * ── What it treats as hostile ────────────────────────────────────────────────
  *
@@ -67,6 +70,7 @@ import {
 } from '@2lp/shared';
 import { readBounded } from './browse.js';
 import { feed } from './feed.js';
+import { matchesGrant, type GrantChat } from './grants.js';
 import { log } from './log.js';
 import { PLUGINS_DIR, isPlainDirectory } from './plugins.js';
 import type { Config, PluginSettings } from './config.js';
@@ -144,6 +148,40 @@ function callable(settings: PluginSettings | undefined): settings is Callable {
   return settings?.callable?.enabled === true;
 }
 
+/** The conversation asking, as the outbox knows it: its key, and its record if the registry has one. */
+export interface Asker {
+  readonly chatKey: string;
+  readonly chat: GrantChat;
+}
+
+/**
+ * Why this turn may call this plugin — or that it may not.
+ *
+ *   - `open`: `operatorOnly` is off, so anybody the agent answers may.
+ *   - `operator`: the turn is an operator's. Never refused, whatever the grants say.
+ *   - `granted`: not an operator, but the conversation is in `callable.grants`.
+ *   - `refused`: none of the above.
+ */
+export type CallAuthority = 'open' | 'operator' | 'granted' | 'refused';
+
+/**
+ * The one rule for who may call a plugin. Pure, and the only place it is
+ * written: `listCallable` decides what to show with it and `callPluginNow`
+ * decides what to write with it, so a plugin the agent can see is a plugin it
+ * can call, and never the other way round.
+ *
+ * The grant matches the way `apps.grants` does (grants.ts): by chat key, by a
+ * person's number or linked id in their direct chat, or by a group's own jid
+ * in that group. No asker means no grant can match, which is what a caller
+ * that predates grants — the panel, a test — gets by leaving it out.
+ */
+export function mayCall(settings: Callable, fromOperator: boolean, asker?: Asker): CallAuthority {
+  if (!settings.callable.operatorOnly) return 'open';
+  if (fromOperator) return 'operator';
+  if (asker !== undefined && matchesGrant(settings.callable.grants, asker.chatKey, asker.chat)) return 'granted';
+  return 'refused';
+}
+
 /** Whether `path` exists and is something other than a real directory — a link, most importantly. */
 function occupiedByNonDirectory(path: string): boolean {
   try {
@@ -198,22 +236,32 @@ function describeActions(manifest: PluginManifest): string {
 /**
  * Answer a `pluginList`: the callable plugins this turn may use.
  *
- * Operator-only plugins are omitted from a turn that is not an operator's,
- * rather than listed and then refused. A plugin whose manifest cannot be read
- * is still listed, with the reason, so the agent can tell an operator what is
- * wrong instead of not mentioning a plugin they know is switched on.
+ * Operator-only plugins are omitted from a turn that may not call them, rather
+ * than listed and then refused. A plugin whose manifest cannot be read is still
+ * listed, with the reason, so the agent can tell an operator what is wrong
+ * instead of not mentioning a plugin they know is switched on.
+ *
+ * `published` says why the agent can see an operator-only plugin: `operator
+ * only` on an operator's turn, `granted to this chat` where the conversation
+ * is in its grants — so the agent knows not to offer it elsewhere.
  */
-export function listCallable(config: Pick<Config, 'plugins'>, fromOperator: boolean, root = PLUGINS_DIR): ExaOutcome {
+export function listCallable(
+  config: Pick<Config, 'plugins'>,
+  fromOperator: boolean,
+  root = PLUGINS_DIR,
+  asker?: Asker,
+): ExaOutcome {
   const items: Array<{ title: string; url: string; published: string | null; text: string }> = [];
   for (const [name, settings] of Object.entries(config.plugins).sort(([a], [b]) => a.localeCompare(b))) {
     if (!PLUGIN_NAME.test(name) || !callable(settings)) continue;
-    if (settings.callable.operatorOnly && !fromOperator) continue;
+    const authority = mayCall(settings, fromOperator, asker);
+    if (authority === 'refused') continue;
     const dir = join(root, name);
     const read = isPlainDirectory(dir) ? readManifest(dir) : ({ ok: false, reason: 'has no directory to live in' } as const);
     items.push({
       title: labelOf(name, settings, read.ok ? read.manifest : undefined).slice(0, 300),
       url: name,
-      published: settings.callable.operatorOnly ? 'operator only' : null,
+      published: authority === 'open' ? null : authority === 'granted' ? 'granted to this chat' : 'operator only',
       text: read.ok
         ? `${stripControls(read.manifest.description)}\n${describeActions(read.manifest)}`
         : `Its manifest ${read.reason}, so it cannot be called until an operator fixes it.`,
@@ -229,6 +277,14 @@ export interface CallRequest {
   readonly action: string;
   readonly args: Readonly<Record<string, string>>;
   readonly fromOperator: boolean;
+  /**
+   * The conversation asking, for `callable.grants`. Optional so a caller with
+   * no conversation behind it — the panel asking as the operator — need not
+   * invent one; without it, only `operatorOnly: false` or an operator's turn
+   * gets past the gate.
+   */
+  readonly chatKey?: string;
+  readonly chat?: GrantChat;
   readonly root?: string;
   readonly pollMs?: number;
 }
@@ -269,7 +325,12 @@ async function callPluginNow(request: CallRequest): Promise<{ outcome: ExaOutcom
     );
   }
   const label = labelOf(name, settings);
-  if (settings.callable.operatorOnly && !fromOperator) {
+  const authority = mayCall(
+    settings,
+    fromOperator,
+    request.chatKey === undefined ? undefined : { chatKey: request.chatKey, chat: request.chat ?? null },
+  );
+  if (authority === 'refused') {
     feed.event('plugin.callRefused', `${label}: ${action} was asked for by somebody who is not an operator`);
     return refuse('not an operator', `Only an operator can use ${label}, in a direct message with me.`);
   }
@@ -357,7 +418,9 @@ async function callPluginNow(request: CallRequest): Promise<{ outcome: ExaOutcom
   }
 
   const ms = Date.now() - started;
-  log('plugin.call', { plugin: name, action, result, ms, fromOperator });
+  // `granted` only when a grant is what let it through: an operator's call and
+  // an open plugin's look as they always did.
+  log('plugin.call', { plugin: name, action, result, ms, fromOperator, ...(authority === 'granted' ? { granted: true } : {}) });
   feed.event('plugin.call', `${label}: ${action} — ${result === 'answered' ? 'answered' : result === 'timeout' ? 'no answer in time' : result === 'failed' ? 'could not do it' : 'answer refused'}`);
   return { outcome, said };
 }

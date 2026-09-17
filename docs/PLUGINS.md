@@ -134,6 +134,7 @@ entry, plus a `callable` block:
 | `callable.enabled` | `false` | Off, or absent, and the agent cannot see or call it. |
 | `callable.operatorOnly` | `true` | Only on an operator's turn — see below. |
 | `callable.timeoutMs` | `60000` | How long the bridge waits for an answer. 1,000 to 300,000. |
+| `callable.grants` | `[]` | Conversations that may call it although `operatorOnly` is on. Up to 20 — see *Granting a chat*. |
 
 An entry can be outbound-only, callable-only, or both. The example above is
 callable-only: `enabled` is the *outbound* switch and stays off, and its empty
@@ -152,6 +153,25 @@ listing there, rather than listed and then refused.
 Set `operatorOnly: false` only for a plugin that is safe for anybody the agent
 answers to use, in any chat including groups: something read-only, about
 nothing private.
+
+### Granting a chat
+
+Between those two is the case most plugins are for: the operator's own, and
+also the one client whose bookings these are, in that client's group. Keep
+`operatorOnly` on and name the conversations that may call it anyway:
+
+```json
+"callable": { "enabled": true, "operatorOnly": true, "grants": ["120363000000000000@g.us"] }
+```
+
+An entry takes the same forms as `apps.grants`: a chat key from the panel, a
+phone number, a linked id (`<id>@lid`), or a group's jid (`<id>@g.us`).
+Operators are never refused, whatever the list says. A group grant is a grant
+to its members — adding somebody to the room is adding them here, and a number
+never grants a group on its own. It is config-only, like the rest of
+`callable`: the panel does not widen it. In the agent's listing such a plugin
+shows `granted to this chat`, so it knows why it can see it there and not to
+offer it elsewhere.
 
 ### The protocol
 
