@@ -40,6 +40,7 @@ import {
   canRecall,
   describeSpec,
   formatLocal,
+  reactionMinimumGapMs,
 } from '@2lp/shared';
 import type { OutboxAction as OutboxActionType } from '@2lp/shared';
 import { feed } from './feed.js';
@@ -51,9 +52,10 @@ import {
   askOwed, isAnswerTurn, peerByHandle, peerOf, withMark,
 } from './peers.js';
 import { callPlugin, listCallable } from './pluginCalls.js';
-import { configured as apimartReady, generateImage as apimartImage } from './apimart.js';
+import { matchesGrant, type GrantChat } from './grants.js';
+import { configured as apimartReady, generateImage as apimartImage, generateMusic as apimartMusic } from './apimart.js';
 import { referencePaths } from './images.js';
-import { generateImage, synthesise } from './minimax.js';
+import { generateImage, generateMusic, synthesise } from './minimax.js';
 import { log } from './log.js';
 import { retainOutbound } from './mediaStore.js';
 import { sent } from './sent.js';
@@ -69,12 +71,12 @@ import {
   databaseNotes,
   publishPage,
   scaffoldPage,
-  usesKit,
   writePageImage,
 } from './pages.js';
 import { addContact } from './contacts.js';
 import { resolveVoice, voiceless } from './voice.js';
 import { remember } from './memory.js';
+import { knowledgeCorrectSection } from './knowledge.js';
 import { cancelSchedule, createSchedule, schedulesFor } from './schedule.js';
 import { lastInbound, recentMessages } from './history.js';
 import type { Limiter } from './ratelimit.js';
@@ -101,6 +103,7 @@ const SENDABLE: Readonly<Record<string, string>> = {
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
+  '.mp4': 'video/mp4',
   '.pdf': 'application/pdf',
   '.txt': 'text/plain',
   '.md': 'text/markdown',
@@ -108,12 +111,13 @@ const SENDABLE: Readonly<Record<string, string>> = {
   '.json': 'application/json',
 };
 
-/** Leading bytes that must match, for the formats where it is cheap to check. */
-const MAGIC: ReadonlyArray<readonly [string, readonly number[]]> = [
-  ['image/png', [0x89, 0x50, 0x4e, 0x47]],
-  ['image/jpeg', [0xff, 0xd8, 0xff]],
-  ['image/gif', [0x47, 0x49, 0x46, 0x38]],
-  ['application/pdf', [0x25, 0x50, 0x44, 0x46]],
+/** Signature bytes and their offsets, for formats where a cheap check is reliable. */
+const MAGIC: ReadonlyArray<readonly [string, number, readonly number[]]> = [
+  ['image/png', 0, [0x89, 0x50, 0x4e, 0x47]],
+  ['image/jpeg', 0, [0xff, 0xd8, 0xff]],
+  ['image/gif', 0, [0x47, 0x49, 0x46, 0x38]],
+  ['video/mp4', 4, [0x66, 0x74, 0x79, 0x70]],
+  ['application/pdf', 0, [0x25, 0x50, 0x44, 0x46]],
 ];
 
 export type FileResolution =
@@ -255,7 +259,7 @@ export function resolveOutboundFile(name: string, directory = outPaths.files): F
     if (read !== stat.size) return { ok: false, reason: 'file could not be read' };
 
     const expected = MAGIC.find(([type]) => type === mimetype);
-    if (expected && !expected[1].every((byte, i) => data[i] === byte)) {
+    if (expected && !expected[2].every((byte, i) => data[expected[1] + i] === byte)) {
       return { ok: false, reason: `file does not contain ${mimetype} data` };
     }
 
@@ -290,6 +294,12 @@ export interface OutboxDeps {
   readonly lastMessageIn: (chatKey: string) => { id: string; participant?: string } | null;
   /** Persist page passwords. Injected so the outbox does not reach into the panel's API. */
   readonly setPagePasswords: (passwords: Readonly<Record<string, { salt: string; hash: string }>>) => void;
+  /**
+   * Save who may change each page, through the panel's own settings writer.
+   * Returns the writer's verdict so a failed save is reported, not assumed.
+   * Optional so a harness with nothing to save need not provide one.
+   */
+  readonly setPageGrants?: (grants: Readonly<Record<string, readonly string[]>>) => { ok: boolean; message: string };
   /** Where callable plugins live. Defaults to the plugins mount; tests point it elsewhere. */
   readonly pluginsDir?: string;
 }
@@ -318,7 +328,19 @@ export interface OutboxDeps {
  * alongside new messages would mean a turn that spent its allowance could no
  * longer fix what it spent it on, which is exactly backwards.
  */
-const DELIVERS: ReadonlySet<string> = new Set(['text', 'sendTo', 'file', 'image', 'voice', 'react']);
+const DELIVERS: ReadonlySet<string> = new Set(['text', 'sendTo', 'file', 'image', 'voice', 'music', 'react']);
+
+/**
+ * What a saved track should say it is, on the Media page.
+ *
+ * The brief and the words, when there are words. A file called
+ * `…-music.mp3` tells an operator nothing about why it exists or what it cost,
+ * and this is the only place that knowledge survives the send.
+ */
+function musicWords(prompt: string, lyrics: string): string {
+  const sung = lyrics.trim();
+  return sung.length === 0 ? prompt : `${prompt}\n\n${sung}`;
+}
 
 /** What one action costs its turn. `typing` is cosmetic and free. */
 /**
@@ -344,14 +366,39 @@ function costOf(kind: string): Cost {
   return DELIVERS.has(kind) ? 'send' : 'tool';
 }
 
+/**
+ * Whether a chat may call the hfs2s plugin's box-level actions (status, box,
+ * the engineer seats): only when the operator listed it on that plugin's own
+ * `callable.grants`. App grants never reach here; they scope one workspace.
+ */
+function boxGranted(config: Config, chatKey: string, chat: GrantChat): boolean {
+  const grants = config.plugins?.[APPS_PLUGIN]?.callable?.grants;
+  return Array.isArray(grants) && grants.length > 0 && matchesGrant(grants, chatKey, chat);
+}
+
 export class Outbox extends EventEmitter {
   private readonly attempts = new Map<string, number>();
+  private readonly lastReactionAt = new Map<string, number>();
   private draining = false;
   private timer: NodeJS.Timeout | null = null;
   private sweeper: NodeJS.Timeout | null = null;
 
   constructor(private readonly deps: OutboxDeps) {
     super();
+  }
+
+  /**
+   * Enforce the reaction half of the emoji slider at the trusted boundary.
+   *
+   * Prompt text is still useful for choosing whether and what to react with,
+   * but it cannot make a frequency control reliable by itself. The bridge owns
+   * the live setting and the send, so it also owns the minimum gap.
+   */
+  private reactionAllowed(chatKey: string, now: number): boolean {
+    const gap = reactionMinimumGapMs(this.deps.config.agent.emojiFrequency);
+    if (!Number.isFinite(gap)) return false;
+    const last = this.lastReactionAt.get(chatKey);
+    return last === undefined || now - last >= gap;
   }
 
   /**
@@ -554,7 +601,7 @@ export class Outbox extends EventEmitter {
   private async answer(
     actionId: string,
     kind:
-      | 'search' | 'fetch' | 'chats' | 'page' | 'contact' | 'sent' | 'history' | 'schedule' | 'edit' | 'unsend'
+      | 'search' | 'fetch' | 'chats' | 'page' | 'contact' | 'contactsImport' | 'knowledge' | 'sent' | 'history' | 'schedule' | 'edit' | 'unsend'
       | 'leaveGroup' | 'plugin' | 'app' | 'peer',
     outcome: ExaOutcome,
   ): Promise<void> {
@@ -656,6 +703,24 @@ export class Outbox extends EventEmitter {
     const resolution = this.deps.turns.resolve(action.turnId, now, cost);
     if (!resolution.ok) {
       log('outbox.unroutable', { id: action.id, kind: action.kind, reason: resolution.reason });
+      // A plugin call is synchronous from the agent's point of view: its CLI
+      // waits for a result file before it can continue. Silently dropping a
+      // call after the turn spends its tool budget therefore does the opposite
+      // of bounding a loop — every refused retry sits there until the plugin
+      // timeout, while new human messages accumulate behind it. Answer the two
+      // plugin verbs immediately so the model sees a hard stop and can report
+      // what it already learned. Sends stay resolvable on their separate budget.
+      if (
+        resolution.reason === 'tool limit reached'
+        && (action.kind === 'pluginCall' || action.kind === 'pluginList')
+      ) {
+        await this.answer(action.id, 'plugin', {
+          ok: false,
+          error:
+            'This turn has reached its tool limit. Do not retry the plugin in this turn. ' +
+            'Answer with what you already know, state anything unfinished plainly, and let the next messages run.',
+        });
+      }
       return; // dropped, not retried: an unroutable turn never becomes routable
     }
     const { turn } = resolution;
@@ -675,6 +740,18 @@ export class Outbox extends EventEmitter {
       const target = this.crossChatTarget(action.chatKey);
       if (target === null) return; // refused and logged
       dest = { jid: target.jid, key: target.key, crossed: true };
+    }
+
+    // A reaction the current slider would suppress must stop before it spends
+    // this turn's send allowance or the chat's outbound rate. Removing an
+    // existing reaction is always allowed: turning emoji down should not make
+    // an earlier reaction impossible to undo.
+    if (action.kind === 'react' && action.emoji.length > 0 && !this.reactionAllowed(dest.key, now)) {
+      log('outbox.reactionSuppressed', {
+        chatKey: dest.key,
+        frequency: this.deps.config.agent.emojiFrequency,
+      });
+      return;
     }
 
     // Only something a person receives spends the outbound rate, and it is
@@ -1000,7 +1077,7 @@ export class Outbox extends EventEmitter {
                 // Said here as well as in the brief, because this is the moment
                 // it matters: everything after this point is minutes of silence
                 // for whoever asked.
-                text: 'If you have not already told them you are building this, do it now — a page takes minutes and silence reads as being ignored.',
+                text: 'Before editing, invoke the frontend-design Skill now. Choose a direction specific to this brief, build it, inspect the rendered page on mobile and desktop, then publish. If you have not told them you are building it, do that too — silence reads as being ignored.',
               }],
             }
           : { ok: false, error: made.error });
@@ -1027,6 +1104,74 @@ export class Outbox extends EventEmitter {
               }],
             }
           : { ok: false, error: taken.error });
+        break;
+      }
+
+      case 'pageGrant': {
+        // Provenance, like `contact`: the turn is an operator's, in a direct
+        // chat. The page's own grant is deliberately not consulted — an
+        // operator may hand out a page nobody has granted them, which is the
+        // point, and nobody else may change grants at all, including a chat
+        // that already holds the page.
+        if (!turn.fromOperator) {
+          log('pages.grantRefused', { chatKey: turn.chatKey, slug: action.slug, op: action.op });
+          feed.event('pages.grantRefused', `a change to who can edit ${action.slug} was asked for outside an operator's direct chat`);
+          await this.answer(action.id, 'page', {
+            ok: false,
+            error:
+              'Only an operator can change who may edit a page, and only by writing to you directly. ' +
+              'Ask them to message you, or to change it in the panel.',
+          });
+          break;
+        }
+        const label = (key: string): string => {
+          const rec = this.deps.chats.get(key);
+          if (rec === null) return key.includes('@') || /^[0-9]+$/.test(key) ? `a number (${key})` : `${key} (unknown chat)`;
+          return `${rec.name ?? 'unnamed'} — ${rec.isGroup ? 'group' : 'direct'}, ${key}`;
+        };
+        const current = Object.hasOwn(this.deps.config.pages.grants, action.slug)
+          ? [...(this.deps.config.pages.grants[action.slug] ?? [])]
+          : null;
+        const describe = (list: readonly string[] | null): string =>
+          list === null
+            ? `${action.slug} is unclaimed — ${this.deps.config.pages.open ? 'any chat may change it' : 'no chat may change it until one is granted'}.`
+            : list.length === 0
+              ? `${action.slug} is granted to nobody.`
+              : `${action.slug} can be changed by:\n` + list.map((k) => `  - ${label(k)}`).join('\n');
+
+        if (action.op === 'list') {
+          await this.answer(action.id, 'page', { ok: true, items: [{ title: action.slug, url: '', published: null, text: describe(current) }] });
+          break;
+        }
+        const keys = action.chats.map((c) => (c === 'here' ? turn.chatKey : c));
+        const unknown = keys.filter((k) => this.deps.chats.get(k) === null);
+        if (unknown.length > 0) {
+          await this.answer(action.id, 'page', {
+            ok: false,
+            error: `No conversation has the key ${unknown.join(', ')}. Use a key the bridge gave you, or "here".`,
+          });
+          break;
+        }
+        const grants: Record<string, string[]> = Object.fromEntries(
+          Object.entries(this.deps.config.pages.grants).map(([k, v]) => [k, [...v]]),
+        );
+        if (action.op === 'unclaim') {
+          delete grants[action.slug];
+        } else if (action.op === 'add') {
+          grants[action.slug] = [...new Set([...(current ?? []), ...keys])];
+        } else {
+          grants[action.slug] = (current ?? []).filter((k) => !keys.includes(k));
+        }
+        const saved = this.deps.setPageGrants?.(grants) ?? { ok: false, message: 'nothing is wired to save it' };
+        if (!saved.ok) {
+          log('pages.grantSaveFailed', { slug: action.slug, why: saved.message });
+          await this.answer(action.id, 'page', { ok: false, error: `The change was not saved: ${saved.message}` });
+          break;
+        }
+        const after = Object.hasOwn(grants, action.slug) ? (grants[action.slug] ?? []) : null;
+        log('pages.granted', { chatKey: turn.chatKey, slug: action.slug, op: action.op, chats: after?.length ?? null });
+        feed.event('settings.changed', `pages: ${action.slug} — ${action.op} by an operator over WhatsApp`);
+        await this.answer(action.id, 'page', { ok: true, items: [{ title: action.slug, url: '', published: null, text: `Saved. ${describe(after)}` }] });
         break;
       }
 
@@ -1067,16 +1212,11 @@ export class Outbox extends EventEmitter {
         // The address comes back as an ordinary result item, so the answer file
         // keeps one shape. A page has no text to carry — the point is the URL.
         const published = publishPage(action.slug);
-        // Published either way: a page that opted out of the house style is a
-        // choice the agent is allowed to make, and refusing would turn a look
-        // into a gate. Saying so is enough, and it is said where it will be
-        // read rather than in a log nobody opens.
-        // The same goes for a database the page cannot actually read.
+        // A page owns its visual direction now; publishing does not grade it
+        // against one shared stylesheet. Database wiring remains structural,
+        // so a page that cannot read the data it carries is still called out.
         const notes = published.ok
-          ? [
-            ...(usesKit(action.slug) ? [] : ['this page does not use the house style — link /_kit/kit.css unless you meant to']),
-            ...databaseNotes(action.slug),
-          ]
+          ? databaseNotes(action.slug)
           : [];
         const note = notes.length > 0 ? ` (${notes.join('; ')})` : '';
         await this.answer(action.id, 'page', published.ok
@@ -1277,6 +1417,99 @@ export class Outbox extends EventEmitter {
             },
           ],
         });
+        break;
+      }
+
+      case 'contactsImport': {
+        if (!turn.fromOperator) {
+          log('outbox.contactsImportRefused', { chatKey: turn.chatKey, note: 'not an operator turn' });
+          feed.event('contacts.refused', 'a contact CSV was offered from a chat that is not an operator');
+          await this.answer(action.id, 'contactsImport', {
+            ok: false,
+            error:
+              'Only an operator can import contacts, and only from a CSV attached to their current message.',
+          });
+          break;
+        }
+
+        const items: Array<{ title: string; url: string; published: string | null; text: string }> = [];
+        for (const contact of action.contacts) {
+          const label = contact.label.trim();
+          if (label.length > 60) {
+            items.push({
+              title: `Row ${String(contact.row)}`,
+              url: '',
+              published: 'failed',
+              text: 'name is longer than 60 characters',
+            });
+            continue;
+          }
+          const added = addContact({ config: this.deps.config, chats: this.deps.chats }, contact.number, label);
+          if (!added.ok) {
+            items.push({
+              title: label.length > 0 ? label : `Row ${String(contact.row)}`,
+              url: '',
+              published: 'failed',
+              text: `row ${String(contact.row)}: ${added.error}`,
+            });
+            continue;
+          }
+          log('contacts.issued', { chatKey: added.chatKey, already: added.already, importRow: contact.row });
+          feed.event(
+            'contact.added',
+            added.already ? `${label} was already a contact` : `${label} can now be messaged`,
+          );
+          items.push({
+            title: label,
+            url: added.chatKey,
+            published: added.already ? 'already existed' : null,
+            text: added.already ? 'already a contact' : 'added',
+          });
+        }
+        await this.answer(action.id, 'contactsImport', { ok: true, items });
+        break;
+      }
+
+      case 'knowledgeCorrect': {
+        if (!turn.fromOperator) {
+          log('outbox.knowledgeCorrectRefused', { chatKey: turn.chatKey, note: 'not an operator turn' });
+          feed.event('knowledge.correctionRefused', 'a Knowledge correction was requested outside an operator turn');
+          await this.answer(action.id, 'knowledge', {
+            ok: false,
+            error: 'Only an operator can correct the shared Knowledge library. Ask an operator to request or confirm the correction.',
+          });
+          break;
+        }
+        try {
+          const record = knowledgeCorrectSection(action.sourceId, action.sectionId, {
+            expectedAt: action.expectedAt,
+            ...(action.heading === undefined ? {} : { heading: action.heading }),
+            text: action.text,
+          });
+          log('knowledge.correctedByAgent', {
+            id: record.id,
+            section: action.sectionId,
+            chatKey: turn.chatKey,
+            reason: action.reason.slice(0, 160),
+          });
+          feed.event(
+            'knowledge.corrected',
+            `${record.title} · ${action.sectionId}: ${action.reason.slice(0, 220)}`,
+          );
+          await this.answer(action.id, 'knowledge', {
+            ok: true,
+            items: [{
+              title: record.title,
+              url: record.sourceUrl ?? record.sourceName,
+              published: record.updatedAt ?? null,
+              text: `${action.sectionId} corrected and re-indexed; original provenance retained`,
+            }],
+          });
+        } catch (error) {
+          const message = String((error as Error).message).slice(0, 300);
+          log('knowledge.correctionFailed', { id: action.sourceId, section: action.sectionId, error: message });
+          await this.answer(action.id, 'knowledge', { ok: false, error: message });
+        }
         break;
       }
 
@@ -1521,11 +1754,13 @@ export class Outbox extends EventEmitter {
               await this.answer(action.id, 'plugin', { ok: false, error: NOT_YOUR_APP });
               break;
             }
-          } else if (!turn.fromOperator) {
+          } else if (!turn.fromOperator && !boxGranted(this.deps.config, turn.chatKey, this.deps.chats.get(turn.chatKey))) {
             // Names no workspace, so it is about the box: the listing of every
-            // client's app, or the machine's disk and memory. A grant cannot
-            // scope those, and granting one app is not consent to see the rest
-            // — so they stay with the operator even where `operatorOnly` is off.
+            // client's app, the machine's disk and memory, or the engineer seats.
+            // An app grant cannot scope those, and granting one app is not
+            // consent to see the rest — so they stay with the operator unless
+            // the chat itself is on the hfs2s plugin's own `callable.grants`,
+            // which is the operator saying this room may drive the box.
             log('apps.refused', { chatKey: turn.chatKey, workspace: '(none)', verb: action.action });
             await this.answer(action.id, 'plugin', { ok: false, error: NOT_THE_BOX });
             break;
@@ -1600,6 +1835,12 @@ export class Outbox extends EventEmitter {
         if (!image.ok) {
           log('outbox.imageFailed', { reason: image.error });
           feed.event('image.failed', image.error);
+          await this.sayText(
+            dest.key,
+            dest.jid,
+            `I could not ${refs.length > 0 ? 'edit' : 'make'} that picture: ${image.error}`.slice(0, 4000),
+            'image generation failed',
+          );
           return;
         }
         const pictured = await this.deps.wa.sendImage(dest.jid, image.data, action.caption);
@@ -1693,6 +1934,90 @@ export class Outbox extends EventEmitter {
         break;
       }
 
+      case 'music': {
+        // Words of our own rather than `action.caption`, which the picture
+        // path uses and which is wrong here for two reasons. It is optional, so
+        // relying on it means a silent drop — and music is the one capability
+        // that ships *off*, so this is a path people will actually reach rather
+        // than a corner. And when a caption does exist it is the line meant to
+        // accompany a track that now does not exist, so saying it is a small
+        // lie told at exactly the wrong moment.
+        if (!this.deps.config.agent.music) {
+          return this.refuse('music', dest, 'I cannot make music — it is switched off here.');
+        }
+
+        // A transport with no file sending has nowhere to put a track. Checked
+        // before `claim`, like the voiceless case above: nothing was generated,
+        // so nothing should be billed against the day.
+        if (this.deps.wa.sendFile === undefined) {
+          log('outbox.musicUnsupported', { reason: `no file sending on ${this.deps.wa.kind}` });
+          await this.sayText(
+            dest.key, dest.jid,
+            'I cannot send audio here, so I have not made anything.',
+            'no file sending on this transport',
+          );
+          return;
+        }
+
+        // Claimed before the request, so a slow provider cannot let two through
+        // the same last unit of the day's allowance — and music is the one
+        // where "slow" means minutes, so the window this closes is a real one.
+        if (!claim('music', this.deps.config.limits.musicPerDay)) {
+          log('outbox.musicCapped', { perDay: this.deps.config.limits.musicPerDay });
+          feed.event('music.capped', "today's music allowance is spent");
+          await this.sayText(
+            dest.key, dest.jid,
+            'I have made as much music as I can today — ask me again tomorrow.',
+            'music allowance spent',
+          );
+          return;
+        }
+
+        // Which provider, and why APIMart leads here when it does not for
+        // pictures. MiniMax's music API is shut to accounts that were not
+        // already paying for it — it answers 410, "no longer available to new
+        // users" — so for most deployments it is not a choice at all. APIMart
+        // is asked first and MiniMax kept for an account that still has it.
+        const track = apimartReady()
+          ? await apimartMusic(action.prompt, action.lyrics)
+          : await generateMusic(action.prompt, action.lyrics);
+        if (!track.ok) {
+          log('outbox.musicFailed', { reason: track.error });
+          feed.event('music.failed', track.error);
+          await this.sayText(
+            dest.key,
+            dest.jid,
+            `I could not make that track: ${track.error}`.slice(0, 4000),
+            'music generation failed',
+          );
+          return;
+        }
+
+        // The provider's own type, never a guess. Flow Music returns m4a and
+        // MiniMax returns mp3; WhatsApp decides whether an attachment is
+        // playable from its media type, so a wrong one is a file nobody can
+        // hear rather than an error anybody sees.
+        const extension = track.mime === 'audio/mpeg' ? 'mp3' : track.mime === 'audio/wav' ? 'wav' : 'm4a';
+        const played = await this.deps.wa.sendFile(dest.jid, track.data, track.mime, `track.${extension}`, null);
+        // Keep the brief rather than the bytes alone, the same way a voice note
+        // keeps its script: the Media page can then say what was asked for
+        // instead of offering a play button and the word "audio".
+        retainOutbound(dest.key, 'music', track.data, track.mime, musicWords(action.prompt, action.lyrics));
+        sent.record(
+          dest.key, played, 'music', action.caption ?? action.prompt,
+          feed.outbound(dest.key, 'music', action.caption ?? action.prompt).uid,
+        );
+
+        // WhatsApp audio carries no caption — `sendFile` drops it for
+        // `audio/*`, because the protocol has nowhere to put one. So it is sent
+        // as its own message rather than silently lost, and after the track:
+        // the audio is the thing that was asked for and should arrive first.
+        if (action.caption !== null && action.caption.trim().length > 0) {
+          await this.sayText(dest.key, dest.jid, action.caption);
+        }
+        break;
+      }
+
       case 'react': {
         const target = this.deps.lastMessageIn(turn.chatKey);
         if (!target) {
@@ -1706,7 +2031,14 @@ export class Outbox extends EventEmitter {
           return;
         }
         await this.deps.wa.react(turn.chatJid, target.id, action.emoji, target.participant);
-        feed.outbound(turn.chatKey, 'react', action.emoji);
+        if (action.emoji.length === 0) {
+          this.lastReactionAt.delete(turn.chatKey);
+          feed.event('reaction.removed', '2LP removed its reaction');
+          log('outbox.reactionRemoved', { chatKey: turn.chatKey });
+        } else {
+          this.lastReactionAt.set(turn.chatKey, now);
+          feed.outbound(turn.chatKey, 'react', action.emoji);
+        }
         break;
       }
       /**

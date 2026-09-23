@@ -328,3 +328,7 @@ credentials. The directory must be writable by uid 1000, since the bridge writes
 receipts into it.
 
 See THREAT-MODEL.md §T9.
+
+### The hfs2s plugin and the box
+
+Actions that name no workspace (`status`, `box`, the engineer `seats` family) are about the whole box, so an app grant never opens them. They answer a non-operator turn only when the chat is on the **hfs2s plugin's own** `callable.grants` — the operator saying that room may drive the box. Grant sparingly: `seat-send` is a prompt into a root, permissions-bypassed session.
